@@ -2319,10 +2319,27 @@ def handle_edit_plan_datetime_internal(message, state):
                    message.reply_to_message.from_user.id == BOT_ID)
         
         prompt_message_id = state.get('prompt_message_id')
-        # Если сообщение не является ответом на нужное сообщение бота, просто игнорируем его
-        if not is_reply or (prompt_message_id and message.reply_to_message.message_id != prompt_message_id):
-            logger.info(f"[EDIT PLAN DATETIME INTERNAL] Сообщение от пользователя {user_id} не является ответом на сообщение бота, игнорируем")
-            return
+        
+        # Проверка реплая: в группах обязателен реплай, в личке - необязателен
+        try:
+            chat_info = bot.get_chat(chat_id)
+            is_private = chat_info.type == 'private'
+        except:
+            is_private = chat_id > 0
+        
+        if not is_private:
+            # В группах требуется реплай на правильный промпт
+            if not is_reply or (prompt_message_id and message.reply_to_message.message_id != prompt_message_id):
+                logger.info(f"[EDIT PLAN DATETIME INTERNAL] В группе не реплай на правильный промпт, игнорируем")
+                return
+        else:
+            # В личке: если это реплай, проверяем что на правильный промпт; если не реплай - принимаем как следующее сообщение
+            if is_reply and prompt_message_id:
+                if message.reply_to_message.message_id != prompt_message_id:
+                    logger.info(f"[EDIT PLAN DATETIME INTERNAL] В личке реплай не на правильный промпт, игнорируем")
+                    return
+            # Если не реплай, но состояние активно - принимаем как следующее сообщение
+            logger.info(f"[EDIT PLAN DATETIME INTERNAL] В личке принято сообщение (реплай или следующее)")
         
         if not plan_id:
             bot.reply_to(message, "❌ Ошибка: план не найден.")

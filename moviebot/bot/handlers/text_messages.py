@@ -299,20 +299,35 @@ def handle_list_plan_reply(message):
 
 
 def check_plan_datetime_reply(message):
-    """Проверка для handler ответа на промпт даты/времени планирования (step=3)"""
+    """Проверка для handler ответа на промпт даты/времени планирования (step=3) ИЛИ редактирования (edit_plan_datetime)"""
     # КРИТИЧЕСКИЙ ФИКС: В личке принимаем следующее сообщение, в группах - только реплай
     is_private = message.chat.type == 'private'
     
-    # Проверяем, что пользователь в состоянии планирования с step=3
-    from moviebot.states import user_plan_state
-    user_id = message.from_user.id
-    if user_id not in user_plan_state:
-        return False
-    state = user_plan_state[user_id]
-    if state.get('step') != 3:
+    if not message.text or not message.text.strip():
         return False
     
-    if not message.text or not message.text.strip():
+    # Проверяем состояния планирования ИЛИ редактирования
+    from moviebot.states import user_plan_state, user_edit_state
+    user_id = message.from_user.id
+    
+    state = None
+    is_edit = False
+    
+    # 1. Проверяем состояние редактирования (приоритет выше)
+    if user_id in user_edit_state:
+        edit_state = user_edit_state[user_id]
+        if edit_state.get('action') == 'edit_plan_datetime':
+            state = edit_state
+            is_edit = True
+    
+    # 2. Если нет редактирования — смотрим обычное планирование
+    elif user_id in user_plan_state:
+        plan_state = user_plan_state[user_id]
+        if plan_state.get('step') == 3:
+            state = plan_state
+    
+    # Если ни одно состояние не подходит
+    if not state:
         return False
     
     # В группах принимаем только реплаи на бота
@@ -324,7 +339,11 @@ def check_plan_datetime_reply(message):
         # Проверяем, что это ответ на правильный промпт (либо на запрос даты, либо на сообщение об ошибке)
         prompt_message_id = state.get('prompt_message_id')
         reply_text = message.reply_to_message.text or ""
-        is_prompt = "Когда планируете смотреть" in reply_text
+        # Для редактирования промпт другой
+        if is_edit:
+            is_prompt = "Введите новую дату и время" in reply_text
+        else:
+            is_prompt = "Когда планируете смотреть" in reply_text
         is_error = "Не понял дату/время" in reply_text
         if not (is_prompt or is_error):
             return False
@@ -336,7 +355,11 @@ def check_plan_datetime_reply(message):
             # Если это реплай, проверяем, что это ответ на правильный промпт
             if message.reply_to_message.from_user and message.reply_to_message.from_user.id == BOT_ID:
                 reply_text = message.reply_to_message.text or ""
-                is_prompt = "Когда планируете смотреть" in reply_text
+                # Для редактирования промпт другой
+                if is_edit:
+                    is_prompt = "Введите новую дату и время" in reply_text
+                else:
+                    is_prompt = "Когда планируете смотреть" in reply_text
                 is_error = "Не понял дату/время" in reply_text
                 if not (is_prompt or is_error):
                     return False
@@ -356,7 +379,7 @@ def handle_plan_datetime_reply(message):
     logger.info(f"[PLAN DATETIME REPLY] ===== START: message_id={message.message_id}, user_id={user_id}, text='{text}'")
 
     try:
-        from moviebot.bot.handlers.plan import get_plan_day_or_date_internal
+        from moviebot.bot.handlers.plan import get_plan_day_or_date_internal, handle_edit_plan_datetime_internal
         from moviebot.states import user_plan_state, user_edit_state
 
         state = None
@@ -364,17 +387,19 @@ def handle_plan_datetime_reply(message):
 
         # 1. Проверяем состояние редактирования (приоритет выше)
         if user_id in user_edit_state:
-            state = user_edit_state[user_id]
-            is_edit = True
-            logger.info(f"[PLAN DATETIME REPLY] Режим РЕДАКТИРОВАНИЯ: {state}")
+            edit_state = user_edit_state[user_id]
+            if edit_state.get('action') == 'edit_plan_datetime':
+                state = edit_state
+                is_edit = True
+                logger.info(f"[PLAN DATETIME REPLY] Режим РЕДАКТИРОВАНИЯ: {state}")
 
         # 2. Если нет редактирования — смотрим обычное планирование
-        elif user_id in user_plan_state:
+        if not is_edit and user_id in user_plan_state:
             state = user_plan_state[user_id]
             logger.info(f"[PLAN DATETIME REPLY] Обычное планирование: {state}")
 
         # Если вообще нет состояния — выходим тихо
-        else:
+        if not state:
             logger.info(f"[PLAN DATETIME REPLY] Нет активного состояния планирования/редактирования для user_id={user_id}")
             return
 
@@ -407,11 +432,15 @@ def handle_plan_datetime_reply(message):
             # Если не реплай, но состояние активно - принимаем как следующее сообщение
             logger.info(f"[PLAN DATETIME REPLY] В личке принято следующее сообщение без реплая")
 
-        # Вызываем общую функцию обработки даты/времени
-        # get_plan_day_or_date_internal сам управляет состоянием:
-        # - очищает его при успешном планировании
-        # - оставляет его при ошибке для повторного ввода
-        result = get_plan_day_or_date_internal(message, state)
+        # Если это редактирование - используем специальный обработчик
+        if is_edit:
+            handle_edit_plan_datetime_internal(message, state)
+        else:
+            # Вызываем общую функцию обработки даты/времени для обычного планирования
+            # get_plan_day_or_date_internal сам управляет состоянием:
+            # - очищает его при успешном планировании
+            # - оставляет его при ошибке для повторного ввода
+            result = get_plan_day_or_date_internal(message, state)
 
         logger.info(f"[PLAN DATETIME REPLY] ✅ Завершено")
 
