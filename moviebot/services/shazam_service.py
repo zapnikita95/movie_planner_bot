@@ -487,8 +487,12 @@ def build_tmdb_index():
     df = df[df['imdb_id'].str.len() > 0]
     logger.info(f"После финальной очистки imdb_id: {len(df)} фильмов")
     
-    # Сохраняем has_overview, actors_str и director_str для приоритизации и keyword-матчинга при поиске
-    processed = df[['imdb_id', 'title', 'year', 'description', 'has_overview', 'actors_str', 'director_str']].copy()
+    # Сохраняем has_overview, actors_str, director_str, genres_str и overview для приоритизации и keyword-матчинга при поиске
+    # overview сохраняем отдельно для keyword-матчинга (самый сильный буст)
+    processed = df[['imdb_id', 'title', 'year', 'description', 'has_overview', 'actors_str', 'director_str', 'genres_str', 'overview']].copy()
+    # Заменяем NaN на пустые строки для безопасной работы
+    processed['overview'] = processed['overview'].fillna('')
+    processed['genres_str'] = processed['genres_str'].fillna('')
     # Уже отсортировали и ограничили выше, не нужно еще раз .head()
     
     # КЭШИРОВАНИЕ: Проверяем, не были ли эмбеддинги уже сгенерированы
@@ -616,6 +620,66 @@ def _extract_keywords(query_en):
     return keywords
 
 
+def _detect_genres_in_query(query_en_lower, keywords):
+    """Определяет упомянутые жанры в запросе (английские названия)"""
+    # Маппинг русских и английских названий жанров
+    genre_map = {
+        'action': ['action', 'боевик', 'экшн'],
+        'drama': ['drama', 'драма'],
+        'comedy': ['comedy', 'комедия'],
+        'thriller': ['thriller', 'триллер'],
+        'horror': ['horror', 'ужасы', 'хоррор'],
+        'sci-fi': ['sci-fi', 'science fiction', 'фантастика'],
+        'fantasy': ['fantasy', 'фэнтези'],
+        'romance': ['romance', 'романтика', 'романтический'],
+        'adventure': ['adventure', 'приключения'],
+        'crime': ['crime', 'криминал', 'детектив'],
+        'mystery': ['mystery', 'мистика', 'тайна'],
+        'war': ['war', 'война'],
+        'western': ['western', 'вестерн'],
+        'animation': ['animation', 'анимация', 'мультфильм'],
+        'documentary': ['documentary', 'документальный'],
+    }
+    
+    mentioned_genres = []
+    query_lower = query_en_lower.lower()
+    
+    for genre_en, variants in genre_map.items():
+        for variant in variants:
+            if variant in query_lower or variant in keywords:
+                if genre_en not in mentioned_genres:
+                    mentioned_genres.append(genre_en)
+                break
+    
+    logger.info(f"[SEARCH MOVIES] Обнаружены жанры в запросе: {mentioned_genres}")
+    return mentioned_genres
+
+
+def _detect_actors_in_query(query_en_lower, keywords):
+    """Определяет упомянутые актеры/режиссеры в запросе (возвращает список фраз для поиска)"""
+    # Ищем имена актеров - это обычно слова с большой буквы или фразы из 2+ слов
+    # Упрощенная версия: возвращаем ключевые слова длиннее 4 символов как потенциальные имена
+    # В реальности можно использовать NER, но для простоты используем длинные слова
+    actor_phrases = []
+    
+    # Ищем последовательности из 2+ ключевых слов подряд (возможно имя)
+    import re
+    # Ищем пары слов
+    two_word_phrases = re.findall(r'\b\w+\s+\w+\b', query_en_lower)
+    for phrase in two_word_phrases:
+        words = phrase.split()
+        # Если оба слова длиннее 3 символов и не стоп-слова - это может быть имя
+        if len(words) == 2 and len(words[0]) > 3 and len(words[1]) > 3:
+            actor_phrases.append(phrase.strip())
+    
+    # Также добавляем длинные ключевые слова (возможно фамилия или часть имени)
+    long_keywords = [kw for kw in keywords if len(kw) > 4]
+    actor_phrases.extend(long_keywords)
+    
+    logger.info(f"[SEARCH MOVIES] Обнаружены потенциальные имена актеров/режиссеров: {actor_phrases}")
+    return actor_phrases
+
+
 def search_movies(query, top_k=15):
     try:
         logger.info(f"[SEARCH MOVIES] Начало поиска для запроса: '{query}'")
@@ -626,6 +690,11 @@ def search_movies(query, top_k=15):
         
         # Извлекаем ключевые слова для keyword-матчинга
         keywords = _extract_keywords(query_en)
+        query_en_lower = query_en.lower()
+        
+        # Определяем упомянутые жанры и актеры/режиссеры в запросе
+        mentioned_genres = _detect_genres_in_query(query_en_lower, keywords)
+        mentioned_actors = _detect_actors_in_query(query_en_lower, keywords)
         
         logger.info(f"[SEARCH MOVIES] Шаг 2: Получение индекса и данных...")
         index, movies = get_index_and_movies()
@@ -675,18 +744,57 @@ def search_movies(query, top_k=15):
                 
                 distance = float(D[0][i])
                 
-                # Приоритизация: фильмы с overview получают бонус (уменьшаем расстояние)
-                # overview имеет наибольший вес, потом название/актеры, потом режиссеры
-                has_overview = row.get('has_overview', False) if 'has_overview' in row.index else False
-                if has_overview:
-                    # Уменьшаем расстояние на 20% для фильмов с overview (чем меньше distance, тем лучше)
-                    distance = distance * 0.8
-                    logger.debug(f"[SEARCH MOVIES] Фильм {imdb_id_clean} имеет overview, расстояние уменьшено")
+                # ===== УЛУЧШЕННОЕ РАНЖИРОВАНИЕ =====
+                # 1. Базовый семантический score (чем меньше distance, тем лучше)
+                base_score = 1.0 - distance
                 
-                # Keyword-матчинг: считаем совпадения ключевых слов в actors_str и director_str
-                actor_boost = 0
+                # 2. Overview keyword matches (САМЫЙ СИЛЬНЫЙ БУСТ - ×25)
+                overview_keyword_matches = 0
                 if keywords:
-                    # Проверяем наличие полей для обратной совместимости (если индекс собран без них)
+                    overview_text = ''
+                    if 'overview' in row.index:
+                        overview_text = str(row.get('overview', '') or '').lower()
+                    elif 'description' in row.index:
+                        # Если overview нет, пытаемся извлечь из description
+                        desc = str(row.get('description', '') or '').lower()
+                        # Ищем секцию "Plot: ..."
+                        if 'plot:' in desc:
+                            plot_start = desc.find('plot:') + 5
+                            plot_end = desc.find('. actors:', plot_start)
+                            if plot_end == -1:
+                                plot_end = desc.find('. director:', plot_start)
+                            if plot_end != -1:
+                                overview_text = desc[plot_start:plot_end]
+                    
+                    if overview_text:
+                        overview_keyword_matches = sum(1 for word in keywords if word in overview_text)
+                        if overview_keyword_matches > 0:
+                            logger.debug(f"[SEARCH MOVIES] Найдено {overview_keyword_matches} совпадений в overview для {imdb_id_clean}")
+                
+                # 3. Genre boost (+50 за каждый совпадающий жанр)
+                genre_boost = 0
+                if mentioned_genres:
+                    genres_str = ''
+                    if 'genres_str' in row.index:
+                        genres_str = str(row.get('genres_str', '') or '').lower()
+                    elif 'description' in row.index:
+                        # Пытаемся извлечь из description
+                        desc = str(row.get('description', '') or '').lower()
+                        # Жанры обычно в начале description
+                        if desc:
+                            parts = desc.split('.')
+                            if len(parts) > 0:
+                                genres_str = parts[0].lower()
+                    
+                    if genres_str:
+                        for genre in mentioned_genres:
+                            if genre in genres_str:
+                                genre_boost += 50
+                                logger.debug(f"[SEARCH MOVIES] Жанр '{genre}' найден для {imdb_id_clean}, genre_boost={genre_boost}")
+                
+                # 4. Actor/Director boost (+100 за полное имя, +50 за частичное)
+                actor_boost = 0
+                if mentioned_actors:
                     actors_str = ''
                     director_str = ''
                     if 'actors_str' in row.index:
@@ -694,18 +802,25 @@ def search_movies(query, top_k=15):
                     if 'director_str' in row.index:
                         director_str = str(row.get('director_str', '') or '').lower()
                     
-                    for keyword in keywords:
-                        if actors_str and keyword in actors_str:
-                            actor_boost += 1
-                            logger.debug(f"[SEARCH MOVIES] Ключевое слово '{keyword}' найдено в актёрах для {imdb_id_clean}")
-                        if director_str and keyword in director_str:
-                            actor_boost += 1
-                            logger.debug(f"[SEARCH MOVIES] Ключевое слово '{keyword}' найдено в режиссёре для {imdb_id_clean}")
+                    # Объединяем актеров и режиссеров для поиска
+                    combined_text = f"{actors_str} {director_str}".lower()
+                    
+                    for actor_phrase in mentioned_actors:
+                        actor_lower = actor_phrase.lower()
+                        if actor_lower in combined_text:
+                            # Проверяем, полное ли имя (2+ слова) или частичное
+                            if len(actor_phrase.split()) >= 2:
+                                # Полное имя (например "keanu reeves")
+                                actor_boost += 100
+                                logger.debug(f"[SEARCH MOVIES] Полное имя '{actor_phrase}' найдено для {imdb_id_clean}")
+                            elif len(actor_lower) > 4:
+                                # Частичное (фамилия или часть имени длиннее 4 символов)
+                                actor_boost += 50
+                                logger.debug(f"[SEARCH MOVIES] Частичное имя '{actor_phrase}' найдено для {imdb_id_clean}")
                 
-                # Реранжируем: (1 - distance) для нормализации + boost * 10
-                # Чем меньше distance, тем лучше, поэтому используем (1 - distance)
-                # actor_boost умножаем на 10 для значимого влияния
-                score = (1.0 - distance) + (actor_boost * 10.0)
+                # Итоговый score
+                # Порядок приоритета: overview (×25) > актеры (×100/×50) > жанры (×50) > семантика (1-distance)
+                score = base_score + (overview_keyword_matches * 25.0) + genre_boost + actor_boost
                 
                 results.append({
                     'imdb_id': imdb_id_clean,
