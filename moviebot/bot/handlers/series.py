@@ -1259,15 +1259,16 @@ def search_type_callback(call):
     logger.info(f"[SEARCH TYPE] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
     logger.info(f"[SEARCH TYPE] call.data={call.data}, call.message.message_id={call.message.message_id if call.message else 'N/A'}")
     try:
-        # Отвечаем на callback сразу, чтобы убрать "крутилку"
+        # Отвечаем на callback сразу
         bot.answer_callback_query(call.id)
+        
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         search_type = call.data.split(":")[1]  # 'film' или 'series'
-        
+
         logger.info(f"[SEARCH TYPE] Пользователь {user_id} выбрал тип поиска: {search_type}, chat_id={chat_id}")
-        
-        # Обновляем состояние
+
+        # Обновляем состояние (mixed будет default, если не выбрано)
         if user_id in user_search_state:
             user_search_state[user_id]['search_type'] = search_type
             user_search_state[user_id]['message_id'] = call.message.message_id
@@ -1278,30 +1279,36 @@ def search_type_callback(call):
                 'search_type': search_type
             }
         logger.info(f"[SEARCH TYPE] ✅ Состояние обновлено: {user_search_state[user_id]}")
-        
-        # Обновляем сообщение с указанием выбранного типа (как в старом файле)
-        type_text = "🎬 фильмы" if search_type == 'film' else "📺 сериалы" if search_type == 'series' else "🎬📺 фильмы и сериалы"
-        
-        # Обновляем кнопки, чтобы показать выбранный тип
+
+        # Текущий тип (может быть 'film', 'series' или 'mixed' из состояния)
+        current_type = user_search_state[user_id].get('search_type', 'mixed')
+
+        # Текст промпта в зависимости от текущего типа
+        type_text = {
+            'film': "🎬 фильмы",
+            'series': "📺 сериалы",
+            'mixed': "🎬📺 фильмы и сериалы"
+        }.get(current_type, "🎬📺 фильмы и сериалы")
+
+        # === Универсальные кнопки: всегда две, галочка только на текущем ===
         markup = InlineKeyboardMarkup(row_width=2)
-        if search_type == 'film':
-            markup.add(
-                InlineKeyboardButton("🎬 Найти фильм ✅", callback_data="search_type:film"),
-                InlineKeyboardButton("📺 Найти сериал", callback_data="search_type:series")
-            )
-        else:  # series
-            markup.add(
-                InlineKeyboardButton("🎬 Найти фильм", callback_data="search_type:film"),
-                InlineKeyboardButton("📺 Найти сериал ✅", callback_data="search_type:series")
-            )
+
+        film_btn_text = "🎬 Найти фильм"
+        if current_type == 'film':
+            film_btn_text += " ✅"
+
+        series_btn_text = "📺 Найти сериал"
+        if current_type == 'series':
+            series_btn_text += " ✅"
+
+        markup.add(
+            InlineKeyboardButton(film_btn_text, callback_data="search_type:film"),
+            InlineKeyboardButton(series_btn_text, callback_data="search_type:series")
+        )
         markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-        
-        # answer_callback_query уже вызван выше (строка 50)
-        logger.info(f"[SEARCH TYPE] Тип поиска выбран: {type_text}")
-        
-        is_private = call.message.chat.type == 'private'
+
         prompt_text = f"🔍 Укажите запрос для поиска {type_text} в ответном сообщении, например: джон уик"
-        
+
         try:
             sent_msg = bot.edit_message_text(
                 prompt_text,
@@ -1309,33 +1316,31 @@ def search_type_callback(call):
                 call.message.message_id,
                 reply_markup=markup
             )
-            message_id = call.message.message_id if sent_msg else None
             logger.info(f"[SEARCH TYPE] ✅ Сообщение обновлено успешно")
         except Exception as edit_e:
             logger.error(f"[SEARCH TYPE] Ошибка редактирования сообщения: {edit_e}", exc_info=True)
-            # Пробуем отправить новое сообщение
             try:
                 sent_msg = bot.send_message(
                     chat_id,
                     prompt_text,
                     reply_markup=markup
                 )
-                message_id = sent_msg.message_id if sent_msg else None
                 logger.info(f"[SEARCH TYPE] ✅ Новое сообщение отправлено")
             except Exception as send_e:
                 logger.error(f"[SEARCH TYPE] ❌ Ошибка отправки нового сообщения: {send_e}", exc_info=True)
                 bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
                 return
-        
-        # Для ЛС устанавливаем ожидание текста
-        if is_private and message_id:
-            expect_text_from_user(user_id, chat_id, expected_for='search', message_id=message_id)
+
+        # Для лички ставим ожидание текста
+        if call.message.chat.type == 'private':
+            expect_text_from_user(user_id, chat_id, expected_for='search', message_id=call.message.message_id)
+
     except Exception as e:
         logger.error(f"[SEARCH TYPE] ❌ КРИТИЧЕСКАЯ ОШИБКА: {e}", exc_info=True)
         try:
             bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
-        except Exception as answer_e:
-            logger.error(f"[SEARCH TYPE] Не удалось вызвать answer_callback_query: {answer_e}")
+        except:
+            pass
     finally:
         logger.info(f"[SEARCH TYPE] ===== END: callback_id={call.id}")
 

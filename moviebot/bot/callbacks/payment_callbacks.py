@@ -467,18 +467,18 @@ def register_payment_callbacks(bot_instance):
                 markup.add(InlineKeyboardButton("👥 Групповая подписка", callback_data="payment:active:group"))
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:back"))
             
-                try:
-                    safe_edit_message(
-                        bot_instance,
-                        chat_id=call.message.chat.id,
-                        message_id=call.message.message_id,
-                        text="✅ <b>Подписка отменена</b>\n\nВаша подписка была успешно отменена.\n\nИспользуйте /payment для просмотра информации о подписках.",
-                        parse_mode='HTML'
-                    )
-                except Exception as e:
-                    if "message is not modified" not in str(e):
-                        logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
-                return
+                #try: убираем чтобы была кнопка подтверждения отмены
+                #    safe_edit_message(
+                #        bot_instance,
+                #        chat_id=call.message.chat.id,
+                #        message_id=call.message.message_id,
+                #        text="✅ <b>Подписка отменена</b>\n\nВаша подписка была успешно отменена.\n\nИспользуйте /payment для просмотра информации о подписках.",
+                #        parse_mode='HTML'
+                #    )
+                #except Exception as e:
+                #    if "message is not modified" not in str(e):
+                #        logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                #return
         
             if action.startswith("active:personal"):
                 # Проверка личной подписки
@@ -6390,17 +6390,17 @@ def register_payment_callbacks(bot_instance):
                             markup.add(InlineKeyboardButton("❌ Точно отменить", callback_data=f"payment:cancel_confirm:{subscription_id}"))
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:active:group:current"))
                         
-                            try:
-                                safe_edit_message(
-                                    bot_instance,
-                                    chat_id=call.message.chat.id,
-                                    message_id=call.message.message_id,
-                                    text="✅ <b>Подписка отменена</b>\n\nВаша подписка была успешно отменена.\n\nИспользуйте /payment для просмотра информации о подписках.",
-                                    parse_mode='HTML'
-                                )
-                            except Exception as e:
-                                if "message is not modified" not in str(e):
-                                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                            #try: убираем чтобы была кнопка подтверждения отмены
+                            #    safe_edit_message(
+                            #        bot_instance,
+                            #        chat_id=call.message.chat.id,
+                            #        message_id=call.message.message_id,
+                            #        text="✅ <b>Подписка отменена</b>\n\nВаша подписка была успешно отменена.\n\nИспользуйте /payment для просмотра информации о подписках.",
+                            #       parse_mode='HTML'
+                            #    )
+                            #except Exception as e:
+                            #    if "message is not modified" not in str(e):
+                            #        logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                         else:
                             # Для личных подписок показываем подтверждение с предложением более дешевых вариантов
                             plan_type = sub.get('plan_type', 'all')
@@ -6440,17 +6440,17 @@ def register_payment_callbacks(bot_instance):
                             markup.add(InlineKeyboardButton("❌ Точно отменить", callback_data=f"payment:cancel_confirm:{subscription_id}"))
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"payment:active:{subscription_type}"))
                         
-                            try:
-                                safe_edit_message(
-                                    bot_instance,
-                                    chat_id=call.message.chat.id,
-                                    message_id=call.message.message_id,
-                                    text="✅ <b>Подписка отменена</b>\n\nВаша подписка была успешно отменена.\n\nИспользуйте /payment для просмотра информации о подписках.",
-                                    parse_mode='HTML'
-                                )
-                            except Exception as e:
-                                if "message is not modified" not in str(e):
-                                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                            #try: убираем чтобы была кнопка подтверждения отмены
+                            #    safe_edit_message(
+                            #        bot_instance,
+                            #        chat_id=call.message.chat.id,
+                            #        message_id=call.message.message_id,
+                            #        text="✅ <b>Подписка отменена</b>\n\nВаша подписка была успешно отменена.\n\nИспользуйте /payment для просмотра информации о подписках.",
+                            #       parse_mode='HTML'
+                            #   )
+                            #except Exception as e:
+                            #    if "message is not modified" not in str(e):
+                            #        logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                     else:
                         bot_instance.answer_callback_query(call.id, "Подписка не найдена", show_alert=True)
                         return
@@ -6565,18 +6565,18 @@ def register_payment_callbacks(bot_instance):
                 back_callback = f"payment:active:{subscription_type}" if subscription_type == 'personal' else "payment:active:group:current"
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data=back_callback))
             
-                try:
-                    safe_edit_message(
-                        bot_instance,
-                        chat_id=call.message.chat.id,
-                        message_id=call.message.message_id,
-                        text="✅ <b>Подписка отменена</b>\n\nВаша подписка была успешно отменена.\n\nИспользуйте /payment для просмотра информации о подписках.",
-                        parse_mode='HTML'
-                    )
-                except Exception as e:
-                    if "message is not modified" not in str(e):
-                        logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
-                return
+                #try: убираем чтобы была кнопка подтверждения отмены
+                #    safe_edit_message(
+                #        bot_instance,
+                #        chat_id=call.message.chat.id,
+                #        message_id=call.message.message_id,
+                #        text="✅ <b>Подписка отменена</b>\n\nВаша подписка была успешно отменена.\n\nИспользуйте /payment для просмотра информации о подписках.",
+                #       parse_mode='HTML'
+                #    )
+                #except Exception as e:
+                #    if "message is not modified" not in str(e):
+                #        logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                #return
         
             if action == "back":
                 # Возврат в главное меню оплаты
