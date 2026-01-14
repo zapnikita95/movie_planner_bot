@@ -180,12 +180,18 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
         # Иначе обычное расположение (2 колонки, 20 серий на странице)
         use_4_columns = total_pages_base > 5
         if use_4_columns:
-            # Сетка 4 столбца: 4 кнопки в ряд, до 20 строк на странице
-            # Пример: ⬜ 1  ⬜ 6  ⬜ 11 ⬜ 16 (если на странице серии 1-20)
-            #         ⬜ 2  ⬜ 7  ⬜ 12 ⬜ 17
-            #         ⬜ 3  ⬜ 8  ⬜ 13 ⬜ 18
-            #         ...
+            # Сетка 4 столбца по 20 строк (вертикальное заполнение):
+            # Столбец 1: 1, 2, 3, 4, ...
+            # Столбец 2: 21, 22, 23, 24, ...
+            # Столбец 3: 41, 42, 43, 44, ...
+            # Столбец 4: 61, 62, 63, 64, ...
+            # Отображается как:
+            # ⬜ 1  ⬜ 21 ⬜ 41 ⬜ 61
+            # ⬜ 2  ⬜ 22 ⬜ 42 ⬜ 62
+            # ⬜ 3  ⬜ 23 ⬜ 43 ⬜ 63
+            # ...
             
+            # Сначала создаем все кнопки
             buttons_list = []
             for ep in page_episodes:
                 ep_num = ep.get('episodeNumber', '')
@@ -206,10 +212,31 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
                 button = InlineKeyboardButton(button_text, callback_data=f"series_episode:{kp_id}:{season_num}:{ep_num}")
                 buttons_list.append(button)
             
-            # Разбиваем на ряды по 4 кнопки (4 столбца)
-            for i in range(0, len(buttons_list), 4):
-                row_buttons = buttons_list[i:i+4]
-                markup.row(*row_buttons)
+            # Теперь создаем вертикальные столбцы: 4 столбца, каждый по 20 кнопок (или меньше, если эпизодов меньше 80)
+            COLUMNS_COUNT = 4
+            ROWS_PER_COLUMN = 20
+            
+            # Создаем матрицу столбцов: каждый столбец - список кнопок
+            columns = [[] for _ in range(COLUMNS_COUNT)]
+            
+            # Распределяем кнопки по столбцам вертикально
+            # Нужно: Столбец 0: [0, 1, 2, ..., 19], Столбец 1: [20, 21, 22, ..., 39], и т.д.
+            # Индекс кнопки i попадает в столбец i // ROWS_PER_COLUMN
+            for i, button in enumerate(buttons_list):
+                column_index = i // ROWS_PER_COLUMN  # 0 для 0-19, 1 для 20-39, 2 для 40-59, 3 для 60-79
+                if column_index < COLUMNS_COUNT:
+                    columns[column_index].append(button)
+            
+            # Теперь формируем ряды: берем по одной кнопке из каждого столбца
+            # Идем по строкам: строка 0 = первая кнопка из каждого столбца, строка 1 = вторая кнопка, и т.д.
+            max_rows = max(len(col) for col in columns) if columns else 0
+            for row_idx in range(max_rows):
+                row_buttons = []
+                for col in columns:
+                    if row_idx < len(col):
+                        row_buttons.append(col[row_idx])
+                if row_buttons:
+                    markup.row(*row_buttons)
         else:
             # Обычное расположение: 2 колонки
             markup.row_width = 2
