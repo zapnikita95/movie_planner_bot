@@ -4177,6 +4177,8 @@ def register_payment_callbacks(bot_instance):
                         existing_plan_types = [sub.get('plan_type') for sub in active_subs]
                         has_all = 'all' in existing_plan_types
                         
+                        logger.info(f"[PAYMENT SUBSCRIBE] active_subs={len(active_subs)}, existing_plan_types={existing_plan_types}, has_all={has_all}, plan_type={plan_type}, period_type={period_type}")
+                        
                         # Считаем сумму и имена существующих
                         plan_names_short = {
                             'notifications': 'Уведомления',
@@ -4192,23 +4194,38 @@ def register_payment_callbacks(bot_instance):
                         
                         # Если есть подписка на 3 месяца/год, нельзя подключить помесячную
                         if period_type == 'month' and has_long_term_sub:
+                            # Сначала отвечаем на callback query
+                            try:
+                                bot_instance.answer_callback_query(call.id)
+                            except Exception as e:
+                                logger.warning(f"[PAYMENT] Ошибка answer_callback_query: {e}")
+                            
                             text = "⚠️ <b>Невозможно подключить помесячную подписку</b>\n\n"
                             text += "Сейчас у вас более полная подписка по более выгодным условиям (3 месяца или год).\n\n"
                             text += "Вы можете отменить свою подписку и оформить ежемесячную подписку."
                             markup = InlineKeyboardMarkup(row_width=1)
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
                             try:
-                                safe_edit_message(
-                                    bot_instance,
+                                bot_instance.edit_message_text(
+                                    text=text,
                                     chat_id=call.message.chat.id,
                                     message_id=call.message.message_id,
-                                    text=text,
                                     reply_markup=markup,
                                     parse_mode='HTML'
                                 )
                             except Exception as e:
-                                if "message is not modified" not in str(e):
-                                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                                error_str = str(e).lower()
+                                if "message is not modified" not in error_str:
+                                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}", exc_info=True)
+                                    try:
+                                        bot_instance.send_message(
+                                            call.message.chat.id,
+                                            text,
+                                            reply_markup=markup,
+                                            parse_mode='HTML'
+                                        )
+                                    except Exception as e2:
+                                        logger.error(f"[PAYMENT] Ошибка отправки нового сообщения: {e2}", exc_info=True)
                             logger.info(f"[PAYMENT] Пользователь user_id={user_id} пытается подключить помесячную подписку при наличии подписки на 3 месяца/год")
                             return
                         
@@ -4242,27 +4259,50 @@ def register_payment_callbacks(bot_instance):
                         state['next_payment_date'] = next_payment_date
                         
                         if has_all:
+                            # Сначала отвечаем на callback query
+                            try:
+                                bot_instance.answer_callback_query(call.id)
+                            except Exception as e:
+                                logger.warning(f"[PAYMENT] Ошибка answer_callback_query: {e}")
+                            
                             text = "⚠️ <b>У вас уже есть подписка \"Все режимы\"</b>\n\n"
                             text += "Вы не можете добавить дополнительные подписки к пакетной.\n\n"
                             text += "Если хотите изменить — сначала отмените текущую."
                             markup = InlineKeyboardMarkup(row_width=1)
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
                             try:
-                                safe_edit_message(
-                                    bot_instance,
+                                bot_instance.edit_message_text(
+                                    text=text,
                                     chat_id=call.message.chat.id,
                                     message_id=call.message.message_id,
-                                    text=text,
                                     reply_markup=markup,
                                     parse_mode='HTML'
                                 )
                             except Exception as e:
-                                if "message is not modified" not in str(e):
-                                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                                error_str = str(e).lower()
+                                if "message is not modified" not in error_str:
+                                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}", exc_info=True)
+                                    try:
+                                        bot_instance.send_message(
+                                            call.message.chat.id,
+                                            text,
+                                            reply_markup=markup,
+                                            parse_mode='HTML'
+                                        )
+                                    except Exception as e2:
+                                        logger.error(f"[PAYMENT] Ошибка отправки нового сообщения: {e2}", exc_info=True)
                             return
                         
                         elif plan_type == 'all':
                             # Пытаемся добавить пакетную, когда есть отдельные
+                            logger.info(f"[PAYMENT SUBSCRIBE] Обработка plan_type='all', existing_plan_types={existing_plan_types}, period_type={period_type}")
+                            
+                            # Сначала отвечаем на callback query для обратной связи
+                            try:
+                                bot_instance.answer_callback_query(call.id)
+                            except Exception as e:
+                                logger.warning(f"[PAYMENT] Ошибка answer_callback_query: {e}")
+                            
                             text = "📦 <b>Оформление подписки \"Все режимы\"</b>\n\n"
                             text += "⚠️ <b>У вас уже есть активные подписки:</b>\n"
                             for name in existing_sub_names:
@@ -4296,22 +4336,53 @@ def register_payment_callbacks(bot_instance):
                             
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
                             
+                            logger.info(f"[PAYMENT] Показываем оформление 'Все режимы' для user_id={user_id}, plan_type={plan_type}, period_type={period_type}")
+                            
+                            # Используем edit_message_text напрямую для гарантированного обновления
                             try:
-                                safe_edit_message(
-                                    bot_instance,
+                                bot_instance.edit_message_text(
+                                    text=text,
                                     chat_id=call.message.chat.id,
                                     message_id=call.message.message_id,
-                                    text=text,
                                     reply_markup=markup,
                                     parse_mode='HTML'
                                 )
+                                logger.info(f"[PAYMENT] Сообщение успешно обновлено для user_id={user_id}, message_id={call.message.message_id}")
                             except Exception as e:
-                                if "message is not modified" not in str(e):
-                                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                                error_str = str(e).lower()
+                                if "message is not modified" in error_str:
+                                    # Если сообщение не изменилось, обновляем только клавиатуру
+                                    logger.info(f"[PAYMENT] Текст не изменился, обновляю только клавиатуру для message_id={call.message.message_id}")
+                                    try:
+                                        bot_instance.edit_message_reply_markup(
+                                            chat_id=call.message.chat.id,
+                                            message_id=call.message.message_id,
+                                            reply_markup=markup
+                                        )
+                                    except Exception as e2:
+                                        logger.error(f"[PAYMENT] Ошибка обновления клавиатуры: {e2}", exc_info=True)
+                                else:
+                                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}", exc_info=True)
+                                    # Пробуем отправить новое сообщение
+                                    try:
+                                        bot_instance.send_message(
+                                            call.message.chat.id,
+                                            text,
+                                            reply_markup=markup,
+                                            parse_mode='HTML'
+                                        )
+                                    except Exception as e2:
+                                        logger.error(f"[PAYMENT] Ошибка отправки нового сообщения: {e2}", exc_info=True)
                             return
                         
                         elif len(existing_plan_types) == 2 and plan_type != 'all':
                             # 2 из 3 отдельных — предлагаем пакетную
+                            # Сначала отвечаем на callback query
+                            try:
+                                bot_instance.answer_callback_query(call.id)
+                            except Exception as e:
+                                logger.warning(f"[PAYMENT] Ошибка answer_callback_query: {e}")
+                            
                             text = f"⚠️ У вас уже \"{', '.join(existing_sub_names)}\"\n\n"
                             text += "Оформите \"Все режимы\" для полного доступа.\n"
                             text += "Текущие подписки будут отменены автоматически."
@@ -4328,17 +4399,26 @@ def register_payment_callbacks(bot_instance):
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
                             
                             try:
-                                safe_edit_message(
-                                    bot_instance,
+                                bot_instance.edit_message_text(
+                                    text=text,
                                     chat_id=call.message.chat.id,
                                     message_id=call.message.message_id,
-                                    text=text,
                                     reply_markup=markup,
                                     parse_mode='HTML'
                                 )
                             except Exception as e:
-                                if "message is not modified" not in str(e):
-                                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                                error_str = str(e).lower()
+                                if "message is not modified" not in error_str:
+                                    logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}", exc_info=True)
+                                    try:
+                                        bot_instance.send_message(
+                                            call.message.chat.id,
+                                            text,
+                                            reply_markup=markup,
+                                            parse_mode='HTML'
+                                        )
+                                    except Exception as e2:
+                                        logger.error(f"[PAYMENT] Ошибка отправки нового сообщения: {e2}", exc_info=True)
                             return
                         
                         elif plan_type in existing_plan_types:
@@ -4390,18 +4470,30 @@ def register_payment_callbacks(bot_instance):
                             except Exception as e:
                                 logger.warning(f"[PAYMENT] Ошибка answer_callback_query: {e}")
                             
-                            # Затем редактируем сообщение
+                            # Затем редактируем сообщение - используем edit_message_text напрямую для гарантированного обновления
                             try:
-                                safe_edit_message(
-                                    bot_instance,
+                                bot_instance.edit_message_text(
+                                    text=text,
                                     chat_id=call.message.chat.id,
                                     message_id=call.message.message_id,
-                                    text=text,
                                     reply_markup=markup,
                                     parse_mode='HTML'
                                 )
+                                logger.info(f"[PAYMENT] Сообщение успешно обновлено для user_id={user_id}, message_id={call.message.message_id}")
                             except Exception as e:
-                                if "message is not modified" not in str(e):
+                                error_str = str(e).lower()
+                                if "message is not modified" in error_str:
+                                    # Если сообщение не изменилось, обновляем только клавиатуру
+                                    logger.info(f"[PAYMENT] Текст не изменился, обновляю только клавиатуру для message_id={call.message.message_id}")
+                                    try:
+                                        bot_instance.edit_message_reply_markup(
+                                            chat_id=call.message.chat.id,
+                                            message_id=call.message.message_id,
+                                            reply_markup=markup
+                                        )
+                                    except Exception as e2:
+                                        logger.error(f"[PAYMENT] Ошибка обновления клавиатуры: {e2}", exc_info=True)
+                                else:
                                     logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}", exc_info=True)
                                     # Пробуем отправить новое сообщение
                                     try:
