@@ -16,7 +16,7 @@ from moviebot.services.shazam_service import (
     transcribe_voice,
     convert_ogg_to_wav
 )
-from moviebot.api.kinopoisk_api import get_film_by_imdb_id
+from moviebot.api.kinopoisk_api import get_film_by_imdb_id, search_films
 
 from moviebot.utils.helpers import has_recommendations_access
 
@@ -127,23 +127,76 @@ def process_shazam_text_query(message, query, reply_to_message=None, loading_msg
         markup = InlineKeyboardMarkup(row_width=1)
         
         # Фильтруем результаты: оставляем только те, у которых есть kp_id (найдены в Кинопоиске)
-        # И ограничиваем до 5 для отображения
+        # ВАЖНО: Для топ-3 ВСЕГДА пытаемся найти - если не найден по IMDB ID, используем fallback по названию
+        # Для остальных (4+) только поиск по IMDB ID, без fallback
         valid_results = []
-        for result in results:
+        
+        # Сначала обрабатываем топ-3 - для каждого применяем fallback если нужно
+        for idx in range(min(3, len(results))):
+            result = results[idx]
             imdb_id_raw = result.get('imdb_id')
-            if imdb_id_raw:
-                try:
-                    film_info = get_film_by_imdb_id(imdb_id_raw)
-                    if film_info and film_info.get('kp_id'):
-                        result['kp_id'] = film_info.get('kp_id')
-                        result['kp_title'] = film_info.get('title')
-                        result['kp_year'] = film_info.get('year')
-                        valid_results.append(result)
-                        if len(valid_results) >= 5:
-                            break
-                except Exception as e:
-                    logger.warning(f"[SHAZAM TEXT] Ошибка получения данных из Кинопоиска для {imdb_id_raw}: {e}")
-                    continue
+            if not imdb_id_raw:
+                continue
+            
+            try:
+                # Пробуем найти по IMDB ID
+                film_info = get_film_by_imdb_id(imdb_id_raw)
+                if film_info and film_info.get('kp_id'):
+                    # Найден по IMDB ID - добавляем
+                    result['kp_id'] = film_info.get('kp_id')
+                    result['kp_title'] = film_info.get('title')
+                    result['kp_year'] = film_info.get('year')
+                    valid_results.append(result)
+                    logger.info(f"[SHAZAM TEXT] Топ-3 позиция {idx+1}: найден по IMDB ID {imdb_id_raw} → kp_id={result['kp_id']}")
+                else:
+                    # Не найден по IMDB ID - применяем fallback: ищем по названию
+                    title = result.get('title', '')
+                    if title:
+                        logger.info(f"[SHAZAM TEXT] Топ-3 позиция {idx+1}: фильм {imdb_id_raw} не найден по IMDB ID, ищем по названию: '{title}'")
+                        search_results, _ = search_films(title, page=1)
+                        if search_results and len(search_results) > 0:
+                            # Берём первый результат
+                            first_result = search_results[0]
+                            kp_id = first_result.get('filmId') or first_result.get('kinopoiskId')
+                            name_ru = first_result.get('nameRu', '')
+                            name_en = first_result.get('nameEn', '')
+                            
+                            if kp_id:
+                                result['kp_id'] = str(kp_id)
+                                result['kp_title'] = name_ru or name_en or title
+                                result['kp_year'] = first_result.get('year', '')
+                                valid_results.append(result)
+                                logger.info(f"[SHAZAM TEXT] Топ-3 позиция {idx+1}: найден по названию → kp_id={kp_id}, title={result['kp_title']}")
+                            else:
+                                logger.warning(f"[SHAZAM TEXT] Топ-3 позиция {idx+1}: поиск по названию вернул результат без kp_id")
+                        else:
+                            logger.warning(f"[SHAZAM TEXT] Топ-3 позиция {idx+1}: поиск по названию '{title}' не дал результатов")
+                    else:
+                        logger.warning(f"[SHAZAM TEXT] Топ-3 позиция {idx+1}: нет названия для fallback поиска")
+            except Exception as e:
+                logger.warning(f"[SHAZAM TEXT] Ошибка обработки топ-3 позиции {idx+1} (imdb_id={imdb_id_raw}): {e}")
+                continue
+        
+        # Теперь обрабатываем остальные результаты (4+) - только поиск по IMDB ID, без fallback
+        for idx in range(3, len(results)):
+            if len(valid_results) >= 5:
+                break
+            
+            result = results[idx]
+            imdb_id_raw = result.get('imdb_id')
+            if not imdb_id_raw:
+                continue
+            
+            try:
+                film_info = get_film_by_imdb_id(imdb_id_raw)
+                if film_info and film_info.get('kp_id'):
+                    result['kp_id'] = film_info.get('kp_id')
+                    result['kp_title'] = film_info.get('title')
+                    result['kp_year'] = film_info.get('year')
+                    valid_results.append(result)
+            except Exception as e:
+                logger.warning(f"[SHAZAM TEXT] Ошибка получения данных из Кинопоиска для {imdb_id_raw}: {e}")
+                continue
         
         if not valid_results:
             markup = InlineKeyboardMarkup()
@@ -174,8 +227,9 @@ def process_shazam_text_query(message, query, reply_to_message=None, loading_msg
             
             films_text += f"{i}. <b>{display_title}{display_year}</b>\n"
             
-            # Кнопка с русским названием
-            button_text = f"Подробнее о {i}. {display_title}{display_year}"
+            # Кнопка с русским названием (используем kp_title если есть, иначе display_title)
+            button_title = kp_title or display_title
+            button_text = f"Подробнее о {i}. {button_title}{display_year}"
             if kp_id:
                 markup.add(InlineKeyboardButton(button_text, callback_data=f"shazam:film:{int(kp_id)}"))
             else:
@@ -359,23 +413,76 @@ def process_shazam_voice_async(message, loading_msg):
         markup = InlineKeyboardMarkup(row_width=1)
         
         # Фильтруем результаты: оставляем только те, у которых есть kp_id (найдены в Кинопоиске)
-        # И ограничиваем до 5 для отображения
+        # ВАЖНО: Для топ-3 ВСЕГДА пытаемся найти - если не найден по IMDB ID, используем fallback по названию
+        # Для остальных (4+) только поиск по IMDB ID, без fallback
         valid_results = []
-        for result in results:
+        
+        # Сначала обрабатываем топ-3 - для каждого применяем fallback если нужно
+        for idx in range(min(3, len(results))):
+            result = results[idx]
             imdb_id_raw = result.get('imdb_id')
-            if imdb_id_raw:
-                try:
-                    film_info = get_film_by_imdb_id(imdb_id_raw)
-                    if film_info and film_info.get('kp_id'):
-                        result['kp_id'] = film_info.get('kp_id')
-                        result['kp_title'] = film_info.get('title')
-                        result['kp_year'] = film_info.get('year')
-                        valid_results.append(result)
-                        if len(valid_results) >= 5:
-                            break
-                except Exception as e:
-                    logger.warning(f"[SHAZAM VOICE] Ошибка получения данных из Кинопоиска для {imdb_id_raw}: {e}")
-                    continue
+            if not imdb_id_raw:
+                continue
+            
+            try:
+                # Пробуем найти по IMDB ID
+                film_info = get_film_by_imdb_id(imdb_id_raw)
+                if film_info and film_info.get('kp_id'):
+                    # Найден по IMDB ID - добавляем
+                    result['kp_id'] = film_info.get('kp_id')
+                    result['kp_title'] = film_info.get('title')
+                    result['kp_year'] = film_info.get('year')
+                    valid_results.append(result)
+                    logger.info(f"[SHAZAM VOICE] Топ-3 позиция {idx+1}: найден по IMDB ID {imdb_id_raw} → kp_id={result['kp_id']}")
+                else:
+                    # Не найден по IMDB ID - применяем fallback: ищем по названию
+                    title = result.get('title', '')
+                    if title:
+                        logger.info(f"[SHAZAM VOICE] Топ-3 позиция {idx+1}: фильм {imdb_id_raw} не найден по IMDB ID, ищем по названию: '{title}'")
+                        search_results, _ = search_films(title, page=1)
+                        if search_results and len(search_results) > 0:
+                            # Берём первый результат
+                            first_result = search_results[0]
+                            kp_id = first_result.get('filmId') or first_result.get('kinopoiskId')
+                            name_ru = first_result.get('nameRu', '')
+                            name_en = first_result.get('nameEn', '')
+                            
+                            if kp_id:
+                                result['kp_id'] = str(kp_id)
+                                result['kp_title'] = name_ru or name_en or title
+                                result['kp_year'] = first_result.get('year', '')
+                                valid_results.append(result)
+                                logger.info(f"[SHAZAM VOICE] Топ-3 позиция {idx+1}: найден по названию → kp_id={kp_id}, title={result['kp_title']}")
+                            else:
+                                logger.warning(f"[SHAZAM VOICE] Топ-3 позиция {idx+1}: поиск по названию вернул результат без kp_id")
+                        else:
+                            logger.warning(f"[SHAZAM VOICE] Топ-3 позиция {idx+1}: поиск по названию '{title}' не дал результатов")
+                    else:
+                        logger.warning(f"[SHAZAM VOICE] Топ-3 позиция {idx+1}: нет названия для fallback поиска")
+            except Exception as e:
+                logger.warning(f"[SHAZAM VOICE] Ошибка обработки топ-3 позиции {idx+1} (imdb_id={imdb_id_raw}): {e}")
+                continue
+        
+        # Теперь обрабатываем остальные результаты (4+) - только поиск по IMDB ID, без fallback
+        for idx in range(3, len(results)):
+            if len(valid_results) >= 5:
+                break
+            
+            result = results[idx]
+            imdb_id_raw = result.get('imdb_id')
+            if not imdb_id_raw:
+                continue
+            
+            try:
+                film_info = get_film_by_imdb_id(imdb_id_raw)
+                if film_info and film_info.get('kp_id'):
+                    result['kp_id'] = film_info.get('kp_id')
+                    result['kp_title'] = film_info.get('title')
+                    result['kp_year'] = film_info.get('year')
+                    valid_results.append(result)
+            except Exception as e:
+                logger.warning(f"[SHAZAM VOICE] Ошибка получения данных из Кинопоиска для {imdb_id_raw}: {e}")
+                continue
         
         if not valid_results:
             markup = InlineKeyboardMarkup()
@@ -406,8 +513,9 @@ def process_shazam_voice_async(message, loading_msg):
             
             films_text += f"{i}. <b>{display_title}{display_year}</b>\n"
             
-            # Кнопка с русским названием
-            button_text = f"Подробнее о {i}. {display_title}{display_year}"
+            # Кнопка с русским названием (используем kp_title если есть, иначе display_title)
+            button_title = kp_title or display_title
+            button_text = f"Подробнее о {i}. {button_title}{display_year}"
             if kp_id:
                 markup.add(InlineKeyboardButton(button_text, callback_data=f"shazam:film:{int(kp_id)}"))
             else:
