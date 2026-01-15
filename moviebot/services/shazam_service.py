@@ -61,6 +61,13 @@ TOP_DIRECTORS_PATH = DATA_DIR / 'top_directors.txt'  # Топ-100 режиссё
 MIN_VOTE_COUNT = 500
 MAX_MOVIES = 20000
 
+# Параметр fuzziness для поиска (0-100)
+# 0 = строгий поиск (только точные совпадения)
+# 50 = средний (по умолчанию)
+# 100 = максимальный (самые отдалённые совпадения)
+FUZZINESS_LEVEL = int(os.getenv('FUZZINESS_LEVEL', '50'))
+FUZZINESS_LEVEL = max(0, min(100, FUZZINESS_LEVEL))  # Ограничиваем 0-100
+
 
 def init_shazam_index():
     """Инициализация индекса при запуске приложения"""
@@ -817,6 +824,12 @@ def get_index_and_movies():
     
     logger.info("[GET INDEX] Индекс не в памяти, пытаемся загрузить...")
     
+    # Оптимизация: загружаем модель ДО блокировки индекса, чтобы не блокировать другие потоки
+    # Это безопасно, так как get_model() использует свою блокировку
+    if _model is None:
+        logger.info("[GET INDEX] Предзагрузка модели перед блокировкой индекса...")
+        get_model()
+    
     with _index_lock:  # ← Только один worker может войти сюда одновременно
         logger.info("[GET INDEX] Получена блокировка для загрузки индекса...")
         # Двойная проверка - возможно, другой поток уже загрузил индекс
@@ -953,7 +966,7 @@ def _extract_keywords(query_en):
 
 def search_movies(query, top_k=15):
     try:
-        logger.info(f"[SEARCH MOVIES] Начало поиска для запроса: '{query}'")
+        logger.info(f"[SEARCH MOVIES] Начало поиска для запроса: '{query}' (FUZZINESS_LEVEL={FUZZINESS_LEVEL})")
         
         logger.info(f"[SEARCH MOVIES] Шаг 1: Перевод запроса...")
         query_en = translate_to_english(query)
@@ -1027,8 +1040,17 @@ def search_movies(query, top_k=15):
             logger.error(f"[SEARCH MOVIES] КРИТИЧЕСКАЯ ОШИБКА: Размерность запроса ({query_dim}) не совпадает с индексом ({index_dim})!")
             return []
         
+        # Вычисляем количество кандидатов на основе FUZZINESS_LEVEL
+        # FUZZINESS_LEVEL влияет на ширину поиска:
+        # 0 = top_k * 3 (строгий поиск)
+        # 50 = top_k * 5 (по умолчанию)
+        # 100 = top_k * 10 (максимальный поиск)
+        fuzziness_multiplier = 3 + (FUZZINESS_LEVEL / 100.0) * 7  # От 3 до 10
+        search_k = int(top_k * fuzziness_multiplier)
+        logger.info(f"[SEARCH MOVIES] FUZZINESS_LEVEL={FUZZINESS_LEVEL}, multiplier={fuzziness_multiplier:.2f}, search_k={search_k}")
+        
         # Всегда делаем FAISS поиск (получаем больше кандидатов)
-        D, I = index.search(query_emb, k=top_k * 5)
+        D, I = index.search(query_emb, k=search_k)
         logger.info(f"[SEARCH MOVIES] Поиск завершен, найдено индексов: {len(I[0])}")
         
         # Если актёр/режиссёр упомянут — фильтруем только его фильмы
@@ -1175,14 +1197,22 @@ def search_movies(query, top_k=15):
                     freshness_boost = 25  # бонус за свежесть
             
             # Базовый семантический score
-            base_score = 1.0 - distance
+            # При высоком FUZZINESS_LEVEL делаем ранжирование мягче (меньше штраф за расстояние)
+            # FUZZINESS_LEVEL влияет на вес семантического расстояния:
+            # 0 = строгий (distance имеет полный вес)
+            # 50 = средний (по умолчанию)
+            # 100 = мягкий (distance имеет меньший вес, больше учитываются keyword-матчи)
+            distance_weight = 1.0 - (FUZZINESS_LEVEL / 200.0)  # От 1.0 до 0.5
+            base_score = 1.0 - (distance * distance_weight)
             
             # Итоговый score с правильными приоритетами:
             # ПРИОРИТЕТ №1: actor_boost (+400) - САМЫЙ СИЛЬНЫЙ
-            # ПРИОРИТЕТ №2: overview_keyword_matches (×25)
+            # ПРИОРИТЕТ №2: overview_keyword_matches (×25, но при высоком fuzziness может быть больше)
             # ПРИОРИТЕТ №3: genre_boost (+100 за жанр)
             # ПРИОРИТЕТ №4: title_boost (+5 за совпадение в названии)
-            score = base_score + actor_boost + (overview_keyword_matches * 25.0) + genre_boost + title_boost + overview_boost + freshness_boost + popularity_boost
+            # При высоком FUZZINESS_LEVEL увеличиваем вес keyword-матчинга (синонимы важнее)
+            keyword_multiplier = 25.0 + (FUZZINESS_LEVEL / 100.0) * 15.0  # От 25 до 40
+            score = base_score + actor_boost + (overview_keyword_matches * keyword_multiplier) + genre_boost + title_boost + overview_boost + freshness_boost + popularity_boost
             
             results.append({
                 'imdb_id': imdb_id_clean,
