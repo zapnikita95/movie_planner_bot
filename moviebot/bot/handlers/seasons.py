@@ -591,14 +591,15 @@ def show_completed_series_list(chat_id: int, user_id: int, message_id: int = Non
         
         completed_series = []
         for row in all_series:
-            # Упрощаем получение полей — cursor возвращает DictRow, так что .get() везде безопасно
             film_id = row.get('id') if row else None
             title = row.get('title')
             kp_id = row.get('kp_id')
 
+            # Получаем статус выхода сериала
             is_airing, _ = get_series_airing_status(kp_id)
             seasons_data = get_seasons_data(kp_id)
 
+            # Собираем ВСЕ отмеченные серии пользователя
             watched_set = set()
             with db_lock:
                 cursor_local.execute('''
@@ -610,11 +611,19 @@ def show_completed_series_list(chat_id: int, user_id: int, message_id: int = Non
                     e_num = str(w_row.get('episode_number', ''))
                     watched_set.add((s_num, e_num))
 
+            # Считаем ВСЕ эпизоды сериала и сколько просмотрено
             total_ep, watched_ep = count_episodes_for_watch_check(seasons_data, is_airing, watched_set, chat_id, film_id, user_id)
 
+            logger.info(f"[SHOW_COMPLETED_SERIES_LIST] {title} (kp_id={kp_id}): total_ep={total_ep}, watched_ep={watched_ep}, is_airing={is_airing}")
+
+            # Условие: все эпизоды просмотрены, сериал завершён, и есть хотя бы один эпизод
             if total_ep == watched_ep and total_ep > 0 and not is_airing:
                 button_text = f"✅ {title}"
                 completed_series.append((kp_id, button_text))
+                logger.info(f"[SHOW_COMPLETED_SERIES_LIST] Сериал {title} добавлен в просмотренные")
+            else:
+                logger.info(f"[SHOW_COMPLETED_SERIES_LIST] Сериал {title} НЕ завершён: total={total_ep}, watched={watched_ep}, airing={is_airing}")
+
     finally:
         try:
             cursor_local.close()
@@ -654,21 +663,14 @@ def show_completed_series_list(chat_id: int, user_id: int, message_id: int = Non
             bot.send_message(**common_kwargs)
     except Exception as e:
         logger.error(f"[SHOW_COMPLETED_SERIES_LIST] Ошибка отправки/редактирования: {e}", exc_info=True)
-        # Фолбэк без thread_id на случай совсем старой библиотеки
+        # Fallback без thread_id
         try:
-            fallback_kwargs = {
-                'text': text,
-                'chat_id': chat_id,
-                'reply_markup': markup,
-                'parse_mode': 'HTML'
-            }
+            fallback_kwargs = common_kwargs.copy()
+            fallback_kwargs.pop('message_thread_id', None)
             if message_id:
-                common_kwargs['message_id'] = message_id
-                edit_kwargs = common_kwargs.copy()
-                edit_kwargs.pop('message_thread_id', None)  # ← убираем то, что edit не жрёт
-                bot.edit_message_text(**edit_kwargs)
+                bot.edit_message_text(**fallback_kwargs)
             else:
-                bot.send_message(**common_kwargs)
+                bot.send_message(**fallback_kwargs)
         except Exception as e2:
             logger.error(f"[SHOW_COMPLETED_SERIES_LIST] Полная ошибка отправки: {e2}")
             
