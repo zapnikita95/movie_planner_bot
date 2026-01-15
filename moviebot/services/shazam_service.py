@@ -15,15 +15,17 @@ import torch
 import gc
 from tqdm import tqdm
 from datetime import datetime
-import whisper  # только это нужно из speech-библиотек
+# Whisper заменён на faster-whisper для лучшего качества и производительности
 
 # В начале файла (после всех импортов)
 import threading
 
 # Глобальная блокировка для индекса
 _index_lock = threading.Lock()
-# Блокировка для загрузки модели
+# Блокировка для загрузки модели embeddings
 _model_lock = threading.Lock()
+# Блокировка для загрузки модели Whisper
+_whisper_lock = threading.Lock()
 
 # Отключаем ненужный параллелизм, чтобы не было segmentation fault
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
@@ -44,6 +46,8 @@ _top_directors_set = None  # Множество топ-100 режиссёров
 CACHE_DIR = Path('cache')
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
+# DATA_DIR используется для хранения индексов, топ-списков и кэша Whisper
+# На Railway volume должен быть смонтирован в app/data, чтобы данные сохранялись между деплоями
 DATA_DIR = Path('data/shazam')
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -67,6 +71,10 @@ MAX_MOVIES = 20000
 # 100 = максимальный (самые отдалённые совпадения)
 FUZZINESS_LEVEL = int(os.getenv('FUZZINESS_LEVEL', '50'))
 FUZZINESS_LEVEL = max(0, min(100, FUZZINESS_LEVEL))  # Ограничиваем 0-100
+
+# Количество актёров и режиссёров в топ-списках (можно менять без переиндексации)
+TOP_ACTORS_COUNT = int(os.getenv('TOP_ACTORS_COUNT', '500'))
+TOP_DIRECTORS_COUNT = int(os.getenv('TOP_DIRECTORS_COUNT', '100'))
 
 
 def init_shazam_index():
@@ -125,24 +133,45 @@ def get_translator():
 
 def get_whisper():
     global _whisper
+    # Двойная проверка с блокировкой для thread-safety (как в get_model)
     if _whisper is None:
-        logger.info(f"Загрузка whisper (кэш: {CACHE_DIR})...")
-        try:
-            whisper_cache = CACHE_DIR / 'whisper'
-            whisper_cache.mkdir(parents=True, exist_ok=True)
-            
-            model = whisper.load_model("base", download_root=str(whisper_cache))
-            
-            class WhisperWrapper:
-                def __init__(self, model):
-                    self.model = model
+        with _whisper_lock:
+            # Проверяем еще раз внутри блокировки
+            if _whisper is None:
+                logger.info(f"Загрузка faster-whisper...")
+                try:
+                    from faster_whisper import WhisperModel
                     
-                def __call__(self, audio_path):
-                    result = self.model.transcribe(str(audio_path), language="ru")
-                    return {"text": result.get("text", "").strip()}
-            
-            _whisper = WhisperWrapper(model)
-            logger.info("whisper успешно загружен")
+                    # Используем модель "small" - хороший баланс между качеством и размером
+                    # Можно изменить через переменную окружения WHISPER_MODEL (base, small, medium, large-v2, large-v3)
+                    model_size = os.getenv('WHISPER_MODEL', 'small')
+                    device = "cpu"  # Можно использовать "cuda" если есть GPU
+                    compute_type = "int8"  # int8 для CPU, float16 для GPU
+                    
+                    # Кэш Whisper сохраняем в DATA_DIR (data/shazam/whisper) - это volume на Railway
+                    # Это позволяет не скачивать модели при каждом передеплое
+                    whisper_cache = DATA_DIR / 'whisper'
+                    whisper_cache.mkdir(parents=True, exist_ok=True)
+                    
+                    logger.info(f"Загрузка модели faster-whisper: {model_size} (device={device}, compute_type={compute_type})...")
+                    logger.info(f"Кэш моделей Whisper: {whisper_cache} (volume на Railway: app/data/shazam/whisper)")
+                    model = WhisperModel(model_size, device=device, compute_type=compute_type, download_root=str(whisper_cache))
+                    
+                    class WhisperWrapper:
+                        def __init__(self, model):
+                            self.model = model
+                            
+                        def __call__(self, audio_path):
+                            # faster-whisper возвращает генератор, нужно собрать все сегменты
+                            segments, info = self.model.transcribe(str(audio_path), language="ru", beam_size=5)
+                            text_parts = []
+                            for segment in segments:
+                                text_parts.append(segment.text)
+                            full_text = " ".join(text_parts).strip()
+                            return {"text": full_text}
+                    
+                    _whisper = WhisperWrapper(model)
+                    logger.info(f"✅ faster-whisper успешно загружен (модель: {model_size})")
         except Exception as e:
             logger.error(f"Ошибка загрузки whisper: {e}", exc_info=True)
             _whisper = False
@@ -281,27 +310,27 @@ def _create_top_lists_from_dataframe(df):
     
     logger.info(f"Найдено уникальных актёров: {len(actor_counts)}, режиссёров: {len(director_counts)}")
     
-    # Топ-500 актёров и топ-100 режиссёров
-    top_500_actors = [actor for actor, count in actor_counts.most_common(500)]
-    top_100_directors = [director for director, count in director_counts.most_common(100)]
+    # Топ-N актёров и режиссёров (из переменных окружения)
+    top_actors = [actor for actor, count in actor_counts.most_common(TOP_ACTORS_COUNT)]
+    top_directors = [director for director, count in director_counts.most_common(TOP_DIRECTORS_COUNT)]
     
     # Сохраняем в файлы
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     try:
         with open(TOP_ACTORS_PATH, 'w', encoding='utf-8') as f:
-            f.write('\n'.join(top_500_actors))
-        logger.info(f"✅ Сохранён топ-500 актёров: {len(top_500_actors)} имён (файл: {TOP_ACTORS_PATH})")
-        if top_500_actors:
-            logger.info(f"   Примеры топ-5 актёров: {top_500_actors[:5]}")
+            f.write('\n'.join(top_actors))
+        logger.info(f"✅ Сохранён топ-{TOP_ACTORS_COUNT} актёров: {len(top_actors)} имён (файл: {TOP_ACTORS_PATH})")
+        if top_actors:
+            logger.info(f"   Примеры топ-5 актёров: {top_actors[:5]}")
     except Exception as e:
         logger.error(f"❌ Ошибка сохранения топ-актёров: {e}", exc_info=True)
     
     try:
         with open(TOP_DIRECTORS_PATH, 'w', encoding='utf-8') as f:
-            f.write('\n'.join(top_100_directors))
-        logger.info(f"✅ Сохранён топ-100 режиссёров: {len(top_100_directors)} имён (файл: {TOP_DIRECTORS_PATH})")
-        if top_100_directors:
-            logger.info(f"   Примеры топ-5 режиссёров: {top_100_directors[:5]}")
+            f.write('\n'.join(top_directors))
+        logger.info(f"✅ Сохранён топ-{TOP_DIRECTORS_COUNT} режиссёров: {len(top_directors)} имён (файл: {TOP_DIRECTORS_PATH})")
+        if top_directors:
+            logger.info(f"   Примеры топ-5 режиссёров: {top_directors[:5]}")
     except Exception as e:
         logger.error(f"❌ Ошибка сохранения топ-режиссёров: {e}", exc_info=True)
 
@@ -859,6 +888,26 @@ def _normalize_text(text):
     return normalized
 
 
+def _get_actor_position(actors_str, actor_name_normalized):
+    """
+    Определяет позицию актёра в списке актёров фильма.
+    Возвращает позицию (1-based) или None, если актёр не найден.
+    """
+    if not actors_str or pd.isna(actors_str):
+        return None
+    
+    # Парсим список актёров (разделитель - запятая)
+    actors_list = [a.strip().lower() for a in str(actors_str).split(',')]
+    
+    # Нормализуем каждого актёра для сравнения
+    for idx, actor in enumerate(actors_list):
+        actor_normalized = _normalize_text(actor)
+        if actor_normalized == actor_name_normalized:
+            return idx + 1  # 1-based позиция
+    
+    return None
+
+
 def _get_genre_keywords():
     """Возвращает облака смыслов для жанров (характерные слова на английском)"""
     return {
@@ -1049,62 +1098,96 @@ def search_movies(query, top_k=15):
         search_k = int(top_k * fuzziness_multiplier)
         logger.info(f"[SEARCH MOVIES] FUZZINESS_LEVEL={FUZZINESS_LEVEL}, multiplier={fuzziness_multiplier:.2f}, search_k={search_k}")
         
-        # Всегда делаем FAISS поиск (получаем больше кандидатов)
-        D, I = index.search(query_emb, k=search_k)
-        logger.info(f"[SEARCH MOVIES] Поиск завершен, найдено индексов: {len(I[0])}")
-        
-        # Если актёр/режиссёр упомянут — фильтруем только его фильмы
-        # ПРИОРИТЕТ: сначала актёры, потом режиссёры
+        # Если актёр/режиссёр упомянут — сначала находим ВСЕ его фильмы во всей базе
+        # Затем ранжируем их по контексту запроса
         candidate_indices = []
         candidate_distances = []
+        actor_movie_indices = []  # Индексы всех фильмов с актёром (для последующего ранжирования)
+        
         if mentioned_actor_en:
             # Нормализуем имя для поиска (убираем пунктуацию, приводим к нижнему регистру)
             actor_name_for_search = _normalize_text(mentioned_actor_en)
             
             # Проверяем, является ли имя актёром или режиссёром из топ-списков
-            # ВАЖНО: ищем только если имя найдено в топ-списках
             is_actor = top_actors_set and actor_name_for_search in top_actors_set
             is_director = top_directors_set and actor_name_for_search in top_directors_set
             
-            # Если имя не найдено в топ-списках, не ищем (это не должно происходить, но на всякий случай)
             if not is_actor and not is_director:
                 logger.warning(f"[SEARCH MOVIES] Имя '{actor_name_for_search}' не найдено в топ-списках, но mentioned_actor_en не None - пропускаем фильтрацию по актёру")
                 mentioned_actor_en = None
-                # Переходим к обычному поиску
-                candidate_indices = I[0].tolist()
-                candidate_distances = [float(D[0][i]) for i in range(len(I[0]))]
-                logger.info(f"[SEARCH MOVIES] Обычный поиск, кандидатов: {len(candidate_indices)}")
             else:
-                # Сначала собираем фильмы с актёром (приоритет №1)
-                actor_indices = []
-                actor_distances = []
-                # Затем собираем фильмы с режиссёром (приоритет №2, только если нет актёров)
-                director_indices = []
-                director_distances = []
+                # НОВАЯ ЛОГИКА: Ищем ВСЕ фильмы с этим актёром/режиссёром во всей базе
+                logger.info(f"[SEARCH MOVIES] Поиск ВСЕХ фильмов с {'актёром' if is_actor else 'режиссёром'} '{actor_name_for_search}' во всей базе...")
                 
-                for i, idx in enumerate(I[0]):
-                    if idx < len(movies):
+                for idx in range(len(movies)):
+                    row = movies.iloc[idx]
+                    
+                    # ПРИОРИТЕТ №1: Актёры
+                    if is_actor and 'actors_str' in row.index:
+                        actors_str = row.get('actors_str', '')
+                        if pd.notna(actors_str) and actor_name_for_search in _normalize_text(actors_str):
+                            actor_movie_indices.append(idx)
+                    
+                    # ПРИОРИТЕТ №2: Режиссёры (только если не актёр)
+                    elif is_director and not is_actor and 'director_str' in row.index:
+                        director_str = row.get('director_str', '')
+                        if pd.notna(director_str) and actor_name_for_search in _normalize_text(director_str):
+                            actor_movie_indices.append(idx)
+                
+                logger.info(f"[SEARCH MOVIES] Найдено ВСЕГО фильмов с {'актёром' if is_actor else 'режиссёром'} '{actor_name_for_search}': {len(actor_movie_indices)}")
+                
+                if actor_movie_indices:
+                    # Теперь ранжируем найденные фильмы по семантическому сходству с запросом
+                    # Создаём эмбеддинги для всех найденных фильмов
+                    actor_movie_descriptions = []
+                    valid_indices = []
+                    
+                    for idx in actor_movie_indices:
                         row = movies.iloc[idx]
-                        # Нормализуем тексты из базы
-                        actors_normalized = _normalize_text(row.get('actors_str', '')) if 'actors_str' in row.index else ''
-                        director_normalized = _normalize_text(row.get('director_str', '')) if 'director_str' in row.index else ''
+                        description = row.get('description', '')
+                        if pd.notna(description) and description:
+                            actor_movie_descriptions.append(description)
+                            valid_indices.append(idx)
+                    
+                    if actor_movie_descriptions:
+                        logger.info(f"[SEARCH MOVIES] Генерируем эмбеддинги для {len(actor_movie_descriptions)} фильмов с актёром...")
+                        actor_movie_embeddings = model.encode(actor_movie_descriptions, convert_to_numpy=True, normalize_embeddings=False, batch_size=int(os.getenv('EMBEDDINGS_BATCH_SIZE', '64')))
                         
-                        # ПРИОРИТЕТ №1: Проверяем актёров (если имя в топ-актёрах)
-                        if is_actor and actor_name_for_search in actors_normalized:
-                            actor_indices.append(idx)
-                            actor_distances.append(float(D[0][i]))
-                        # ПРИОРИТЕТ №2: Проверяем режиссёров (только если не нашли в актёрах)
-                        elif (is_director and not is_actor) and actor_name_for_search in director_normalized:
-                            director_indices.append(idx)
-                            director_distances.append(float(D[0][i]))
-                
-                # Сначала добавляем фильмы с актёром, потом с режиссёром
-                candidate_indices = actor_indices + director_indices
-                candidate_distances = actor_distances + director_distances
-                
-                logger.info(f"[SEARCH MOVIES] Найдено фильмов с актёром '{actor_name_for_search}': {len(actor_indices)}, с режиссёром: {len(director_indices)}")
-        else:
-            # Обычный поиск - берём все результаты
+                        # Вычисляем расстояния до запроса
+                        query_emb_flat = query_emb[0]
+                        distances = []
+                        for emb in actor_movie_embeddings:
+                            # Косинусное расстояние (1 - cosine similarity)
+                            dot_product = np.dot(query_emb_flat, emb)
+                            norm_query = np.linalg.norm(query_emb_flat)
+                            norm_emb = np.linalg.norm(emb)
+                            if norm_query > 0 and norm_emb > 0:
+                                cosine_sim = dot_product / (norm_query * norm_emb)
+                                distance = 1.0 - cosine_sim
+                            else:
+                                distance = 1.0
+                            distances.append(distance)
+                        
+                        # Сортируем по расстоянию (ближайшие первыми)
+                        sorted_pairs = sorted(zip(valid_indices, distances), key=lambda x: x[1])
+                        candidate_indices = [idx for idx, _ in sorted_pairs]
+                        candidate_distances = [dist for _, dist in sorted_pairs]
+                        
+                        logger.info(f"[SEARCH MOVIES] Отранжировано {len(candidate_indices)} фильмов с актёром по семантическому сходству")
+                    else:
+                        logger.warning(f"[SEARCH MOVIES] Не найдено описаний для фильмов с актёром")
+                        # Fallback: используем все найденные индексы с нулевыми расстояниями
+                        candidate_indices = actor_movie_indices
+                        candidate_distances = [0.0] * len(actor_movie_indices)
+                else:
+                    logger.warning(f"[SEARCH MOVIES] Не найдено фильмов с {'актёром' if is_actor else 'режиссёром'} '{actor_name_for_search}'")
+                    mentioned_actor_en = None
+        
+        # Если актёр не найден или не упомянут — обычный FAISS поиск
+        if not candidate_indices:
+            logger.info(f"[SEARCH MOVIES] Обычный поиск (актёр не найден или не упомянут)...")
+            D, I = index.search(query_emb, k=search_k)
+            logger.info(f"[SEARCH MOVIES] Поиск завершен, найдено индексов: {len(I[0])}")
             candidate_indices = I[0].tolist()
             candidate_distances = [float(D[0][i]) for i in range(len(I[0]))]
             logger.info(f"[SEARCH MOVIES] Обычный поиск, кандидатов: {len(candidate_indices)}")
@@ -1132,28 +1215,41 @@ def search_movies(query, top_k=15):
             has_overview = row.get('has_overview', False) if 'has_overview' in row.index else False
             overview_boost = 30 if has_overview else 0  # бонус за наличие overview
             
-            # ПРИОРИТЕТ №1: Буст за полное имя актёра/режиссёра (+400 если найдено) - САМЫЙ СИЛЬНЫЙ
-            # Сначала проверяем актёров (приоритет №1), потом режиссёров (приоритет №2)
+            # ПРИОРИТЕТ №1: Буст за полное имя актёра/режиссёра - САМЫЙ СИЛЬНЫЙ
+            # Буст зависит от позиции актёра в списке:
+            # - 1-й актёр = +1000 (колоссальный буст)
+            # - 2-5 актёры = +600 (большой буст)
+            # - 6+ актёры = +400 (обычный буст)
             actor_boost = 0
             if mentioned_actor_en:
-                # Нормализуем тексты для сравнения
-                actors_normalized = _normalize_text(row.get('actors_str', '')) if 'actors_str' in row.index else ''
-                director_normalized = _normalize_text(row.get('director_str', '')) if 'director_str' in row.index else ''
                 actor_name_for_search = _normalize_text(mentioned_actor_en)
                 
                 # Проверяем, является ли имя актёром или режиссёром из топ-списков
-                # ВАЖНО: ищем только если имя найдено в топ-списках
                 is_actor = top_actors_set and actor_name_for_search in top_actors_set
                 is_director = top_directors_set and actor_name_for_search in top_directors_set
                 
                 # ПРИОРИТЕТ №1: Актёры (если имя в топ-актёрах)
-                if is_actor and actor_name_for_search in actors_normalized:
-                    actor_boost = 400
-                    logger.info(f"[SEARCH MOVIES] Полное имя актёра '{actor_name_for_search}' найдено → +400 для {imdb_id_clean}")
+                if is_actor and 'actors_str' in row.index:
+                    actors_str = row.get('actors_str', '')
+                    if pd.notna(actors_str):
+                        actor_position = _get_actor_position(actors_str, actor_name_for_search)
+                        if actor_position is not None:
+                            if actor_position == 1:
+                                actor_boost = 1000  # Колоссальный буст за главную роль
+                                logger.info(f"[SEARCH MOVIES] Актёр '{actor_name_for_search}' на 1-й позиции → +1000 для {imdb_id_clean}")
+                            elif 2 <= actor_position <= 5:
+                                actor_boost = 600  # Большой буст за роль в первой пятёрке
+                                logger.info(f"[SEARCH MOVIES] Актёр '{actor_name_for_search}' на позиции {actor_position} → +600 для {imdb_id_clean}")
+                            else:
+                                actor_boost = 400  # Обычный буст
+                                logger.info(f"[SEARCH MOVIES] Актёр '{actor_name_for_search}' на позиции {actor_position} → +400 для {imdb_id_clean}")
+                
                 # ПРИОРИТЕТ №2: Режиссёры (такой же буст, если актёров нет)
-                elif is_director and actor_name_for_search in director_normalized:
-                    actor_boost = 400
-                    logger.info(f"[SEARCH MOVIES] Полное имя режиссёра '{actor_name_for_search}' найдено → +400 для {imdb_id_clean}")
+                elif is_director and not is_actor and 'director_str' in row.index:
+                    director_str = row.get('director_str', '')
+                    if pd.notna(director_str) and actor_name_for_search in _normalize_text(director_str):
+                        actor_boost = 400  # Для режиссёров всегда обычный буст
+                        logger.info(f"[SEARCH MOVIES] Режиссёр '{actor_name_for_search}' найден → +400 для {imdb_id_clean}")
             
             # ПРИОРИТЕТ №2: Keyword-матчинг по overview (×25 за каждое совпадение)
             overview_keyword_matches = 0
