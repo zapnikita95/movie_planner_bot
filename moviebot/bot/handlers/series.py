@@ -2136,31 +2136,66 @@ def register_series_handlers(bot_param):
             with db_lock:
                 if mode == 'my_votes':
                     # Для режима "по моим оценкам" - получаем годы из импортированных фильмов и импортированных оценок с оценкой 9-10
+                    # Учитываем content_type: films - только фильмы, series - только сериалы, mixed - оба
                     years = []
                     # Годы из фильмов в базе
                     conn_local = get_db_connection()
                     cursor_local = get_db_cursor()
                     try:
-                        cursor_local.execute("""
+                        # Добавляем фильтр по is_series в зависимости от content_type
+                        is_series_filter = ""
+                        if content_type == 'films':
+                            is_series_filter = "AND m.is_series = FALSE"
+                        elif content_type == 'series':
+                            is_series_filter = "AND m.is_series = TRUE"
+                        # Если mixed - фильтр не добавляем
+                        
+                        cursor_local.execute(f"""
                             SELECT DISTINCT m.year
                             FROM movies m
                             JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
                             WHERE m.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
-                            AND m.year IS NOT NULL
+                            AND m.year IS NOT NULL {is_series_filter}
                             ORDER BY m.year
                         """, (chat_id, user_id))
                         years_rows = cursor_local.fetchall()
                         years_from_movies = [row.get('year') if isinstance(row, dict) else row[0] for row in years_rows if row]
                         years.extend(years_from_movies)
                         
-                        # Годы из импортированных оценок (film_id = NULL)
-                        cursor_local.execute("""
-                            SELECT DISTINCT r.year
-                            FROM ratings r
-                            WHERE r.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
-                            AND r.film_id IS NULL AND r.year IS NOT NULL
-                            ORDER BY r.year
-                        """, (chat_id, user_id))
+                        # Годы из импортированных оценок (film_id = NULL) - проверяем тип через поле type в ratings
+                        # Если type есть в ratings - используем его, иначе проверяем через movies по kp_id
+                        if content_type == 'films':
+                            # Для фильмов: только те, где type = 'FILM' или (type NULL и в movies is_series = FALSE) или нет записи в movies
+                            cursor_local.execute("""
+                                SELECT DISTINCT r.year
+                                FROM ratings r
+                                LEFT JOIN movies m ON r.kp_id = m.kp_id AND r.chat_id = m.chat_id
+                                WHERE r.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
+                                AND r.film_id IS NULL AND r.year IS NOT NULL
+                                AND (r.type = 'FILM' OR (r.type IS NULL AND (m.id IS NULL OR m.is_series = FALSE)))
+                                ORDER BY r.year
+                            """, (chat_id, user_id))
+                        elif content_type == 'series':
+                            # Для сериалов: только те, где type = 'TV_SERIES' или (type NULL и в movies is_series = TRUE)
+                            cursor_local.execute("""
+                                SELECT DISTINCT r.year
+                                FROM ratings r
+                                LEFT JOIN movies m ON r.kp_id = m.kp_id AND r.chat_id = m.chat_id
+                                WHERE r.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
+                                AND r.film_id IS NULL AND r.year IS NOT NULL
+                                AND (r.type = 'TV_SERIES' OR (r.type IS NULL AND m.id IS NOT NULL AND m.is_series = TRUE))
+                                ORDER BY r.year
+                            """, (chat_id, user_id))
+                        else:
+                            # Для mixed - все импортированные оценки
+                            cursor_local.execute("""
+                                SELECT DISTINCT r.year
+                                FROM ratings r
+                                WHERE r.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
+                                AND r.film_id IS NULL AND r.year IS NOT NULL
+                                ORDER BY r.year
+                            """, (chat_id, user_id))
+                        
                         years_rows_imported = cursor_local.fetchall()
                         years_from_imported = [row.get('year') if isinstance(row, dict) else row[0] for row in years_rows_imported if row]
                         years.extend(years_from_imported)
@@ -2201,14 +2236,23 @@ def register_series_handlers(bot_param):
                                 available_periods.append(period)
                 elif mode == 'group_votes':
                     # Для режима "По оценкам в базе" - получаем годы из фильмов со средней оценкой группы >= 7.5
+                    # Учитываем content_type: films - только фильмы, series - только сериалы, mixed - оба
                     conn_local = get_db_connection()
                     cursor_local = get_db_cursor()
                     years = []
                     try:
-                        cursor_local.execute("""
+                        # Добавляем фильтр по is_series в зависимости от content_type
+                        is_series_filter = ""
+                        if content_type == 'films':
+                            is_series_filter = "AND m.is_series = FALSE"
+                        elif content_type == 'series':
+                            is_series_filter = "AND m.is_series = TRUE"
+                        # Если mixed - фильтр не добавляем
+                        
+                        cursor_local.execute(f"""
                             SELECT DISTINCT m.year
                             FROM movies m
-                            WHERE m.chat_id = %s AND m.year IS NOT NULL
+                            WHERE m.chat_id = %s AND m.year IS NOT NULL {is_series_filter}
                             AND EXISTS (
                                 SELECT 1 FROM ratings r 
                                 WHERE r.film_id = m.id AND r.chat_id = m.chat_id AND (r.is_imported = FALSE OR r.is_imported IS NULL) 
@@ -2252,13 +2296,23 @@ def register_series_handlers(bot_param):
                             if any(y >= 2020 for y in years):
                                 available_periods.append(period)
                 else:
-                    # Для режима database - используем старую логику
+                    # Для режима database - используем логику с учетом content_type
+                    # content_type: films - только фильмы (is_series = FALSE), series - только сериалы (is_series = TRUE), mixed - оба
                     base_query = """
                         SELECT COUNT(DISTINCT m.id) 
                         FROM movies m
                         LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
                         WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
                     """
+                    # Добавляем фильтр по is_series в зависимости от content_type
+                    is_series_filter = ""
+                    if content_type == 'films':
+                        is_series_filter = "AND m.is_series = FALSE"
+                    elif content_type == 'series':
+                        is_series_filter = "AND m.is_series = TRUE"
+                    # Если mixed - фильтр не добавляем
+                    
+                    base_query += f" {is_series_filter}"
                     params = [chat_id]
                 
                     for period in all_periods:
@@ -2664,20 +2718,32 @@ def register_series_handlers(bot_param):
             selected_genres = state.get('genres', [])
             periods = state.get('periods', [])
             mode = state.get('mode')
+            content_type = state.get('content_type', 'mixed')  # films, series, mixed
+            
+            logger.info(f"[RANDOM] Genre step: mode={mode}, content_type={content_type}")
             
             # --------------------- Формируем запрос ---------------------
             params = []
             
             if mode == 'my_votes':
                 # Жанры из импортированных оценок пользователя с оценкой 9-10
+                # Учитываем content_type: films - только FILM, series - только TV_SERIES, mixed - оба
                 # Используем UNION для объединения жанров из фильмов в базе группы и импортированных оценок
+                
+                # Добавляем фильтр по is_series для фильмов из базы группы
+                is_series_filter = ""
+                if content_type == 'films':
+                    is_series_filter = "AND m.is_series = FALSE"
+                elif content_type == 'series':
+                    is_series_filter = "AND m.is_series = TRUE"
+                
                 base_query = """
                     SELECT DISTINCT genre FROM (
                         SELECT DISTINCT TRIM(UNNEST(string_to_array(m.genres, ', '))) as genre
                         FROM movies m
                         JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
                         WHERE m.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
-                        AND m.genres IS NOT NULL AND m.genres != '' AND m.genres != '—'
+                        AND m.genres IS NOT NULL AND m.genres != '' AND m.genres != '—' """ + is_series_filter + """
                 """
                 params = [chat_id, user_id]
                 
@@ -2700,12 +2766,20 @@ def register_series_handlers(bot_param):
                     if period_conditions:
                         base_query += " AND (" + " OR ".join(period_conditions) + ")"
                 
+                # Добавляем фильтр по type для импортированных оценок (film_id = NULL)
+                type_filter = ""
+                if content_type == 'films':
+                    type_filter = "AND (r.type = 'FILM' OR (r.type IS NULL AND NOT EXISTS (SELECT 1 FROM movies m2 WHERE m2.kp_id = r.kp_id AND m2.chat_id = r.chat_id AND m2.is_series = TRUE)))"
+                elif content_type == 'series':
+                    type_filter = "AND (r.type = 'TV_SERIES' OR (r.type IS NULL AND EXISTS (SELECT 1 FROM movies m2 WHERE m2.kp_id = r.kp_id AND m2.chat_id = r.chat_id AND m2.is_series = TRUE)))"
+                # Если mixed - фильтр не добавляем
+                
                 base_query += """
                         UNION ALL
                         SELECT DISTINCT TRIM(UNNEST(string_to_array(r.genres, ', '))) as genre
                         FROM ratings r
                         WHERE r.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
-                        AND r.film_id IS NULL AND r.genres IS NOT NULL AND r.genres != '' AND r.genres != '—'
+                        AND r.film_id IS NULL AND r.genres IS NOT NULL AND r.genres != '' AND r.genres != '—' """ + type_filter + """
                 """
                 params.append(chat_id)
                 params.append(user_id)
@@ -2736,10 +2810,17 @@ def register_series_handlers(bot_param):
                 
             elif mode == 'group_votes':
                 # Жанры из фильмов со средней оценкой группы >= 7.5
+                # Учитываем content_type: films - только фильмы, series - только сериалы, mixed - оба
+                is_series_filter = ""
+                if content_type == 'films':
+                    is_series_filter = "AND m.is_series = FALSE"
+                elif content_type == 'series':
+                    is_series_filter = "AND m.is_series = TRUE"
+                
                 base_query = """
                     SELECT DISTINCT TRIM(UNNEST(string_to_array(m.genres, ', '))) as genre
                     FROM movies m
-                    WHERE m.chat_id = %s
+                    WHERE m.chat_id = %s """ + is_series_filter + """
                     AND m.genres IS NOT NULL AND m.genres != '' AND m.genres != '—'
                     AND EXISTS (
                         SELECT 1 FROM ratings r 
@@ -2751,12 +2832,19 @@ def register_series_handlers(bot_param):
                 params = [chat_id]
                 
             else:
-                # Обычный режим – жанры из непросмотренных фильмов чата
+                # Обычный режим (database) – жанры из непросмотренных фильмов/сериалов чата
+                # Учитываем content_type: films - только фильмы, series - только сериалы, mixed - оба
+                is_series_filter = ""
+                if content_type == 'films':
+                    is_series_filter = "AND m.is_series = FALSE"
+                elif content_type == 'series':
+                    is_series_filter = "AND m.is_series = TRUE"
+                
                 base_query = """
                     SELECT DISTINCT TRIM(UNNEST(string_to_array(m.genres, ', '))) as genre
                     FROM movies m
                     LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
-                    WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
+                    WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL """ + is_series_filter + """
                     AND m.genres IS NOT NULL AND m.genres != '' AND m.genres != '—'
                 """
                 params = [chat_id]
@@ -2873,12 +2961,22 @@ def register_series_handlers(bot_param):
             selected_directors = state.get('directors', [])
             periods = state.get('periods', [])
             genres = state.get('genres', [])
+            content_type = state.get('content_type', 'mixed')  # films, series, mixed
+            
+            logger.info(f"[RANDOM] Director step group_votes: content_type={content_type}")
             
             # Формируем WHERE условие с учетом периодов, жанров и средней оценки >= 7.5
+            # Учитываем content_type: films - только фильмы, series - только сериалы, mixed - оба
+            is_series_filter = ""
+            if content_type == 'films':
+                is_series_filter = "AND m.is_series = FALSE"
+            elif content_type == 'series':
+                is_series_filter = "AND m.is_series = TRUE"
+            
             base_query = """
                 SELECT m.director, COUNT(*) as cnt
                 FROM movies m
-                WHERE m.chat_id = %s
+                WHERE m.chat_id = %s """ + is_series_filter + """
                 AND m.director IS NOT NULL AND m.director != 'Не указан' AND m.director != ''
                 AND EXISTS (
                     SELECT 1 FROM ratings r 
@@ -2996,12 +3094,22 @@ def register_series_handlers(bot_param):
             periods = state.get('periods', [])
             genres = state.get('genres', [])
             directors = state.get('directors', [])
+            content_type = state.get('content_type', 'mixed')  # films, series, mixed
+            
+            logger.info(f"[RANDOM] Actor step group_votes: content_type={content_type}")
             
             # Формируем WHERE условие с учетом всех фильтров и средней оценки >= 7.5
+            # Учитываем content_type: films - только фильмы, series - только сериалы, mixed - оба
+            is_series_filter = ""
+            if content_type == 'films':
+                is_series_filter = "AND m.is_series = FALSE"
+            elif content_type == 'series':
+                is_series_filter = "AND m.is_series = TRUE"
+            
             base_query = """
                 SELECT m.actors 
                 FROM movies m
-                WHERE m.chat_id = %s
+                WHERE m.chat_id = %s """ + is_series_filter + """
                 AND m.actors IS NOT NULL AND m.actors != '' AND m.actors != '—'
                 AND EXISTS (
                     SELECT 1 FROM ratings r 
@@ -3127,16 +3235,28 @@ def register_series_handlers(bot_param):
             selected_directors = state.get('directors', [])
             periods = state.get('periods', [])
             genres = state.get('genres', [])
+            content_type = state.get('content_type', 'mixed')  # films, series, mixed
+            
+            logger.info(f"[RANDOM] Director step my_votes: content_type={content_type}")
             
             # Получаем список kp_id фильмов с оценками 9-10, которые соответствуют периодам и жанрам
+            # Учитываем content_type: films - только FILM, series - только TV_SERIES, mixed - оба
             # Используем UNION для объединения фильмов из базы группы и импортированных оценок
+            
+            # Добавляем фильтр по is_series для фильмов из базы группы
+            is_series_filter = ""
+            if content_type == 'films':
+                is_series_filter = "AND m.is_series = FALSE"
+            elif content_type == 'series':
+                is_series_filter = "AND m.is_series = TRUE"
+            
             base_query = """
                 SELECT DISTINCT kp_id FROM (
                     SELECT m.kp_id
                     FROM movies m
                     JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
                     WHERE m.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
-                    AND m.kp_id IS NOT NULL
+                    AND m.kp_id IS NOT NULL """ + is_series_filter + """
             """
             params = [chat_id, user_id]
             
@@ -3168,12 +3288,20 @@ def register_series_handlers(bot_param):
                 if genre_conditions:
                     base_query += " AND (" + " OR ".join(genre_conditions) + ")"
             
+            # Добавляем фильтр по type для импортированных оценок (film_id = NULL)
+            type_filter = ""
+            if content_type == 'films':
+                type_filter = "AND (r.type = 'FILM' OR (r.type IS NULL AND NOT EXISTS (SELECT 1 FROM movies m2 WHERE m2.kp_id = r.kp_id AND m2.chat_id = r.chat_id AND m2.is_series = TRUE)))"
+            elif content_type == 'series':
+                type_filter = "AND (r.type = 'TV_SERIES' OR (r.type IS NULL AND EXISTS (SELECT 1 FROM movies m2 WHERE m2.kp_id = r.kp_id AND m2.chat_id = r.chat_id AND m2.is_series = TRUE)))"
+            # Если mixed - фильтр не добавляем
+            
             base_query += """
                     UNION ALL
                     SELECT r.kp_id
                     FROM ratings r
                     WHERE r.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
-                    AND r.film_id IS NULL AND r.kp_id IS NOT NULL
+                    AND r.film_id IS NULL AND r.kp_id IS NOT NULL """ + type_filter + """
             """
             params.append(chat_id)
             params.append(user_id)
@@ -3301,14 +3429,26 @@ def register_series_handlers(bot_param):
             periods = state.get('periods', [])
             genres = state.get('genres', [])
             directors = state.get('directors', [])
+            content_type = state.get('content_type', 'mixed')  # films, series, mixed
+            
+            logger.info(f"[RANDOM] Actor step my_votes: content_type={content_type}")
             
             # Получаем список kp_id фильмов с оценками 9-10, которые соответствуют фильтрам
+            # Учитываем content_type: films - только FILM, series - только TV_SERIES, mixed - оба
+            
+            # Добавляем фильтр по is_series для фильмов из базы группы
+            is_series_filter = ""
+            if content_type == 'films':
+                is_series_filter = "AND m.is_series = FALSE"
+            elif content_type == 'series':
+                is_series_filter = "AND m.is_series = TRUE"
+            
             base_query = """
                 SELECT DISTINCT m.kp_id
                 FROM movies m
                 JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
                 WHERE m.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
-                AND m.kp_id IS NOT NULL
+                AND m.kp_id IS NOT NULL """ + is_series_filter + """
             """
             params = [chat_id, user_id]
             
@@ -7104,9 +7244,8 @@ def import_kp_ratings(kp_user_id, chat_id, user_id, max_count=100):
                 if not kp_id:
                     continue
                 
-                # Проверяем тип - только FILM
-                if item.get('type') != 'FILM':
-                    continue
+                # Получаем тип (FILM или TV_SERIES) - теперь сохраняем все типы
+                film_type = item.get('type', 'FILM')  # FILM или TV_SERIES
                 
                 user_rating = item.get('userRating')
                 if not user_rating or user_rating < 1 or user_rating > 10:
@@ -7117,7 +7256,11 @@ def import_kp_ratings(kp_user_id, chat_id, user_id, max_count=100):
                 film_genres_list = item.get('genres', [])
                 film_genres_str = ', '.join([g.get('genre', '') for g in film_genres_list if g.get('genre')]) if film_genres_list else None
                 
-                link = f"https://kinopoisk.ru/film/{kp_id}/"
+                # Формируем ссылку в зависимости от типа
+                if film_type == 'TV_SERIES':
+                    link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+                else:
+                    link = f"https://www.kinopoisk.ru/film/{kp_id}/"
                 
                 # Импортированные оценки НЕ добавляют фильмы в базу группы
                 # Они существуют только как оценки в таблице ratings с is_imported = TRUE
@@ -7152,10 +7295,10 @@ def import_kp_ratings(kp_user_id, chat_id, user_id, max_count=100):
                             
                             # Добавляем импортированную оценку для существующего фильма
                             cursor_local.execute('''
-                                INSERT INTO ratings (chat_id, film_id, user_id, rating, is_imported, kp_id, year, genres)
-                                VALUES (%s, %s, %s, %s, TRUE, %s, %s, %s)
-                                ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating, is_imported = TRUE, kp_id = EXCLUDED.kp_id, year = EXCLUDED.year, genres = EXCLUDED.genres
-                            ''', (chat_id, film_id, user_id, user_rating, kp_id, film_year, film_genres_str))
+                                INSERT INTO ratings (chat_id, film_id, user_id, rating, is_imported, kp_id, year, genres, type)
+                                VALUES (%s, %s, %s, %s, TRUE, %s, %s, %s, %s)
+                                ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating, is_imported = TRUE, kp_id = EXCLUDED.kp_id, year = EXCLUDED.year, genres = EXCLUDED.genres, type = EXCLUDED.type
+                            ''', (chat_id, film_id, user_id, user_rating, kp_id, film_year, film_genres_str, film_type))
                             conn_local.commit()
                             
                             imported_count += 1
@@ -7181,9 +7324,9 @@ def import_kp_ratings(kp_user_id, chat_id, user_id, max_count=100):
                             
                             # Добавляем импортированную оценку БЕЗ film_id (film_id = NULL)
                             cursor_local.execute('''
-                                INSERT INTO ratings (chat_id, film_id, user_id, rating, is_imported, kp_id, year, genres)
-                                VALUES (%s, NULL, %s, %s, TRUE, %s, %s, %s)
-                            ''', (chat_id, user_id, user_rating, kp_id, film_year, film_genres_str))
+                                INSERT INTO ratings (chat_id, film_id, user_id, rating, is_imported, kp_id, year, genres, type)
+                                VALUES (%s, NULL, %s, %s, TRUE, %s, %s, %s, %s)
+                            ''', (chat_id, user_id, user_rating, kp_id, film_year, film_genres_str, film_type))
                             conn_local.commit()
                             
                             imported_count += 1

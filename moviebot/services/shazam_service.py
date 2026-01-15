@@ -140,7 +140,14 @@ def get_whisper():
             if _whisper is None:
                 logger.info(f"Загрузка faster-whisper...")
                 try:
-                    from faster_whisper import WhisperModel
+                    # Импортируем faster_whisper только при первом использовании (ленивая загрузка)
+                    try:
+                        from faster_whisper import WhisperModel
+                    except ImportError as import_error:
+                        logger.error(f"❌ faster-whisper не установлен: {import_error}")
+                        logger.error("Установите через: pip install faster-whisper")
+                        _whisper = False
+                        return _whisper
                     
                     # Используем модель "small" - хороший баланс между качеством и размером
                     # Можно изменить через переменную окружения WHISPER_MODEL (base, small, medium, large-v2, large-v3)

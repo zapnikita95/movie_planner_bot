@@ -200,6 +200,15 @@ def init_database():
         logger.debug(f"Поле genres уже существует или ошибка: {e}")
         conn.rollback()
     
+    # Миграция: добавление поля type в ratings для импортированных оценок (FILM или TV_SERIES)
+    try:
+        cursor.execute('ALTER TABLE ratings ADD COLUMN IF NOT EXISTS type TEXT')
+        conn.commit()
+        logger.info("Миграция: поле type добавлено в ratings")
+    except Exception as e:
+        logger.debug(f"Поле type уже существует или ошибка: {e}")
+        conn.rollback()
+    
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS watched_movies (
             id SERIAL PRIMARY KEY,
