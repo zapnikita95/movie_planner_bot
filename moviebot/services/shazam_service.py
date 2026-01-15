@@ -259,6 +259,13 @@ def build_tmdb_index():
                 if not has_actors or not has_director:
                     logger.warning(f"Индекс не содержит actors_str или director_str (has_actors={has_actors}, has_director={has_director})")
                     logger.warning("Для максимальной эффективности keyword-матчинга рекомендуется пересобрать индекс с FORCE_REBUILD_INDEX=1")
+                
+                # Проверяем наличие топ-списков актёров и режиссёров
+                if not TOP_ACTORS_PATH.exists() or not TOP_DIRECTORS_PATH.exists():
+                    logger.warning("⚠️ Топ-списки актёров/режиссёров не найдены!")
+                    logger.warning("⚠️ Для работы динамического поиска по актёрам/режиссёрам нужно пересобрать индекс с FORCE_REBUILD_INDEX=1")
+                    logger.warning("⚠️ Без топ-списков поиск по актёрам/режиссёрам работать не будет!")
+                
                 logger.info(f"Индекс успешно загружен из файла, фильмов: {len(_movies_df)}, размерность: {actual_dim}")
                 return _index, _movies_df
         except Exception as e:
