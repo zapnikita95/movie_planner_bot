@@ -77,8 +77,8 @@ def get_model():
             # Проверяем еще раз внутри блокировки
             if _model is None:
                 logger.info("Загрузка модели embeddings...")
-                _model = SentenceTransformer('sentence-transformers/all-mpnet-base-v2')
-                logger.info("Модель embeddings загружена (all-mpnet-base-v2 — лучше для поиска по актёрам и сюжету)")
+                _model = SentenceTransformer('BAAI/bge-large-en-v1.5')
+                logger.info("Модель embeddings загружена (bge-large-en-v1.5 — лучшая для retrieval на английском)")
     return _model
 
 
@@ -91,12 +91,15 @@ def get_translator():
             torch.set_grad_enabled(False)
             _translator = pipeline(
                 "translation",
-                model="Helsinki-NLP/opus-mt-ru-en",
+                model="facebook/nllb-200-distilled-600M",
+                src_lang="rus_Cyrl",
+                tgt_lang="eng_Latn",
                 device=-1,
                 torch_dtype=torch.float32
             )
             test = _translator("тестовая фраза", max_length=512)
             logger.info(f"Транслятор готов (тест: 'тестовая фраза' → '{test[0]['translation_text']}')")
+            logger.info("Транслятор загружен (nllb-200-distilled-600M — лучше для контекста и исторических терминов)")
         except Exception as e:
             logger.error(f"Ошибка транслятора: {e}", exc_info=True)
             _translator = False
@@ -138,7 +141,15 @@ def translate_to_english(text):
     if any(c.lower() in russian_chars for c in text):
         try:
             result = translator(text, max_length=512)
-            return result[0]['translation_text']
+            translated = result[0]['translation_text']
+            
+            # Фикс для "Великая депрессия"
+            if "great depression" in translated.lower():
+                translated = translated.replace("great depression", "Great Depression")
+                translated = translated.replace("Great depression", "Great Depression")
+                translated = translated.replace("great Depression", "Great Depression")
+            
+            return translated
         except Exception:
             return text
     return text
@@ -604,6 +615,13 @@ def get_index_and_movies():
             logger.error(f"[GET INDEX] Ошибка при загрузке индекса: {e}", exc_info=True)
             return None, None
 
+def _normalize_text(text):
+    """Нормализует текст: приводит к нижнему регистру и убирает знаки препинания"""
+    import re
+    # Убираем знаки препинания, оставляем только буквы и цифры, приводим к нижнему регистру
+    normalized = re.sub(r'[^\w\s]', '', str(text).lower())
+    return normalized
+
 def _extract_keywords(query_en):
     """Извлекает ключевые слова из запроса, убирая стоп-слова"""
     # Стоп-слова на английском (игнорируем при keyword-матчинге)
@@ -615,9 +633,12 @@ def _extract_keywords(query_en):
         'directors', 'starring', 'star', 'stars', 'cast', 'about', 'with', 'in', 'a', 'the'
     }
     
-    # Разбиваем на слова, убираем пунктуацию, приводим к нижнему регистру
+    # Нормализуем запрос (убираем пунктуацию, приводим к нижнему регистру)
+    normalized_query = _normalize_text(query_en)
+    
+    # Разбиваем на слова
     import re
-    words = re.findall(r'\b\w+\b', query_en.lower())
+    words = re.findall(r'\b\w+\b', normalized_query)
     # Фильтруем стоп-слова и короткие слова (меньше 2 символов)
     keywords = [w for w in words if w not in stop_words and len(w) > 2]
     logger.info(f"[SEARCH MOVIES] Извлечены ключевые слова из '{query_en}': {keywords}")
@@ -695,16 +716,17 @@ def search_movies(query, top_k=15):
         candidate_indices = []
         candidate_distances = []
         if mentioned_actor_en:
-            # Переводим имя на английский (если было на русском, используем переведённый запрос)
-            actor_name_for_search = query_en.lower().strip()  # Используем переведённый запрос
+            # Нормализуем имя для поиска (убираем пунктуацию, приводим к нижнему регистру)
+            actor_name_for_search = _normalize_text(query_en)
             
             for i, idx in enumerate(I[0]):
                 if idx < len(movies):
                     row = movies.iloc[idx]
-                    actors_lower = str(row.get('actors_str', '')).lower() if 'actors_str' in row.index else ''
-                    director_lower = str(row.get('director_str', '')).lower() if 'director_str' in row.index else ''
-                    # Ищем имя в актёрах или режиссёрах (case-insensitive, так как оба в lower)
-                    if actor_name_for_search in actors_lower or actor_name_for_search in director_lower:
+                    # Нормализуем тексты из базы (убираем пунктуацию, приводим к нижнему регистру)
+                    actors_normalized = _normalize_text(row.get('actors_str', '')) if 'actors_str' in row.index else ''
+                    director_normalized = _normalize_text(row.get('director_str', '')) if 'director_str' in row.index else ''
+                    # Ищем имя в актёрах или режиссёрах (оба нормализованы)
+                    if actor_name_for_search in actors_normalized or actor_name_for_search in director_normalized:
                         candidate_indices.append(idx)
                         candidate_distances.append(float(D[0][i]))
             logger.info(f"[SEARCH MOVIES] Найдено фильмов с актёром/режиссёром '{actor_name_for_search}': {len(candidate_indices)}")
@@ -737,11 +759,21 @@ def search_movies(query, top_k=15):
             has_overview = row.get('has_overview', False) if 'has_overview' in row.index else False
             overview_boost = 30 if has_overview else 0  # бонус за наличие overview
             
-            # Keyword-матчинг по overview
+            # Keyword-матчинг по overview (нормализуем текст, убираем пунктуацию)
             overview_keyword_matches = 0
             if keywords and 'overview' in row.index:
-                overview_text = str(row.get('overview', '')).lower()
-                overview_keyword_matches = sum(1 for word in keywords if word in overview_text)
+                overview_text_normalized = _normalize_text(row.get('overview', ''))
+                overview_keyword_matches = sum(1 for word in keywords if word in overview_text_normalized)
+            
+            # Keyword-матчинг по названию (пониженный приоритет - отрицательный буст)
+            title_keyword_matches = 0
+            title_penalty = 0
+            if keywords and 'title' in row.index:
+                title_text_normalized = _normalize_text(row.get('title', ''))
+                title_keyword_matches = sum(1 for word in keywords if word in title_text_normalized)
+                # Понижаем приоритет совпадения от названий (небольшой отрицательный буст)
+                if title_keyword_matches > 0:
+                    title_penalty = -5 * title_keyword_matches  # Небольшой штраф за совпадения в названии
             
             # Буст по популярности (vote_count)
             popularity_boost = 0
@@ -762,18 +794,19 @@ def search_movies(query, top_k=15):
             # Буст за полное имя актёра/режиссёра (+400 если найдено)
             actor_boost = 0
             if mentioned_actor_en:
-                actors_lower = str(row.get('actors_str', '')).lower() if 'actors_str' in row.index else ''
-                director_lower = str(row.get('director_str', '')).lower() if 'director_str' in row.index else ''
-                actor_name_for_search = query_en.lower().strip()
-                if actor_name_for_search in actors_lower or actor_name_for_search in director_lower:
+                # Нормализуем тексты для сравнения (убираем пунктуацию, приводим к нижнему регистру)
+                actors_normalized = _normalize_text(row.get('actors_str', '')) if 'actors_str' in row.index else ''
+                director_normalized = _normalize_text(row.get('director_str', '')) if 'director_str' in row.index else ''
+                actor_name_for_search = _normalize_text(query_en)
+                if actor_name_for_search in actors_normalized or actor_name_for_search in director_normalized:
                     actor_boost = 400
                     logger.info(f"[SEARCH MOVIES] Полное имя '{actor_name_for_search}' найдено → +400 для {imdb_id_clean}")
             
             # Базовый семантический score
             base_score = 1.0 - distance
             
-            # Итоговый score
-            score = base_score + (overview_keyword_matches * 25.0) + overview_boost + freshness_boost + popularity_boost + actor_boost
+            # Итоговый score (понижаем приоритет совпадения от названий через title_penalty)
+            score = base_score + (overview_keyword_matches * 25.0) + overview_boost + freshness_boost + popularity_boost + actor_boost + title_penalty
             
             results.append({
                 'imdb_id': imdb_id_clean,
