@@ -548,8 +548,11 @@ def build_tmdb_index():
     descriptions = processed['description'].tolist()
     
     # Оптимизация: увеличиваем batch_size для ускорения (можно настроить через переменную окружения)
+    # Для Railway рекомендуется 64-128 (зависит от доступной памяти)
+    # Для локальной машины с GPU можно 256-512
     batch_size = int(os.getenv('EMBEDDINGS_BATCH_SIZE', '64'))
     logger.info(f"Используется batch_size={batch_size} для генерации эмбеддингов")
+    logger.info(f"💡 Совет: для максимального ускорения на Railway установите USE_FAST_EMBEDDINGS=1 и EMBEDDINGS_BATCH_SIZE=128")
     
     embeddings = []
     total_batches = (len(descriptions) + batch_size - 1) // batch_size
@@ -645,6 +648,89 @@ def _normalize_text(text):
     normalized = re.sub(r'[^\w\s]', '', str(text).lower())
     return normalized
 
+
+def _get_genre_keywords():
+    """Возвращает облака смыслов для жанров (характерные слова на английском)"""
+    return {
+        'action': [
+            'shootout', 'chase', 'fight', 'danger', 'killer', 'villain', 'explosion', 'gun', 'weapon', 'battle',
+            'combat', 'war', 'soldier', 'spy', 'agent', 'mission', 'rescue', 'escape', 'pursuit', 'conflict',
+            'violence', 'action', 'thriller', 'adrenaline', 'stunt', 'hero', 'enemy', 'attack', 'defense', 'survival'
+        ],
+        'comedy': [
+            'funny', 'laugh', 'humor', 'joke', 'comic', 'hilarious', 'amusing', 'entertaining', 'light', 'cheerful',
+            'silly', 'witty', 'satire', 'parody', 'romantic comedy', 'slapstick', 'absurd', 'quirky', 'playful',
+            'humorous', 'comedy', 'fun', 'gag', 'prank', 'mischief', 'comical', 'laughable', 'ridiculous', 'wacky'
+        ],
+        'thriller': [
+            'suspense', 'tension', 'mystery', 'intrigue', 'plot', 'twist', 'surprise', 'suspicious', 'dangerous',
+            'threatening', 'fear', 'anxiety', 'nervous', 'edge', 'cliffhanger', 'unpredictable', 'shocking',
+            'disturbing', 'psychological', 'thriller', 'suspenseful', 'nail-biting', 'gripping', 'intense',
+            'chilling', 'terrifying', 'ominous', 'sinister', 'menacing', 'alarming'
+        ],
+        'drama': [
+            'emotional', 'serious', 'tragic', 'melodrama', 'conflict', 'struggle', 'relationship', 'family',
+            'love', 'loss', 'grief', 'sorrow', 'pain', 'suffering', 'human', 'realistic', 'deep', 'meaningful',
+            'touching', 'heartfelt', 'dramatic', 'intense', 'powerful', 'moving', 'profound', 'thoughtful',
+            'contemplative', 'reflective', 'poignant', 'heartbreaking'
+        ],
+        'horror': [
+            'scary', 'frightening', 'terrifying', 'horror', 'monster', 'ghost', 'demon', 'zombie', 'vampire',
+            'killer', 'murder', 'death', 'blood', 'gore', 'nightmare', 'fear', 'terror', 'panic', 'dread',
+            'creepy', 'spooky', 'eerie', 'sinister', 'dark', 'evil', 'supernatural', 'paranormal', 'haunted',
+            'disturbing', 'shocking', 'gruesome'
+        ],
+        'romance': [
+            'love', 'romance', 'romantic', 'relationship', 'couple', 'dating', 'wedding', 'marriage', 'kiss',
+            'passion', 'affection', 'heart', 'soulmate', 'sweet', 'tender', 'intimate', 'emotional', 'caring',
+            'devoted', 'loving', 'adoring', 'charming', 'enchanting', 'beautiful', 'dreamy', 'sentimental',
+            'touching', 'heartwarming', 'endearing', 'affectionate'
+        ],
+        'animation': [
+            'cartoon', 'animated', 'animation', 'drawing', 'illustration', 'picture', 'graphic', 'visual',
+            'artistic', 'creative', 'colorful', 'vibrant', 'fantasy', 'imaginative', 'whimsical', 'playful',
+            'childlike', 'innocent', 'magical', 'enchanting', 'fairy tale', 'storybook', 'pixar', 'disney',
+            'family', 'children', 'kids', 'youthful', 'cheerful', 'bright', 'lively'
+        ],
+        'crime': [
+            'crime', 'criminal', 'gangster', 'mafia', 'police', 'detective', 'investigation', 'murder', 'killing',
+            'robbery', 'theft', 'corruption', 'illegal', 'law', 'justice', 'prison', 'criminal', 'felony',
+            'violence', 'danger', 'suspense', 'mystery', 'thriller', 'underworld', 'organized crime', 'heist',
+            'conspiracy', 'betrayal', 'revenge', 'punishment'
+        ],
+        'sci-fi': [
+            'science fiction', 'sci-fi', 'future', 'space', 'alien', 'robot', 'technology', 'advanced', 'scientific',
+            'futuristic', 'spacecraft', 'planet', 'galaxy', 'universe', 'time travel', 'dystopia', 'utopia',
+            'cyberpunk', 'artificial intelligence', 'genetic', 'experiment', 'discovery', 'innovation', 'virtual',
+            'digital', 'quantum', 'dimension', 'parallel', 'extraterrestrial', 'cosmic'
+        ],
+        'adventure': [
+            'adventure', 'journey', 'quest', 'expedition', 'exploration', 'discovery', 'treasure', 'hunt',
+            'travel', 'voyage', 'expedition', 'explorer', 'hero', 'brave', 'courageous', 'daring', 'bold',
+            'exciting', 'thrilling', 'action', 'danger', 'risk', 'challenge', 'mission', 'goal', 'destination',
+            'unknown', 'mysterious', 'exotic', 'foreign'
+        ]
+    }
+
+
+def _detect_genre_from_keywords(keywords, query_en_lower):
+    """Определяет жанр на основе ключевых слов и облаков смыслов"""
+    genre_keywords_map = _get_genre_keywords()
+    detected_genres = []
+    
+    # Проверяем каждое ключевое слово на принадлежность к жанрам
+    for genre, genre_words in genre_keywords_map.items():
+        matches = sum(1 for word in keywords if word in genre_words)
+        # Также проверяем весь запрос на наличие характерных слов
+        query_matches = sum(1 for word in genre_words if word in query_en_lower)
+        total_matches = matches + query_matches
+        
+        if total_matches >= 2:  # Если найдено 2+ совпадения - жанр обнаружен
+            detected_genres.append(genre)
+            logger.info(f"[SEARCH MOVIES] Обнаружен жанр '{genre}' по ключевым словам (совпадений: {total_matches})")
+    
+    return detected_genres
+
 def _extract_keywords(query_en):
     """Извлекает ключевые слова из запроса, убирая стоп-слова"""
     # Стоп-слова на английском (игнорируем при keyword-матчинге)
@@ -678,35 +764,42 @@ def search_movies(query, top_k=15):
         
         # Извлекаем ключевые слова для обычного keyword-матчинга
         keywords = _extract_keywords(query_en)
+        query_en_lower = query_en.lower()
         
-        # Пытаемся определить, упомянуто ли имя актёра/режиссёра в запросе
-        # Простая эвристика: если запрос короткий (2-4 слова), возможно это имя
-        # Или ищем известные имена в переведённом запросе
+        # Пытаемся извлечь имя актёра/режиссёра из запроса
+        # Сначала ищем известные имена в переведённом запросе
         mentioned_actor_en = None
-        query_en_words = query_en.split()
+        known_full_names = [
+            'keanu reeves',
+            'leonardo dicaprio',
+            'paul thomas anderson',
+            'quentin tarantino',
+            'martin scorsese',
+            'christopher nolan',
+            'david fincher',
+            'ridley scott',
+            'steven spielberg',
+            'james cameron',
+        ]
+        for name in known_full_names:
+            if name in query_en_lower:
+                mentioned_actor_en = name
+                logger.info(f"[SEARCH MOVIES] Найдено известное имя в запросе: '{mentioned_actor_en}'")
+                break
         
-        if len(query_en_words) <= 4:
-            # Короткий запрос - возможно это имя актёра
-            # Используем переведённый запрос (он уже на английском) как имя для поиска
-            mentioned_actor_en = query_en.lower().strip()
-            logger.info(f"[SEARCH MOVIES] Короткий запрос, предполагаем что это имя: '{mentioned_actor_en}'")
-        else:
-            # Длинный запрос - ищем известные имена актёров/режиссёров
-            known_full_names = [
-                'keanu reeves',
-                'leonardo dicaprio',
-                'paul thomas anderson',
-                'quentin tarantino',
-                'martin scorsese',
-            ]
-            query_en_lower = query_en.lower()
-            for name in known_full_names:
-                if name in query_en_lower:
-                    mentioned_actor_en = name
-                    logger.info(f"[SEARCH MOVIES] Найдено известное имя в запросе: '{mentioned_actor_en}'")
-                    break
+        # Если не нашли известное имя, но запрос очень короткий (2-3 слова) - возможно это имя
+        if not mentioned_actor_en:
+            query_en_words = query_en.split()
+            if len(query_en_words) <= 3:
+                # Очень короткий запрос - возможно это имя актёра
+                mentioned_actor_en = query_en.lower().strip()
+                logger.info(f"[SEARCH MOVIES] Очень короткий запрос, предполагаем что это имя: '{mentioned_actor_en}'")
         
         logger.info(f"[SEARCH MOVIES] Упомянут актёр? {bool(mentioned_actor_en)}, имя (en): {mentioned_actor_en}")
+        
+        # Определяем жанры на основе ключевых слов и облаков смыслов
+        detected_genres = _detect_genre_from_keywords(keywords, query_en_lower)
+        logger.info(f"[SEARCH MOVIES] Обнаружены жанры по ключевым словам: {detected_genres}")
         
         logger.info(f"[SEARCH MOVIES] Шаг 2: Получение индекса и данных...")
         index, movies = get_index_and_movies()
@@ -740,7 +833,7 @@ def search_movies(query, top_k=15):
         candidate_distances = []
         if mentioned_actor_en:
             # Нормализуем имя для поиска (убираем пунктуацию, приводим к нижнему регистру)
-            actor_name_for_search = _normalize_text(query_en)
+            actor_name_for_search = _normalize_text(mentioned_actor_en)  # Используем извлечённое имя, а не весь запрос
             
             for i, idx in enumerate(I[0]):
                 if idx < len(movies):
@@ -782,21 +875,41 @@ def search_movies(query, top_k=15):
             has_overview = row.get('has_overview', False) if 'has_overview' in row.index else False
             overview_boost = 30 if has_overview else 0  # бонус за наличие overview
             
-            # Keyword-матчинг по overview (нормализуем текст, убираем пунктуацию)
+            # ПРИОРИТЕТ №1: Буст за полное имя актёра/режиссёра (+400 если найдено) - САМЫЙ СИЛЬНЫЙ
+            actor_boost = 0
+            if mentioned_actor_en:
+                # Нормализуем тексты для сравнения (убираем пунктуацию, приводим к нижнему регистру)
+                actors_normalized = _normalize_text(row.get('actors_str', '')) if 'actors_str' in row.index else ''
+                director_normalized = _normalize_text(row.get('director_str', '')) if 'director_str' in row.index else ''
+                actor_name_for_search = _normalize_text(mentioned_actor_en)
+                if actor_name_for_search in actors_normalized or actor_name_for_search in director_normalized:
+                    actor_boost = 400
+                    logger.info(f"[SEARCH MOVIES] Полное имя '{actor_name_for_search}' найдено → +400 для {imdb_id_clean}")
+            
+            # ПРИОРИТЕТ №2: Keyword-матчинг по overview (×25 за каждое совпадение)
             overview_keyword_matches = 0
             if keywords and 'overview' in row.index:
                 overview_text_normalized = _normalize_text(row.get('overview', ''))
                 overview_keyword_matches = sum(1 for word in keywords if word in overview_text_normalized)
             
-            # Keyword-матчинг по названию (пониженный приоритет - отрицательный буст)
+            # ПРИОРИТЕТ №3: Буст за жанр (если жанр упомянут в запросе и есть в фильме)
+            genre_boost = 0
+            if detected_genres and 'genres_str' in row.index:
+                genres_str_normalized = _normalize_text(row.get('genres_str', ''))
+                for genre in detected_genres:
+                    if genre in genres_str_normalized:
+                        genre_boost += 100  # Сильный буст за каждый совпадающий жанр
+                        logger.info(f"[SEARCH MOVIES] Жанр '{genre}' найден → +100 для {imdb_id_clean}")
+            
+            # ПРИОРИТЕТ №4: Keyword-матчинг по названию (небольшой буст)
             title_keyword_matches = 0
-            title_penalty = 0
+            title_boost = 0
             if keywords and 'title' in row.index:
                 title_text_normalized = _normalize_text(row.get('title', ''))
                 title_keyword_matches = sum(1 for word in keywords if word in title_text_normalized)
-                # Понижаем приоритет совпадения от названий (небольшой отрицательный буст)
+                # Небольшой буст за совпадения в названии (не очень сильный)
                 if title_keyword_matches > 0:
-                    title_penalty = -5 * title_keyword_matches  # Небольшой штраф за совпадения в названии
+                    title_boost = 5 * title_keyword_matches  # Небольшой буст за совпадения в названии
             
             # Буст по популярности (vote_count)
             popularity_boost = 0
@@ -814,22 +927,15 @@ def search_movies(query, top_k=15):
                 if year_int > 2000:
                     freshness_boost = 25  # бонус за свежесть
             
-            # Буст за полное имя актёра/режиссёра (+400 если найдено)
-            actor_boost = 0
-            if mentioned_actor_en:
-                # Нормализуем тексты для сравнения (убираем пунктуацию, приводим к нижнему регистру)
-                actors_normalized = _normalize_text(row.get('actors_str', '')) if 'actors_str' in row.index else ''
-                director_normalized = _normalize_text(row.get('director_str', '')) if 'director_str' in row.index else ''
-                actor_name_for_search = _normalize_text(query_en)
-                if actor_name_for_search in actors_normalized or actor_name_for_search in director_normalized:
-                    actor_boost = 400
-                    logger.info(f"[SEARCH MOVIES] Полное имя '{actor_name_for_search}' найдено → +400 для {imdb_id_clean}")
-            
             # Базовый семантический score
             base_score = 1.0 - distance
             
-            # Итоговый score (понижаем приоритет совпадения от названий через title_penalty)
-            score = base_score + (overview_keyword_matches * 25.0) + overview_boost + freshness_boost + popularity_boost + actor_boost + title_penalty
+            # Итоговый score с правильными приоритетами:
+            # ПРИОРИТЕТ №1: actor_boost (+400) - САМЫЙ СИЛЬНЫЙ
+            # ПРИОРИТЕТ №2: overview_keyword_matches (×25)
+            # ПРИОРИТЕТ №3: genre_boost (+100 за жанр)
+            # ПРИОРИТЕТ №4: title_boost (+5 за совпадение в названии)
+            score = base_score + actor_boost + (overview_keyword_matches * 25.0) + genre_boost + title_boost + overview_boost + freshness_boost + popularity_boost
             
             results.append({
                 'imdb_id': imdb_id_clean,
@@ -843,6 +949,8 @@ def search_movies(query, top_k=15):
                 'freshness_boost': freshness_boost,
                 'popularity_boost': popularity_boost,
                 'actor_boost': actor_boost,
+                'genre_boost': genre_boost,
+                'title_boost': title_boost,
                 'score': score
             })
         
@@ -851,7 +959,7 @@ def search_movies(query, top_k=15):
         
         logger.info(f"[SEARCH MOVIES] Результаты приоритизированы, возвращаем {len(results)} фильмов")
         if results:
-            logger.info(f"[SEARCH MOVIES] Топ-3: {[(r['title'], r['overview_keyword_matches'], r['overview_boost'], r['freshness_boost'], r['popularity_boost'], r['actor_boost'], r['score']) for r in results[:3]]}")
+            logger.info(f"[SEARCH MOVIES] Топ-3: {[(r['title'], r['actor_boost'], r['overview_keyword_matches'], r['genre_boost'], r['title_boost'], r['score']) for r in results[:3]]}")
         return results
     except Exception as e:
         logger.error(f"[SEARCH MOVIES] Ошибка поиска фильмов: {e}", exc_info=True)
