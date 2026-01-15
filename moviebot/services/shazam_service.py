@@ -635,26 +635,34 @@ def search_movies(query, top_k=15):
         # Извлекаем ключевые слова для обычного keyword-матчинга
         keywords = _extract_keywords(query_en)
         
-        # Полные имена актёров/режиссёров (храним на английском, как в датасете)
-        known_full_names = [
-            'keanu reeves',
-            'leonardo dicaprio',
-            'paul thomas anderson',
-            'quentin tarantino',
-            'martin scorsese',
-            # Добавь других
-        ]
+        # Пытаемся определить, упомянуто ли имя актёра/режиссёра в запросе
+        # Простая эвристика: если запрос короткий (2-4 слова), возможно это имя
+        # Или ищем известные имена в переведённом запросе
+        mentioned_actor_en = None
+        query_en_words = query_en.split()
         
-        # Проверяем, упомянуто ли полное имя (ищем как в запросе, так и в переводе)
-        mentioned_actor = None
-        query_lower = query.lower()
-        query_en_lower = query_en.lower()
-        for name in known_full_names:
-            if name in query_lower or name in query_en_lower:
-                mentioned_actor = name  # Используем английское имя для фильтрации
-                break
+        if len(query_en_words) <= 4:
+            # Короткий запрос - возможно это имя актёра
+            # Используем переведённый запрос (он уже на английском) как имя для поиска
+            mentioned_actor_en = query_en.lower().strip()
+            logger.info(f"[SEARCH MOVIES] Короткий запрос, предполагаем что это имя: '{mentioned_actor_en}'")
+        else:
+            # Длинный запрос - ищем известные имена актёров/режиссёров
+            known_full_names = [
+                'keanu reeves',
+                'leonardo dicaprio',
+                'paul thomas anderson',
+                'quentin tarantino',
+                'martin scorsese',
+            ]
+            query_en_lower = query_en.lower()
+            for name in known_full_names:
+                if name in query_en_lower:
+                    mentioned_actor_en = name
+                    logger.info(f"[SEARCH MOVIES] Найдено известное имя в запросе: '{mentioned_actor_en}'")
+                    break
         
-        logger.info(f"[SEARCH MOVIES] Упомянут актёр? {bool(mentioned_actor)}, имя: {mentioned_actor}")
+        logger.info(f"[SEARCH MOVIES] Упомянут актёр? {bool(mentioned_actor_en)}, имя (en): {mentioned_actor_en}")
         
         logger.info(f"[SEARCH MOVIES] Шаг 2: Получение индекса и данных...")
         index, movies = get_index_and_movies()
@@ -686,15 +694,20 @@ def search_movies(query, top_k=15):
         # Если актёр упомянут — фильтруем только его фильмы
         candidate_indices = []
         candidate_distances = []
-        if mentioned_actor:
+        if mentioned_actor_en:
+            # Переводим имя на английский (если было на русском, используем переведённый запрос)
+            actor_name_for_search = query_en.lower().strip()  # Используем переведённый запрос
+            
             for i, idx in enumerate(I[0]):
                 if idx < len(movies):
                     row = movies.iloc[idx]
                     actors_lower = str(row.get('actors_str', '')).lower() if 'actors_str' in row.index else ''
-                    if mentioned_actor in actors_lower:
+                    director_lower = str(row.get('director_str', '')).lower() if 'director_str' in row.index else ''
+                    # Ищем имя в актёрах или режиссёрах (case-insensitive, так как оба в lower)
+                    if actor_name_for_search in actors_lower or actor_name_for_search in director_lower:
                         candidate_indices.append(idx)
                         candidate_distances.append(float(D[0][i]))
-            logger.info(f"[SEARCH MOVIES] Найдено фильмов с актёром '{mentioned_actor}': {len(candidate_indices)}")
+            logger.info(f"[SEARCH MOVIES] Найдено фильмов с актёром/режиссёром '{actor_name_for_search}': {len(candidate_indices)}")
         else:
             # Обычный поиск - берём все результаты
             candidate_indices = I[0].tolist()
@@ -746,11 +759,21 @@ def search_movies(query, top_k=15):
                 if year_int > 2000:
                     freshness_boost = 25  # бонус за свежесть
             
+            # Буст за полное имя актёра/режиссёра (+400 если найдено)
+            actor_boost = 0
+            if mentioned_actor_en:
+                actors_lower = str(row.get('actors_str', '')).lower() if 'actors_str' in row.index else ''
+                director_lower = str(row.get('director_str', '')).lower() if 'director_str' in row.index else ''
+                actor_name_for_search = query_en.lower().strip()
+                if actor_name_for_search in actors_lower or actor_name_for_search in director_lower:
+                    actor_boost = 400
+                    logger.info(f"[SEARCH MOVIES] Полное имя '{actor_name_for_search}' найдено → +400 для {imdb_id_clean}")
+            
             # Базовый семантический score
             base_score = 1.0 - distance
             
             # Итоговый score
-            score = base_score + (overview_keyword_matches * 25.0) + overview_boost + freshness_boost + popularity_boost
+            score = base_score + (overview_keyword_matches * 25.0) + overview_boost + freshness_boost + popularity_boost + actor_boost
             
             results.append({
                 'imdb_id': imdb_id_clean,
@@ -763,6 +786,7 @@ def search_movies(query, top_k=15):
                 'overview_boost': overview_boost,
                 'freshness_boost': freshness_boost,
                 'popularity_boost': popularity_boost,
+                'actor_boost': actor_boost,
                 'score': score
             })
         
@@ -771,7 +795,7 @@ def search_movies(query, top_k=15):
         
         logger.info(f"[SEARCH MOVIES] Результаты приоритизированы, возвращаем {len(results)} фильмов")
         if results:
-            logger.info(f"[SEARCH MOVIES] Топ-3: {[(r['title'], r['overview_keyword_matches'], r['overview_boost'], r['freshness_boost'], r['popularity_boost'], r['score']) for r in results[:3]]}")
+            logger.info(f"[SEARCH MOVIES] Топ-3: {[(r['title'], r['overview_keyword_matches'], r['overview_boost'], r['freshness_boost'], r['popularity_boost'], r['actor_boost'], r['score']) for r in results[:3]]}")
         return results
     except Exception as e:
         logger.error(f"[SEARCH MOVIES] Ошибка поиска фильмов: {e}", exc_info=True)
