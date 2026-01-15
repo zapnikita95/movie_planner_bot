@@ -649,11 +649,9 @@ def series_subscribe_callback(call):
         # Обновление сообщения - используем show_film_info_with_buttons для обновления описания
         logger.info("[SERIES SUBSCRIBE] Обновление описания через show_film_info_with_buttons")
         try:
-            # Импорт extract_movie_info УДАЛЁН — он уже есть в начале файла
-            
             from moviebot.bot.handlers.series import show_film_info_with_buttons
             
-            # Получаем link из БД
+            # Получаем link
             link = None
             conn_local = get_db_connection()
             cursor_local = get_db_cursor()
@@ -664,22 +662,17 @@ def series_subscribe_callback(call):
                     if link_row:
                         link = link_row.get('link') if isinstance(link_row, dict) else link_row[0]
             finally:
-                try:
-                    cursor_local.close()
-                except:
-                    pass
-                try:
-                    conn_local.close()
-                except:
-                    pass
+                try: cursor_local.close()
+                except: pass
+                try: conn_local.close()
+                except: pass
             
             if not link:
                 link = f"https://www.kinopoisk.ru/series/{kp_id}/"
             
-            # Получаем информацию из API
             info = extract_movie_info(link)
             if not info:
-                # Если API не сработал, получаем из БД
+                # fallback из БД (оставь как есть)
                 conn_local = get_db_connection()
                 cursor_local = get_db_cursor()
                 try:
@@ -697,18 +690,36 @@ def series_subscribe_callback(call):
                                 'is_series': bool(db_row.get('is_series') if isinstance(db_row, dict) else (db_row[6] if len(db_row) > 6 else 0))
                             }
                 finally:
-                    try:
-                        cursor_local.close()
-                    except:
-                        pass
-                    try:
-                        conn_local.close()
-                    except:
-                        pass
+                    try: cursor_local.close()
+                    except: pass
+                    try: conn_local.close()
+                    except: pass
             
             if info:
                 message_id = call.message.message_id if call.message else None
                 message_thread_id = getattr(call.message, 'message_thread_id', None)
+                
+                # ПЕРЕЧИТЫВАЕМ is_subscribed ПОСЛЕ COMMIT
+                conn_local = get_db_connection()
+                cursor_local = get_db_cursor()
+                is_subscribed_now = False
+                try:
+                    with db_lock:
+                        cursor_local.execute("""
+                            SELECT subscribed 
+                            FROM series_subscriptions 
+                            WHERE chat_id = %s AND film_id = %s AND user_id = %s
+                        """, (chat_id, film_id, user_id))
+                        row = cursor_local.fetchone()
+                        if row:
+                            is_subscribed_now = bool(row[0] if isinstance(row, tuple) else row.get('subscribed'))
+                finally:
+                    try: cursor_local.close()
+                    except: pass
+                    try: conn_local.close()
+                    except: pass
+                
+                logger.info(f"[SERIES SUBSCRIBE] Перечитано is_subscribed = {is_subscribed_now}")
                 
                 show_film_info_with_buttons(
                     chat_id=chat_id,
@@ -716,11 +727,12 @@ def series_subscribe_callback(call):
                     info=info,
                     link=link,
                     kp_id=int(kp_id),
-                    existing=None,  # Будет получено внутри функции через get_film_current_state
+                    existing=None,
                     message_id=message_id,
-                    message_thread_id=message_thread_id
+                    message_thread_id=message_thread_id,
+                    override_is_subscribed=is_subscribed_now   # ← ПЕРЕДАЁМ ЗДЕСЬ
                 )
-                logger.info("[SERIES SUBSCRIBE] Описание обновлено через show_film_info_with_buttons")
+                logger.info("[SERIES SUBSCRIBE] Описание обновлено")
             else:
                 logger.warning("[SERIES SUBSCRIBE] Не удалось получить информацию для обновления описания")
         
