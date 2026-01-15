@@ -235,6 +235,8 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
 
 def send_ticket_notification(chat_id, plan_id):
     """Отправляет напоминание с билетами за 10 минут до сеанса"""
+    from moviebot.database.db_connection import get_db_connection, get_db_cursor
+    
     conn_local = get_db_connection()
     cursor_local = get_db_cursor()
     try:
@@ -795,21 +797,27 @@ def check_and_send_plan_notifications():
 def clean_home_plans():
     """Ежедневно удаляет планы дома на вчерашний день, если по фильму нет оценок.
     Также удаляет все планы дома на прошедшие выходные (суббота и воскресенье) в понедельник."""
+    from moviebot.database.db_connection import get_db_connection, get_db_cursor
+    
     now = datetime.now(plans_tz)
     today = now.date()
     yesterday = (now - timedelta(days=1)).date()
     today_weekday = today.weekday()  # 0 = Monday, 6 = Sunday
 
     deleted_count = 0
+    
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
 
-    with db_lock:
+    try:
+        with db_lock:
         # Если сегодня понедельник, удаляем все планы дома на прошедшие выходные (суббота и воскресенье)
         if today_weekday == 0:  # Monday
             # Находим субботу и воскресенье прошлой недели
             saturday = yesterday - timedelta(days=1)  # Вчера было воскресенье, значит суббота - позавчера
             sunday = yesterday
 
-            cursor.execute('''
+            cursor_local.execute('''
                 SELECT p.id, p.film_id, p.chat_id, m.title, m.link
                 FROM plans p
                 JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
@@ -817,7 +825,7 @@ def clean_home_plans():
                 AND DATE(p.plan_datetime AT TIME ZONE 'Europe/Moscow') IN (%s, %s)
             ''', (saturday, sunday))
 
-            weekend_rows = cursor.fetchall()
+            weekend_rows = cursor_local.fetchall()
 
             for row in weekend_rows:
                 plan_id = row.get('id') if isinstance(row, dict) else row[0]
@@ -826,7 +834,7 @@ def clean_home_plans():
                 title = row.get('title') if isinstance(row, dict) else row[3]
                 link = row.get('link') if isinstance(row, dict) else row[4]
                 
-                cursor.execute('DELETE FROM plans WHERE id = %s', (plan_id,))
+                cursor_local.execute('DELETE FROM plans WHERE id = %s', (plan_id,))
                 deleted_count += 1
                 
                 if bot:
@@ -841,13 +849,13 @@ def clean_home_plans():
             logger.info(f"Очищены планы дома на выходные: {len(weekend_rows)} планов")
         
         # Находим планы дома на вчера (используем AT TIME ZONE для корректной работы с TIMESTAMP WITH TIME ZONE)
-        cursor.execute('''
+        cursor_local.execute('''
             SELECT p.id, p.film_id, p.chat_id
             FROM plans p
             WHERE p.plan_type = 'home' AND DATE(p.plan_datetime AT TIME ZONE 'Europe/Moscow') = %s
         ''', (yesterday,))
 
-        rows = cursor.fetchall()
+        rows = cursor_local.fetchall()
 
         for row in rows:
             # RealDictCursor возвращает словари, но поддерживает доступ по индексу
@@ -856,14 +864,14 @@ def clean_home_plans():
             chat_id = row.get('chat_id') if isinstance(row, dict) else row[2]
 
             # Проверяем, есть ли оценки по фильму
-            cursor.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+            cursor_local.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
 
-            count_row = cursor.fetchone()
+            count_row = cursor_local.fetchone()
 
             count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
 
             if count == 0:
-                cursor.execute('DELETE FROM plans WHERE id = %s', (plan_id,))
+                cursor_local.execute('DELETE FROM plans WHERE id = %s', (plan_id,))
                 deleted_count += 1
 
                 if bot:
@@ -872,7 +880,17 @@ def clean_home_plans():
                     except:
                         pass
 
-        conn.commit()
+        conn_local.commit()
+
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
     logger.info(f"Очищены планы дома без оценок: {deleted_count} планов")
 
@@ -880,6 +898,7 @@ def clean_home_plans():
 
 def clean_cinema_plans():
     """Каждый понедельник удаляет все планы кино (фильмы) и планы мероприятий, которые прошли более 1 дня назад"""
+    from moviebot.database.db_connection import get_db_connection, get_db_cursor
     from datetime import datetime, timedelta
     import pytz
     
@@ -1225,6 +1244,8 @@ def check_series_for_new_episodes(chat_id, film_id, kp_id, user_id):
 
 def send_rating_reminder(chat_id, film_id, film_title, user_id):
     """Отправляет напоминание пользователю об оценке фильма на следующий день после просмотра"""
+    from moviebot.database.db_connection import get_db_connection, get_db_cursor
+    
     conn_local = get_db_connection()
     cursor_local = get_db_cursor()
     
@@ -1291,6 +1312,8 @@ def send_rating_reminder(chat_id, film_id, film_title, user_id):
 
 def check_subscription_payments():
     """Проверяет подписки и отправляет уведомления за день до списания"""
+    from moviebot.database.db_connection import get_db_connection, get_db_cursor
+    
     if not bot:
         return
     
@@ -1651,6 +1674,7 @@ def send_successful_payment_notification(
             
             # Получаем реальную сумму последнего платежа (для upgrade — доплата)
             actual_amount = sub_price
+            from moviebot.database.db_connection import get_db_connection, get_db_cursor
             conn_local = get_db_connection()
             cursor_local = get_db_cursor()
             try:
@@ -2178,6 +2202,8 @@ def process_recurring_payments():
 
 def get_random_events_enabled(chat_id):
     """Проверяет, включены ли случайные события для чата"""
+    from moviebot.database.db_connection import get_db_connection, get_db_cursor
+    
     conn_local = get_db_connection()
     cursor_local = get_db_cursor()
     try:
@@ -2201,6 +2227,8 @@ def get_random_events_enabled(chat_id):
 
 def was_event_sent_today(chat_id, event_type):
     """Проверяет, было ли отправлено событие/уведомление сегодня для данного чата"""
+    from moviebot.database.db_connection import get_db_connection, get_db_cursor
+    
     if not bot:
         return False
     
@@ -2233,6 +2261,8 @@ def was_event_sent_today(chat_id, event_type):
 
 def mark_event_sent(chat_id, event_type):
     """Отмечает, что событие/уведомление было отправлено сегодня"""
+    from moviebot.database.db_connection import get_db_connection, get_db_cursor
+    
     if not bot:
         return
     
@@ -2265,6 +2295,8 @@ def mark_event_sent(chat_id, event_type):
 def check_weekend_schedule():
     """Проверяет расписание на выходные (пт-сб-вс) и предлагает рандомный фильм, если нет планов домашнего просмотра.
     Выполняется только в пятницу. Если нет планов вообще (ни дома, ни в кино), отправляет уведомление раз в неделю."""
+    from moviebot.database.db_connection import get_db_connection, get_db_cursor
+    
     if not bot:
         return
     
