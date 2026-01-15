@@ -2235,6 +2235,7 @@ def register_series_handlers(bot_param):
                             conn_local.close()
                         except:
                             pass
+                
                     
                     # Убираем дубликаты
                     years = sorted(list(set(years)))
