@@ -2115,8 +2115,14 @@ def register_series_handlers(bot_param):
                 bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
             
             return
-
-def _show_period_step(call, chat_id, user_id):
+        except Exception as e:
+            logger.error(f"[RANDOM CALLBACK] Ошибка в handle_rand_mode: {e}", exc_info=True)
+            try:
+                bot.answer_callback_query(call.id, "❌ Произошла ошибка", show_alert=True)
+            except:
+                pass
+    
+    def _show_period_step(call, chat_id, user_id):
         """Показывает шаг выбора периода для рандома с учетом типа контента (films/series/mixed)"""
         try:
             logger.info(f"[RANDOM] Showing period step for user {user_id}")
@@ -2361,17 +2367,50 @@ def _show_period_step(call, chat_id, user_id):
             markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
             markup.add(InlineKeyboardButton("⬅️ Назад к режимам", callback_data="rand_mode:back"))
             
-            bot.answer_callback_query(call.id)
-            # Определяем номер шага в зависимости от режима
+            # Определяем номер шага в зависимости от режима (теперь это шаг 2, так как шаг 1 - выбор типа контента)
             if mode in ['my_votes', 'group_votes']:
-                step_text = "🎲 <b>Шаг 1/2: Выберите период</b>"
+                step_text = "🎲 <b>Шаг 2/3: Выберите период</b>"
             elif mode == 'kinopoisk':
-                step_text = "🎲 <b>Шаг 1/3: Выберите период</b>"
+                step_text = "🎲 <b>Шаг 2/4: Выберите период</b>"
             else:
-                step_text = "🎲 <b>Шаг 1/4: Выберите период</b>"
-            text = f"{mode_description}\n\n{step_text}\n\n(можно выбрать несколько или пропустить)"
-            bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-            logger.info(f"[RANDOM CALLBACK] ✅ Mode selected: {mode}, moving to period selection, user_id={user_id}")
+                step_text = "🎲 <b>Шаг 2/5: Выберите период</b>"
+            
+            # Добавляем информацию о выбранном типе контента
+            content_type_text = ""
+            if content_type == 'films':
+                content_type_text = "\n🎬 Выбрано: Фильмы"
+            elif content_type == 'series':
+                content_type_text = "\n📺 Выбрано: Сериалы"
+            else:
+                content_type_text = "\n🎬📺 Выбрано: Смешанный режим"
+            
+            try:
+                bot.answer_callback_query(call.id)
+            except Exception as e:
+                error_str = str(e)
+                if "query is too old" not in error_str and "query ID is invalid" not in error_str and "timeout expired" not in error_str:
+                    logger.warning(f"[RANDOM PERIOD] Не удалось ответить на callback query: {e}")
+            
+            mode_descriptions = {
+                'database': '🎲 <b>Рандом по своей базе</b>\n\nВыбираем случайный фильм из вашей базы по заданным фильтрам.',
+                'kinopoisk': '🎬 <b>Рандом по кинопоиску</b>\n\nНайдите случайный фильм по вашим фильтрам.',
+                'my_votes': '⭐ <b>По моим оценкам (9-10)</b>\n\nПолучите рекомендацию, основанную на ваших оценках на Кинопоиске.',
+                'group_votes': '👥 <b>По оценкам в базе (9-10)</b>\n\nПолучите рекомендацию, основанную на оценках в вашей локальной базе.\n\n💡 <i>Чем больше оценок в базе, тем больше будет вариантов фильмов и жанров.</i>'
+            }
+            mode_description = mode_descriptions.get(mode, '')
+            
+            text = f"{mode_description}{content_type_text}\n\n{step_text}\n\n(можно выбрать несколько или пропустить)"
+            
+            try:
+                bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            except Exception as e:
+                logger.error(f"[RANDOM PERIOD] Ошибка редактирования сообщения: {e}", exc_info=True)
+                try:
+                    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                except:
+                    pass
+            
+            logger.info(f"[RANDOM CALLBACK] ✅ Period step shown: mode={mode}, content_type={content_type}, user_id={user_id}")
         except Exception as e:
             logger.error(f"[RANDOM CALLBACK] ❌ ERROR in handle_rand_mode: {e}", exc_info=True)
             try:
@@ -2637,23 +2676,47 @@ def _show_period_step(call, chat_id, user_id):
                 
                 selected = ', '.join(periods) if periods else 'ничего'
                 
-                # Определяем текст шага в зависимости от режима
+                # Определяем текст шага в зависимости от режима (теперь это шаг 2, так как шаг 1 - выбор типа контента)
                 mode = user_random_state[user_id].get('mode')
+                content_type = user_random_state[user_id].get('content_type', 'mixed')
+                content_type_text = ""
+                if content_type == 'films':
+                    content_type_text = "\n🎬 Выбрано: Фильмы"
+                elif content_type == 'series':
+                    content_type_text = "\n📺 Выбрано: Сериалы"
+                else:
+                    content_type_text = "\n🎬📺 Выбрано: Смешанный режим"
+                
+                mode_descriptions = {
+                    'database': '🎲 <b>Рандом по своей базе</b>\n\nВыбираем случайный фильм из вашей базы по заданным фильтрам.',
+                    'kinopoisk': '🎬 <b>Рандом по кинопоиску</b>\n\nНайдите случайный фильм по вашим фильтрам.',
+                    'my_votes': '⭐ <b>По моим оценкам (9-10)</b>\n\nПолучите рекомендацию, основанную на ваших оценках на Кинопоиске.',
+                    'group_votes': '👥 <b>По оценкам в базе (9-10)</b>\n\nПолучите рекомендацию, основанную на оценках в вашей локальной базе.\n\n💡 <i>Чем больше оценок в базе, тем больше будет вариантов фильмов и жанров.</i>'
+                }
+                mode_description = mode_descriptions.get(mode, '')
+                
                 if mode == 'kinopoisk':
-                    step_text = "🎲 <b>Шаг 1/3: Выберите период</b>"
+                    step_text = "🎲 <b>Шаг 2/4: Выберите период</b>"
                     mode_description = '🎬 <b>Рандом по кинопоиску</b>\n\nНайдите случайный фильм на Кинопоиске по заданным фильтрам.'
                     text = f"{mode_description}\n\n{step_text}\n\nВыбрано: {selected}\n\n(можно выбрать несколько или пропустить)"
                 elif mode == 'group_votes':
-                    step_text = "🎲 <b>Шаг 1/2: Выберите период</b>"
+                    step_text = "🎲 <b>Шаг 2/3: Выберите период</b>"
                     mode_description = '👥 <b>По оценкам в базе (7.5+)</b>\n\nНа основании фильмов в вашей базе будет выбран случайный фильм на Кинопоиске, который может вам понравиться.'
-                    text = f"{mode_description}\n\n{step_text}\n\nВыбрано: {selected}\n\n(можно выбрать несколько или пропустить)"
+                    text = f"{mode_description}{content_type_text}\n\n{step_text}\n\nВыбрано: {selected}\n\n(можно выбрать несколько или пропустить)"
                 elif mode == 'my_votes':
-                    step_text = "🎲 <b>Шаг 1/2: Выберите период</b>"
+                    step_text = "🎲 <b>Шаг 2/3: Выберите период</b>"
                     mode_description = '⭐ <b>По моим оценкам (9-10)</b>\n\nПолучите рекомендацию, основанную на ваших оценках на Кинопоиске.'
-                    text = f"{mode_description}\n\n{step_text}\n\nВыбрано: {selected}\n\n(можно выбрать несколько или пропустить)"
+                    text = f"{mode_description}{content_type_text}\n\n{step_text}\n\nВыбрано: {selected}\n\n(можно выбрать несколько или пропустить)"
                 else:
-                    step_text = "🎲 <b>Шаг 1/4: Выберите период</b>"
-                    text = f"{step_text}\n\nВыбрано: {selected}\n\n(можно выбрать несколько)"
+                    step_text = "🎲 <b>Шаг 2/5: Выберите период</b>"
+                    mode_descriptions = {
+                        'database': '🎲 <b>Рандом по своей базе</b>\n\nВыбираем случайный фильм из вашей базы по заданным фильтрам.',
+                        'kinopoisk': '🎬 <b>Рандом по кинопоиску</b>\n\nНайдите случайный фильм по вашим фильтрам.',
+                        'my_votes': '⭐ <b>По моим оценкам (9-10)</b>\n\nПолучите рекомендацию, основанную на ваших оценках на Кинопоиске.',
+                        'group_votes': '👥 <b>По оценкам в базе (9-10)</b>\n\nПолучите рекомендацию, основанную на оценках в вашей локальной базе.\n\n💡 <i>Чем больше оценок в базе, тем больше будет вариантов фильмов и жанров.</i>'
+                    }
+                    mode_description = mode_descriptions.get(mode, '')
+                    text = f"{mode_description}{content_type_text}\n\n{step_text}\n\nВыбрано: {selected}\n\n(можно выбрать несколько)"
                 
                 try:
                     bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
@@ -2696,8 +2759,41 @@ def _show_period_step(call, chat_id, user_id):
                 markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_year:skip"))
             markup.add(InlineKeyboardButton("⬅️ Назад к режимам", callback_data="rand_mode:back"))
             
+            content_type = state.get('content_type', 'mixed')
+            content_type_text = ""
+            if content_type == 'films':
+                content_type_text = "\n🎬 Выбрано: Фильмы"
+            elif content_type == 'series':
+                content_type_text = "\n📺 Выбрано: Сериалы"
+            else:
+                content_type_text = "\n🎬📺 Выбрано: Смешанный режим"
+            
+            content_type = state.get('content_type', 'mixed')
+            content_type_text = ""
+            if content_type == 'films':
+                content_type_text = "\n🎬 Выбрано: Фильмы"
+            elif content_type == 'series':
+                content_type_text = "\n📺 Выбрано: Сериалы"
+            else:
+                content_type_text = "\n🎬📺 Выбрано: Смешанный режим"
+            
             selected = ', '.join(selected_periods) if selected_periods else 'ничего'
-            text = f"{mode_description}\n\n🎲 <b>Шаг 1/3: Выберите период</b>\n\nВыбрано: {selected}\n\n(можно выбрать несколько или пропустить)"
+            # Для режима kinopoisk это шаг 2/4 (тип контента, период, жанр, результат)
+            mode = state.get('mode')
+            if mode == 'kinopoisk':
+                step_text = "🎲 <b>Шаг 2/4: Выберите период</b>"
+            else:
+                step_text = "🎲 <b>Шаг 2/5: Выберите период</b>"
+            
+            mode_descriptions = {
+                'database': '🎲 <b>Рандом по своей базе</b>\n\nВыбираем случайный фильм из вашей базы по заданным фильтрам.',
+                'kinopoisk': '🎬 <b>Рандом по кинопоиску</b>\n\nНайдите случайный фильм по вашим фильтрам.',
+                'my_votes': '⭐ <b>По моим оценкам (9-10)</b>\n\nПолучите рекомендацию, основанную на ваших оценках на Кинопоиске.',
+                'group_votes': '👥 <b>По оценкам в базе (9-10)</b>\n\nПолучите рекомендацию, основанную на оценках в вашей локальной базе.\n\n💡 <i>Чем больше оценок в базе, тем больше будет вариантов фильмов и жанров.</i>'
+            }
+            mode_description = mode_descriptions.get(mode, '')
+            
+            text = f"{mode_description}{content_type_text}\n\n{step_text}\n\nВыбрано: {selected}\n\n(можно выбрать несколько или пропустить)"
             
             try:
                 bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
@@ -3065,9 +3161,17 @@ def _show_period_step(call, chat_id, user_id):
             selected_text = f"\n\nВыбрано: {', '.join(selected_directors)}" if selected_directors else ""
             mode_description = '👥 <b>По оценкам в базе (7.5+)</b>\n\nНа основании фильмов в вашей базе будет выбран случайный фильм на Кинопоиске, который может вам понравиться.'
             try:
-                bot.edit_message_text(f"{mode_description}\n\n🎥 <b>Шаг 3/4: Выберите режиссёра</b>\n\n(можно выбрать несколько){selected_text}", 
+                # Для режима group_votes это шаг 3/3 (период, жанр, режиссёр)
+                step_text = "🎥 <b>Шаг 3/3: Выберите режиссёра</b>"
+                
+                bot.edit_message_text(f"{mode_description}\n\n{step_text}\n\n(можно выбрать несколько){selected_text}", 
                                     chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                bot.answer_callback_query(call.id)
+                try:
+                    bot.answer_callback_query(call.id)
+                except Exception as e:
+                    error_str = str(e)
+                    if "query is too old" not in error_str and "query ID is invalid" not in error_str and "timeout expired" not in error_str:
+                        logger.warning(f"[RANDOM DIRECTOR GROUP_VOTES] Не удалось ответить на callback query: {e}")
                 logger.info(f"[RANDOM] Director step shown for group_votes, user_id={user_id}, selected={len(selected_directors)}")
             except Exception as e:
                 logger.error(f"[RANDOM] Error showing director step for group_votes: {e}", exc_info=True)
@@ -3209,9 +3313,22 @@ def _show_period_step(call, chat_id, user_id):
             selected_text = f"\n\nВыбрано: {', '.join(selected_actors)}" if selected_actors else ""
             mode_description = '👥 <b>По оценкам в базе (7.5+)</b>\n\nНа основании фильмов в вашей базе будет выбран случайный фильм на Кинопоиске, который может вам понравиться.'
             try:
-                bot.edit_message_text(f"{mode_description}\n\n🎭 <b>Шаг 4/4: Выберите актёра</b>\n\n(можно выбрать несколько){selected_text}", 
+                # Для режима group_votes это шаг 4/4 (период, жанр, режиссёр, актёр)
+                # Но если режиссёр пропущен, то это шаг 3/3
+                directors = state.get('directors', [])
+                if directors:
+                    step_text = "🎭 <b>Шаг 4/4: Выберите актёра</b>"
+                else:
+                    step_text = "🎭 <b>Шаг 3/3: Выберите актёра</b>"
+                
+                bot.edit_message_text(f"{mode_description}\n\n{step_text}\n\n(можно выбрать несколько){selected_text}", 
                                     chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                bot.answer_callback_query(call.id)
+                try:
+                    bot.answer_callback_query(call.id)
+                except Exception as e:
+                    error_str = str(e)
+                    if "query is too old" not in error_str and "query ID is invalid" not in error_str and "timeout expired" not in error_str:
+                        logger.warning(f"[RANDOM ACTOR GROUP_VOTES] Не удалось ответить на callback query: {e}")
                 logger.info(f"[RANDOM] Actor step shown for group_votes, user_id={user_id}, selected={len(selected_actors)}")
             except Exception as e:
                 logger.error(f"[RANDOM] Error showing actor step for group_votes: {e}", exc_info=True)
@@ -3400,9 +3517,17 @@ def _show_period_step(call, chat_id, user_id):
             selected_text = f"\n\nВыбрано: {', '.join(selected_directors)}" if selected_directors else ""
             mode_description = '⭐ <b>По моим оценкам (9-10)</b>\n\nПолучите рекомендацию, основанную на ваших оценках на Кинопоиске.'
             try:
-                bot.edit_message_text(f"{mode_description}\n\n🎥 <b>Шаг 3/4: Выберите режиссёра</b>\n\n(можно выбрать несколько){selected_text}", 
+                # Для режима my_votes это шаг 3/3 (период, жанр, режиссёр)
+                step_text = "🎥 <b>Шаг 3/3: Выберите режиссёра</b>"
+                
+                bot.edit_message_text(f"{mode_description}\n\n{step_text}\n\n(можно выбрать несколько){selected_text}", 
                                     chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                bot.answer_callback_query(call.id)
+                try:
+                    bot.answer_callback_query(call.id)
+                except Exception as e:
+                    error_str = str(e)
+                    if "query is too old" not in error_str and "query ID is invalid" not in error_str and "timeout expired" not in error_str:
+                        logger.warning(f"[RANDOM DIRECTOR MY_VOTES] Не удалось ответить на callback query: {e}")
                 logger.info(f"[RANDOM] Director step shown for my_votes, user_id={user_id}, selected={len(selected_directors)}")
             except Exception as e:
                 logger.error(f"[RANDOM] Error showing director step for my_votes: {e}", exc_info=True)
@@ -3585,9 +3710,22 @@ def _show_period_step(call, chat_id, user_id):
             selected_text = f"\n\nВыбрано: {', '.join(selected_actors)}" if selected_actors else ""
             mode_description = '⭐ <b>По моим оценкам (9-10)</b>\n\nПолучите рекомендацию, основанную на ваших оценках на Кинопоиске.'
             try:
-                bot.edit_message_text(f"{mode_description}\n\n🎭 <b>Шаг 4/4: Выберите актёра</b>\n\n(можно выбрать несколько){selected_text}", 
+                # Для режима my_votes это шаг 4/4 (период, жанр, режиссёр, актёр)
+                # Но если режиссёр пропущен, то это шаг 3/3
+                directors = state.get('directors', [])
+                if directors:
+                    step_text = "🎭 <b>Шаг 4/4: Выберите актёра</b>"
+                else:
+                    step_text = "🎭 <b>Шаг 3/3: Выберите актёра</b>"
+                
+                bot.edit_message_text(f"{mode_description}\n\n{step_text}\n\n(можно выбрать несколько){selected_text}", 
                                     chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-                bot.answer_callback_query(call.id)
+                try:
+                    bot.answer_callback_query(call.id)
+                except Exception as e:
+                    error_str = str(e)
+                    if "query is too old" not in error_str and "query ID is invalid" not in error_str and "timeout expired" not in error_str:
+                        logger.warning(f"[RANDOM ACTOR MY_VOTES] Не удалось ответить на callback query: {e}")
                 logger.info(f"[RANDOM] Actor step shown for my_votes, user_id={user_id}, selected={len(selected_actors)}")
             except Exception as e:
                 logger.error(f"[RANDOM] Error showing actor step for my_votes: {e}", exc_info=True)
@@ -5207,10 +5345,17 @@ def _show_period_step(call, chat_id, user_id):
                         pass
                 
                 # Выбираем до 5 фильмов из базы со средней оценкой >= 7.5, которые соответствуют выбранным критериям
+                # Учитываем content_type: films - только фильмы, series - только сериалы, mixed - оба
+                is_series_filter = ""
+                if content_type == 'films':
+                    is_series_filter = "AND m.is_series = FALSE"
+                elif content_type == 'series':
+                    is_series_filter = "AND m.is_series = TRUE"
+                
                 base_query = """
                     SELECT m.kp_id, m.title, m.year, m.genres
                     FROM movies m
-                    WHERE m.chat_id = %s AND m.kp_id IS NOT NULL
+                    WHERE m.chat_id = %s AND m.kp_id IS NOT NULL """ + is_series_filter + """
                     AND EXISTS (
                         SELECT 1 FROM ratings r 
                         WHERE r.film_id = m.id AND r.chat_id = m.chat_id AND (r.is_imported = FALSE OR r.is_imported IS NULL) 
@@ -5332,18 +5477,38 @@ def _show_period_step(call, chat_id, user_id):
                         last_request_time = time.time()
                     
                     try:
-                        link = f"https://www.kinopoisk.ru/film/{similar_kp_id}/"
+                        # Формируем ссылку в зависимости от типа
+                        # Сначала пробуем получить информацию из API, чтобы определить тип
+                        from moviebot.api.kinopoisk_api import get_film_info
+                        film_api_info = None
+                        try:
+                            film_api_info = get_film_info(similar_kp_id)
+                        except:
+                            pass
+                        
+                        if film_api_info and film_api_info.get('type') == 'TV_SERIES':
+                            link = f"https://www.kinopoisk.ru/series/{similar_kp_id}/"
+                        else:
+                            link = f"https://www.kinopoisk.ru/film/{similar_kp_id}/"
+                        
                         film_info = extract_movie_info(link)
                         request_count += 1
                         
                         if film_info and check_film_matches_criteria(film_info, periods, genres, directors, actors):
+                            # Проверяем, что фильм соответствует content_type
+                            is_series = film_info.get('is_series', False)
+                            if content_type == 'films' and is_series:
+                                continue  # Пропускаем сериалы, если выбраны только фильмы
+                            elif content_type == 'series' and not is_series:
+                                continue  # Пропускаем фильмы, если выбраны только сериалы
+                            
                             # Проверяем, что фильм не в базе
                             if str(similar_kp_id) not in exclude_kp_ids:
                                 filtered_films.append({
                                     'kp_id': str(similar_kp_id),
                                     'title': film_info.get('title', 'Без названия'),
                                     'year': film_info.get('year', '—'),
-                                    'is_series': film_info.get('is_series', False)
+                                    'is_series': is_series
                                 })
                                 
                                 # Ограничиваем количество фильмов для производительности
@@ -5377,7 +5542,8 @@ def _show_period_step(call, chat_id, user_id):
                     del user_random_state[user_id]
                     return
             elif mode == 'database':
-                # Режим "Рандом по своей базе" - только фильмы из базы
+                # Режим "Рандом по своей базе" - только фильмы/сериалы из базы
+                # Учитываем content_type: films - только фильмы, series - только сериалы, mixed - оба
                 # Никаких дополнительных фильтров, только базовые (watched = 0, не в планах)
                 pass
             
@@ -5455,10 +5621,18 @@ def _show_period_step(call, chat_id, user_id):
             
             if not candidates:
                 # Ищем похожие фильмы из запланированных
+                # Учитываем content_type: films - только фильмы, series - только сериалы, mixed - оба
+                is_series_filter_similar = ""
+                if content_type == 'films':
+                    is_series_filter_similar = "AND m.is_series = FALSE"
+                elif content_type == 'series':
+                    is_series_filter_similar = "AND m.is_series = TRUE"
+                
                 similar_query = """SELECT m.title, m.year, m.link, m.kp_id
                                    FROM movies m 
                                    JOIN plans p ON m.id = p.film_id 
-                                   WHERE m.chat_id = %s AND m.watched = 0"""
+                                   WHERE m.chat_id = %s AND m.watched = 0 """ + is_series_filter_similar + """
+                """
                 similar_params = [chat_id]
                 
                 # Применяем те же фильтры для поиска похожих

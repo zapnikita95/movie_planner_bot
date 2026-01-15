@@ -1031,6 +1031,7 @@ def search_movies(query, top_k=15):
         # Извлекаем ключевые слова для обычного keyword-матчинга
         keywords = _extract_keywords(query_en)
         query_en_lower = query_en.lower()
+        query_en_words = query_en_lower.split()
         
         # Загружаем топ-списки актёров и режиссёров
         top_actors_set, top_directors_set = load_top_actors_and_directors()
@@ -1038,7 +1039,6 @@ def search_movies(query, top_k=15):
         # Пытаемся извлечь имя актёра/режиссёра из запроса
         # Проверяем все возможные комбинации слов (2-4 слова)
         mentioned_actor_en = None
-        query_en_words = query_en_lower.split()
         
         # Сначала пытаемся найти в топ-списках (если они не пустые)
         if top_actors_set or top_directors_set:
@@ -1228,35 +1228,39 @@ def search_movies(query, top_k=15):
             # - 2-5 актёры = +600 (большой буст)
             # - 6+ актёры = +400 (обычный буст)
             actor_boost = 0
+            director_boost = 0
             if mentioned_actor_en:
+                # Нормализуем имя для поиска
                 actor_name_for_search = _normalize_text(mentioned_actor_en)
+                actors_str = row.get('actors_str', '')
+                director_str = row.get('director_str', '')
                 
-                # Проверяем, является ли имя актёром или режиссёром из топ-списков
-                is_actor = top_actors_set and actor_name_for_search in top_actors_set
-                is_director = top_directors_set and actor_name_for_search in top_directors_set
+                # Проверяем в актёрах (приоритет №1)
+                if 'actors_str' in row.index and pd.notna(actors_str):
+                    actors_normalized = _normalize_text(str(actors_str))
+                    if actor_name_for_search in actors_normalized:
+                        # Определяем позицию актёра в списке (примерно, по порядку слов)
+                        actors_list = actors_normalized.split(',')
+                        position = 0
+                        for idx, actor in enumerate(actors_list):
+                            if actor_name_for_search in actor:
+                                position = idx + 1
+                                break
+                        
+                        if position == 1:
+                            actor_boost = 1000  # 1-й актёр
+                        elif position <= 5:
+                            actor_boost = 600   # 2-5 актёры
+                        else:
+                            actor_boost = 400   # 6+ актёры
+                        logger.info(f"[SEARCH MOVIES] Актёр '{mentioned_actor_en}' найден в позиции {position} → +{actor_boost} для {imdb_id_clean}")
                 
-                # ПРИОРИТЕТ №1: Актёры (если имя в топ-актёрах)
-                if is_actor and 'actors_str' in row.index:
-                    actors_str = row.get('actors_str', '')
-                    if pd.notna(actors_str):
-                        actor_position = _get_actor_position(actors_str, actor_name_for_search)
-                        if actor_position is not None:
-                            if actor_position == 1:
-                                actor_boost = 1000  # Колоссальный буст за главную роль
-                                logger.info(f"[SEARCH MOVIES] Актёр '{actor_name_for_search}' на 1-й позиции → +1000 для {imdb_id_clean}")
-                            elif 2 <= actor_position <= 5:
-                                actor_boost = 600  # Большой буст за роль в первой пятёрке
-                                logger.info(f"[SEARCH MOVIES] Актёр '{actor_name_for_search}' на позиции {actor_position} → +600 для {imdb_id_clean}")
-                            else:
-                                actor_boost = 400  # Обычный буст
-                                logger.info(f"[SEARCH MOVIES] Актёр '{actor_name_for_search}' на позиции {actor_position} → +400 для {imdb_id_clean}")
-                
-                # ПРИОРИТЕТ №2: Режиссёры (такой же буст, если актёров нет)
-                elif is_director and not is_actor and 'director_str' in row.index:
-                    director_str = row.get('director_str', '')
-                    if pd.notna(director_str) and actor_name_for_search in _normalize_text(director_str):
-                        actor_boost = 400  # Для режиссёров всегда обычный буст
-                        logger.info(f"[SEARCH MOVIES] Режиссёр '{actor_name_for_search}' найден → +400 для {imdb_id_clean}")
+                # Проверяем в режиссёрах (приоритет №2, только если актёр не найден)
+                if actor_boost == 0 and 'director_str' in row.index and pd.notna(director_str):
+                    director_normalized = _normalize_text(str(director_str))
+                    if actor_name_for_search in director_normalized:
+                        director_boost = 400  # Режиссёр всегда +400
+                        logger.info(f"[SEARCH MOVIES] Режиссёр '{mentioned_actor_en}' найден → +{director_boost} для {imdb_id_clean}")
             
             # ПРИОРИТЕТ №2: Keyword-матчинг по overview (×25 за каждое совпадение)
             overview_keyword_matches = 0
@@ -1315,7 +1319,7 @@ def search_movies(query, top_k=15):
             # ПРИОРИТЕТ №4: title_boost (+5 за совпадение в названии)
             # При высоком FUZZINESS_LEVEL увеличиваем вес keyword-матчинга (синонимы важнее)
             keyword_multiplier = 25.0 + (FUZZINESS_LEVEL / 100.0) * 15.0  # От 25 до 40
-            score = base_score + actor_boost + (overview_keyword_matches * keyword_multiplier) + genre_boost + title_boost + overview_boost + freshness_boost + popularity_boost
+            score = base_score + actor_boost + director_boost + (overview_keyword_matches * keyword_multiplier) + genre_boost + title_boost + overview_boost + freshness_boost + popularity_boost
             
             results.append({
                 'imdb_id': imdb_id_clean,

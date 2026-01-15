@@ -805,7 +805,12 @@ def register_shazam_handlers(bot):
     def shazam_film_callback(call):
         """Обработчик выбора фильма из результатов поиска"""
         try:
-            bot.answer_callback_query(call.id)
+            try:
+                bot.answer_callback_query(call.id)
+            except Exception as e:
+                error_str = str(e)
+                if "query is too old" not in error_str and "query ID is invalid" not in error_str and "timeout expired" not in error_str:
+                    logger.warning(f"[SHAZAM FILM] Не удалось ответить на callback query: {e}")
             kp_id = call.data.split(":")[2]
             user_id = call.from_user.id
             chat_id = call.message.chat.id
