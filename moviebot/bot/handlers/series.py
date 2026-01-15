@@ -2077,9 +2077,11 @@ def register_series_handlers(bot_param):
             logger.info(f"[RANDOM CALLBACK] State found: {user_random_state[user_id]}")
             
             user_random_state[user_id]['mode'] = mode
-            user_random_state[user_id]['step'] = 'period'
+            # Первый этап - выбор типа контента (фильмы/сериалы/пропустить)
+            user_random_state[user_id]['step'] = 'content_type'
+            user_random_state[user_id]['content_type'] = None  # 'films', 'series', или 'mixed' (если пропустить)
             
-            logger.info(f"[RANDOM CALLBACK] State updated: mode={mode}, step=period")
+            logger.info(f"[RANDOM CALLBACK] State updated: mode={mode}, step=content_type")
             
             # Добавляем справку о режиме
             mode_descriptions = {
@@ -2090,15 +2092,42 @@ def register_series_handlers(bot_param):
             }
             mode_description = mode_descriptions.get(mode, '')
             
-            # Для режима kinopoisk пропускаем периоды и сразу переходим к выбору года и жанра
-            if mode == 'kinopoisk':
-                user_random_state[user_id]['step'] = 'year'
-                bot.answer_callback_query(call.id)
-                logger.info(f"[RANDOM CALLBACK] Mode kinopoisk selected, moving to year selection")
-                _show_year_step(call, chat_id, user_id)
-                return
+            # Показываем выбор типа контента
+            bot.answer_callback_query(call.id)
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("🎬 Фильмы", callback_data=f"rand_content_type:{mode}:films"))
+            markup.add(InlineKeyboardButton("📺 Сериалы", callback_data=f"rand_content_type:{mode}:series"))
+            markup.add(InlineKeyboardButton("▶️ Пропустить", callback_data=f"rand_content_type:{mode}:mixed"))
+            markup.add(InlineKeyboardButton("⬅️ Назад к режимам", callback_data="rand_mode:back"))
             
-            # Шаг 1: Выбор периода - показываем только те периоды, где есть фильмы
+            text = f"{mode_description}\n\nВыберите, будем искать сериалы или фильмы:"
+            
+            try:
+                bot.edit_message_text(
+                    text,
+                    chat_id,
+                    call.message.message_id,
+                    reply_markup=markup,
+                    parse_mode='HTML'
+                )
+            except Exception as e:
+                logger.error(f"[RANDOM CALLBACK] Ошибка редактирования сообщения: {e}", exc_info=True)
+                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+            
+            return
+    
+    def _show_period_step(call, chat_id, user_id):
+        """Показывает шаг выбора периода для рандома с учетом типа контента (films/series/mixed)"""
+        try:
+            logger.info(f"[RANDOM] Showing period step for user {user_id}")
+            
+            state = user_random_state.get(user_id, {})
+            mode = state.get('mode')
+            content_type = state.get('content_type', 'mixed')  # films, series, mixed
+            
+            logger.info(f"[RANDOM] Period step: mode={mode}, content_type={content_type}")
+            
+            # Шаг 1: Выбор периода - показываем только те периоды, где есть фильмы/сериалы
             all_periods = ["До 1980", "1980–1990", "1990–2000", "2000–2010", "2010–2020", "2020–сейчас"]
             available_periods = []
             
@@ -2367,80 +2396,111 @@ def register_series_handlers(bot_param):
     
     @bot_param.callback_query_handler(func=lambda call: call.data.startswith("rand_content_type:"))
     def handle_rand_content_type(call):
-        """Обработчик выбора типа контента для режима kinopoisk"""
+        """Обработчик выбора типа контента (фильмы/сериалы/пропустить) для всех режимов рандома"""
         try:
-            logger.info(f"[RANDOM CALLBACK] ===== CONTENT TYPE HANDLER: data={call.data}, user_id={call.from_user.id}")
+            logger.info(f"[RANDOM CONTENT TYPE] ===== START: data={call.data}, user_id={call.from_user.id}")
             user_id = call.from_user.id
             chat_id = call.message.chat.id
-
+            
+            # Парсим callback_data: rand_content_type:{mode}:{content_type}
+            data_parts = call.data.split(":", 2)
+            if len(data_parts) < 3:
+                bot.answer_callback_query(call.id, "Ошибка", show_alert=True)
+                return
+            
+            mode = data_parts[1]  # database, kinopoisk, my_votes, group_votes
+            content_type = data_parts[2]  # films, series, mixed
+            
             # Инициализируем состояние, если его нет
             if user_id not in user_random_state:
-                logger.info(f"[RANDOM CALLBACK] Состояние не найдено для user_id={user_id}, инициализируем новое")
+                logger.warning(f"[RANDOM CONTENT TYPE] Состояние не найдено для user_id={user_id}, инициализируем новое")
                 user_random_state[user_id] = {
                     'step': 'mode',
                     'mode': None,
+                    'content_type': None,
                     'periods': [],
                     'genres': [],
                     'directors': [],
                     'actors': []
                 }
-
+            
             state = user_random_state[user_id]
-            data = call.data.split(":", 1)[1]
+            state['mode'] = mode
+            state['content_type'] = content_type
             
-            mode = user_random_state[user_id].get('mode')
-            if mode != 'kinopoisk':
-                logger.warning(f"[RANDOM CALLBACK] Content type handler called for non-kinopoisk mode: {mode}")
-                bot.answer_callback_query(call.id, "❌ Неверный режим", show_alert=True)
-                return
-            
-            if data == "back":
-                # Возврат к выбору режима
-                logger.info(f"[RANDOM CALLBACK] Content type back, returning to mode selection")
-                bot.answer_callback_query(call.id)
-                # Вызываем random_start для возврата к выбору режима
-                from moviebot.bot.handlers.series import random_start
-                class FakeMessage:
-                    def __init__(self, call):
-                        self.from_user = call.from_user
-                        self.chat = call.message.chat
-                        self.text = '/random'
-                    def reply_to(self, text, **kwargs):
-                        return bot.send_message(self.chat.id, text, **kwargs)
-                fake_message = FakeMessage(call)
-                random_start(fake_message)
-                return
-            
-            # Сохраняем выбранный тип контента
-            user_random_state[user_id]['content_type'] = data
-            user_random_state[user_id]['step'] = 'period'
-            
-            logger.info(f"[RANDOM CALLBACK] Content type selected: {data}, moving to period selection")
-            
-            # Показываем выбор периодов
-            available_periods = user_random_state[user_id].get('available_periods', [])
-            if not available_periods:
-                available_periods = ["До 1980", "1980–1990", "1990–2000", "2000–2010", "2010–2020", "2020–сейчас"]
-            
-            markup = InlineKeyboardMarkup(row_width=1)
-            if available_periods:
-                for period in available_periods:
-                    markup.add(InlineKeyboardButton(period, callback_data=f"rand_period:{period}"))
-            markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
-            markup.add(InlineKeyboardButton("⬅️ Назад к режимам", callback_data="rand_mode:back"))
-            
-            mode_description = '🎬 <b>Рандом по кинопоиску</b>\n\nНайдите случайный фильм на Кинопоиске по заданным фильтрам.'
-            content_type_text = {
-                'FILM': '🎬 Фильм',
-                'TV_SERIES': '📺 Сериал',
-                'ALL': '🎬 Фильм и Сериал'
-            }.get(data, '')
+            logger.info(f"[RANDOM CONTENT TYPE] Mode={mode}, content_type={content_type}, user_id={user_id}")
             
             bot.answer_callback_query(call.id)
-            text = f"{mode_description}\n\nВыбрано: {content_type_text}\n\n🎲 <b>Шаг 2/3: Выберите период</b>\n\n(можно выбрать несколько или пропустить)"
-            bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            
+            # Переходим к следующему этапу в зависимости от режима
+            if mode == 'kinopoisk':
+                # Для режима kinopoisk пропускаем периоды и сразу переходим к выбору года
+                state['step'] = 'year'
+                _show_year_step(call, chat_id, user_id)
+            else:
+                # Для остальных режимов переходим к выбору периода
+                state['step'] = 'period'
+                # Вызываем функцию, которая покажет выбор периода (с учетом content_type)
+                _show_period_step(call, chat_id, user_id)
+            
         except Exception as e:
-            logger.error(f"[RANDOM CALLBACK] ❌ ERROR in handle_rand_content_type: {e}", exc_info=True)
+            logger.error(f"[RANDOM CONTENT TYPE] ❌ Ошибка: {e}", exc_info=True)
+            try:
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            except:
+                pass
+    
+    @bot_param.callback_query_handler(func=lambda call: call.data.startswith("rand_content_type:"))
+    def handle_rand_content_type(call):
+        """Обработчик выбора типа контента (фильмы/сериалы/пропустить) для рандома"""
+        try:
+            logger.info(f"[RANDOM CONTENT TYPE] ===== START: data={call.data}, user_id={call.from_user.id}")
+            user_id = call.from_user.id
+            chat_id = call.message.chat.id
+            
+            # Парсим callback_data: rand_content_type:{mode}:{content_type}
+            data_parts = call.data.split(":", 2)
+            if len(data_parts) < 3:
+                bot.answer_callback_query(call.id, "Ошибка", show_alert=True)
+                return
+            
+            mode = data_parts[1]  # database, kinopoisk, my_votes, group_votes
+            content_type = data_parts[2]  # films, series, mixed
+            
+            # Инициализируем состояние, если его нет
+            if user_id not in user_random_state:
+                logger.warning(f"[RANDOM CONTENT TYPE] Состояние не найдено для user_id={user_id}, инициализируем новое")
+                user_random_state[user_id] = {
+                    'step': 'mode',
+                    'mode': None,
+                    'content_type': None,
+                    'periods': [],
+                    'genres': [],
+                    'directors': [],
+                    'actors': []
+                }
+            
+            state = user_random_state[user_id]
+            state['mode'] = mode
+            state['content_type'] = content_type
+            
+            logger.info(f"[RANDOM CONTENT TYPE] Mode={mode}, content_type={content_type}, user_id={user_id}")
+            
+            bot.answer_callback_query(call.id)
+            
+            # Переходим к следующему этапу в зависимости от режима
+            if mode == 'kinopoisk':
+                # Для режима kinopoisk пропускаем периоды и сразу переходим к выбору года
+                state['step'] = 'year'
+                _show_year_step(call, chat_id, user_id)
+            else:
+                # Для остальных режимов переходим к выбору периода
+                state['step'] = 'period'
+                # Вызываем функцию, которая покажет выбор периода (с учетом content_type)
+                _show_period_step(call, chat_id, user_id)
+            
+        except Exception as e:
+            logger.error(f"[RANDOM CONTENT TYPE] ❌ Ошибка: {e}", exc_info=True)
             try:
                 bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:

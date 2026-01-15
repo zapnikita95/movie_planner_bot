@@ -172,9 +172,9 @@ def get_whisper():
                     
                     _whisper = WhisperWrapper(model)
                     logger.info(f"✅ faster-whisper успешно загружен (модель: {model_size})")
-        except Exception as e:
-            logger.error(f"Ошибка загрузки whisper: {e}", exc_info=True)
-            _whisper = False
+                except Exception as e:
+                    logger.error(f"Ошибка загрузки whisper: {e}", exc_info=True)
+                    _whisper = False
     return _whisper
 
 
