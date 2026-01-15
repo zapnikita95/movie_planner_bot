@@ -858,36 +858,36 @@ def search_movies(query, top_k=15):
         keywords = _extract_keywords(query_en)
         query_en_lower = query_en.lower()
         
+        # Загружаем топ-списки актёров и режиссёров
+        top_actors_set, top_directors_set = load_top_actors_and_directors()
+        
         # Пытаемся извлечь имя актёра/режиссёра из запроса
-        # Сначала ищем известные имена в переведённом запросе
+        # Проверяем все возможные комбинации слов (2-4 слова) на совпадение с топ-списками
         mentioned_actor_en = None
-        known_full_names = [
-            'keanu reeves',
-            'leonardo dicaprio',
-            'paul thomas anderson',
-            'quentin tarantino',
-            'martin scorsese',
-            'christopher nolan',
-            'david fincher',
-            'ridley scott',
-            'steven spielberg',
-            'james cameron',
-        ]
-        for name in known_full_names:
-            if name in query_en_lower:
-                mentioned_actor_en = name
-                logger.info(f"[SEARCH MOVIES] Найдено известное имя в запросе: '{mentioned_actor_en}'")
+        query_en_words = query_en_lower.split()
+        
+        # Проверяем комбинации от 2 до 4 слов (для имён типа "joseph gordon-levitt")
+        for word_count in range(2, min(5, len(query_en_words) + 1)):
+            for i in range(len(query_en_words) - word_count + 1):
+                potential_name = ' '.join(query_en_words[i:i+word_count])
+                potential_name_normalized = _normalize_text(potential_name)
+                
+                # Проверяем в топ-актёрах (приоритет №1)
+                if potential_name_normalized in top_actors_set:
+                    mentioned_actor_en = potential_name_normalized
+                    logger.info(f"[SEARCH MOVIES] Найдено имя актёра в топ-500: '{mentioned_actor_en}' ({word_count} слова)")
+                    break
+                
+                # Проверяем в топ-режиссёрах (приоритет №2, только если актёра не нашли)
+                if not mentioned_actor_en and potential_name_normalized in top_directors_set:
+                    mentioned_actor_en = potential_name_normalized
+                    logger.info(f"[SEARCH MOVIES] Найдено имя режиссёра в топ-100: '{mentioned_actor_en}' ({word_count} слова)")
+                    break
+            
+            if mentioned_actor_en:
                 break
         
-        # Если не нашли известное имя, но запрос очень короткий (2-3 слова) - возможно это имя
-        if not mentioned_actor_en:
-            query_en_words = query_en.split()
-            if len(query_en_words) <= 3:
-                # Очень короткий запрос - возможно это имя актёра
-                mentioned_actor_en = query_en.lower().strip()
-                logger.info(f"[SEARCH MOVIES] Очень короткий запрос, предполагаем что это имя: '{mentioned_actor_en}'")
-        
-        logger.info(f"[SEARCH MOVIES] Упомянут актёр? {bool(mentioned_actor_en)}, имя (en): {mentioned_actor_en}")
+        logger.info(f"[SEARCH MOVIES] Упомянут актёр/режиссёр? {bool(mentioned_actor_en)}, имя (en): {mentioned_actor_en}")
         
         # Определяем жанры на основе ключевых слов и облаков смыслов
         detected_genres = _detect_genre_from_keywords(keywords, query_en_lower)
