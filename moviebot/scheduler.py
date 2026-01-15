@@ -357,32 +357,43 @@ def check_and_send_plan_notifications():
         except:
             pass
         
-        with db_lock:
-            try:
-                cursor_local.execute('''
-
-                    SELECT p.id, p.chat_id, p.film_id, p.plan_type, p.plan_datetime, p.user_id,
-
-                           COALESCE(p.custom_title, m.title, 'Мероприятие') as title, m.link, p.notification_sent, p.ticket_notification_sent, p.ticket_file_id
-
-                    FROM plans p
-
-                    LEFT JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
-
-                    WHERE p.plan_datetime >= %s 
-
-                      AND p.plan_datetime <= %s
-
-                ''', (check_start, check_end))
-
-                plans = cursor_local.fetchall()
-            except Exception as db_e:
-                logger.error(f"[PLAN CHECK] Ошибка при запросе планов: {db_e}", exc_info=True)
+        plans = []
+        try:
+            with db_lock:
                 try:
-                    conn_local.rollback()
-                except:
-                    pass
-                plans = []
+                    # Проверяем, что курсор не закрыт
+                    if cursor_local.closed:
+                        logger.warning("[PLAN CHECK] Курсор закрыт, создаем новый")
+                        cursor_local.close()
+                        cursor_local = get_db_cursor()
+                    
+                    cursor_local.execute('''
+
+                        SELECT p.id, p.chat_id, p.film_id, p.plan_type, p.plan_datetime, p.user_id,
+
+                               COALESCE(p.custom_title, m.title, 'Мероприятие') as title, m.link, p.notification_sent, p.ticket_notification_sent, p.ticket_file_id
+
+                        FROM plans p
+
+                        LEFT JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+
+                        WHERE p.plan_datetime >= %s 
+
+                          AND p.plan_datetime <= %s
+
+                    ''', (check_start, check_end))
+
+                    plans = cursor_local.fetchall()
+                except Exception as db_e:
+                    logger.error(f"[PLAN CHECK] Ошибка при запросе планов: {db_e}", exc_info=True)
+                    try:
+                        conn_local.rollback()
+                    except:
+                        pass
+                    plans = []
+        except Exception as lock_e:
+            logger.error(f"[PLAN CHECK] Ошибка при блокировке БД: {lock_e}", exc_info=True)
+            plans = []
 
         
 
