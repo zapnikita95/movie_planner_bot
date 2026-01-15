@@ -37,6 +37,8 @@ _translator = None
 _whisper = None
 _index = None
 _movies_df = None
+_top_actors_set = None  # Множество топ-500 актёров
+_top_directors_set = None  # Множество топ-100 режиссёров
 
 # Пути — относительные для локального запуска, на Railway работает так же
 CACHE_DIR = Path('cache')
@@ -53,6 +55,8 @@ os.environ['SENTENCE_TRANSFORMERS_HOME'] = str(CACHE_DIR / 'huggingface' / 'sent
 TMDB_CSV_PATH = CACHE_DIR / 'tmdb_movies.csv'  # 'cache/tmdb_movies.csv'
 INDEX_PATH = DATA_DIR / 'tmdb_index.faiss'     # 'data/shazam/tmdb_index.faiss'
 DATA_PATH = DATA_DIR / 'tmdb_movies_processed.csv'  # 'data/shazam/tmdb_movies_processed.csv'
+TOP_ACTORS_PATH = DATA_DIR / 'top_actors.txt'  # Топ-500 актёров
+TOP_DIRECTORS_PATH = DATA_DIR / 'top_directors.txt'  # Топ-100 режиссёров
 
 MIN_VOTE_COUNT = 500
 MAX_MOVIES = 20000
@@ -479,11 +483,18 @@ def build_tmdb_index():
     all_directors = []
     
     for idx, row in df.iterrows():
-        # Актёры из cast
+        # Актёры из cast - извлекаем ВСЕХ напрямую из JSON
         if pd.notna(row.get('cast')):
-            actors_list = parse_json_list(row['cast'], 'name', top_n=None)  # Все актёры
-            if actors_list:
-                all_actors.extend([actor.lower().strip() for actor in actors_list])
+            try:
+                cast_json = json.loads(row['cast']) if isinstance(row['cast'], str) else row['cast']
+                if isinstance(cast_json, list):
+                    for actor_item in cast_json:
+                        if isinstance(actor_item, dict) and 'name' in actor_item:
+                            actor_name = str(actor_item['name']).strip().lower()
+                            if actor_name and actor_name != 'nan':
+                                all_actors.append(actor_name)
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                pass
         
         # Режиссёры
         if pd.notna(row.get('director')) and str(row['director']).strip():
@@ -500,14 +511,18 @@ def build_tmdb_index():
     top_100_directors = [director for director, count in director_counts.most_common(100)]
     
     # Сохраняем в файлы
-    TOP_ACTORS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
     with open(TOP_ACTORS_PATH, 'w', encoding='utf-8') as f:
         f.write('\n'.join(top_500_actors))
     logger.info(f"✅ Сохранён топ-500 актёров: {len(top_500_actors)} имён (файл: {TOP_ACTORS_PATH})")
+    if top_500_actors:
+        logger.info(f"   Примеры топ-5 актёров: {top_500_actors[:5]}")
     
     with open(TOP_DIRECTORS_PATH, 'w', encoding='utf-8') as f:
         f.write('\n'.join(top_100_directors))
     logger.info(f"✅ Сохранён топ-100 режиссёров: {len(top_100_directors)} имён (файл: {TOP_DIRECTORS_PATH})")
+    if top_100_directors:
+        logger.info(f"   Примеры топ-5 режиссёров: {top_100_directors[:5]}")
     
     # Продюсеры
     df['producers_str'] = df['producers'].fillna('')
