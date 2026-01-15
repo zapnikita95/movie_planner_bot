@@ -219,13 +219,15 @@ def _create_top_lists_from_dataframe(df):
     all_directors = []
     
     for idx, row in df.iterrows():
-        # Актёры - сначала пробуем из cast (JSON), потом из actors_str (строка с запятыми)
+        # Актёры - пробуем несколько способов парсинга
         actors_found = False
         
         # Попытка 1: из cast (JSON)
         if pd.notna(row.get('cast')):
+            cast_value = row['cast']
             try:
-                cast_json = json.loads(row['cast']) if isinstance(row['cast'], str) else row['cast']
+                # Пробуем парсить как JSON
+                cast_json = json.loads(cast_value) if isinstance(cast_value, str) else cast_value
                 if isinstance(cast_json, list):
                     for actor_item in cast_json:
                         if isinstance(actor_item, dict) and 'name' in actor_item:
@@ -234,9 +236,20 @@ def _create_top_lists_from_dataframe(df):
                                 all_actors.append(actor_name)
                                 actors_found = True
             except (json.JSONDecodeError, TypeError, AttributeError):
-                pass
+                # Попытка 2: если cast не JSON, парсим как строку с запятыми
+                try:
+                    cast_str = str(cast_value).strip()
+                    if cast_str and cast_str != 'nan' and not cast_str.startswith('['):
+                        # Разбиваем по запятым и добавляем каждого актёра
+                        for actor in cast_str.split(','):
+                            actor_name = actor.strip().lower()
+                            if actor_name and actor_name != 'nan':
+                                all_actors.append(actor_name)
+                                actors_found = True
+                except (TypeError, AttributeError):
+                    pass
         
-        # Попытка 2: из actors_str (если cast не сработал)
+        # Попытка 3: из actors_str (если cast не сработал)
         if not actors_found and pd.notna(row.get('actors_str')):
             try:
                 actors_str = str(row['actors_str']).strip()
@@ -558,7 +571,32 @@ def build_tmdb_index():
     df['genres_str'] = df['genres'].apply(lambda x: parse_json_list(x, 'name'))
     
     # Актёры (поле cast есть!)
-    df['actors_str'] = df['cast'].apply(lambda x: parse_json_list(x, 'name', top_n=10))
+    # Парсим cast: сначала пробуем JSON, если не получается - парсим как строку с запятыми
+    def parse_cast(cast_value):
+        if pd.isna(cast_value) or cast_value == '[]':
+            return ''
+        try:
+            # Попытка 1: парсим как JSON
+            items = json.loads(cast_value) if isinstance(cast_value, str) else cast_value
+            if isinstance(items, list):
+                names = [item.get('name', '') for item in items[:10] if isinstance(item, dict) and 'name' in item]
+                return ', '.join([n for n in names if n])
+        except (json.JSONDecodeError, TypeError, AttributeError):
+            pass
+        
+        # Попытка 2: парсим как строку с запятыми
+        try:
+            cast_str = str(cast_value).strip()
+            if cast_str and cast_str != 'nan' and not cast_str.startswith('['):
+                # Разбиваем по запятым, берём первые 10
+                actors = [a.strip() for a in cast_str.split(',')[:10] if a.strip()]
+                return ', '.join(actors)
+        except (TypeError, AttributeError):
+            pass
+        
+        return ''
+    
+    df['actors_str'] = df['cast'].apply(parse_cast)
     
     # Режиссёры (поле director уже готово как строка)
     df['director_str'] = df['director'].fillna('')
@@ -955,14 +993,10 @@ def search_movies(query, top_k=15):
                 if mentioned_actor_en:
                     break
         
-        # Если не нашли в топ-списках, пытаемся извлечь имя из запроса
-        # ИМЯ ЭТО ВСЕГДА 2 СЛОВА! (имя + фамилия)
+        # Если не нашли в топ-списках, НЕ предполагаем что это актёр
+        # Топ-список актёров - это единственный источник истины для определения актёров
         if not mentioned_actor_en:
-            if len(query_en_words) >= 2:
-                # Берём первые 2 слова как потенциальное имя (имя + фамилия)
-                potential_name_2 = ' '.join(query_en_words[0:2])
-                mentioned_actor_en = _normalize_text(potential_name_2)
-                logger.info(f"[SEARCH MOVIES] Берём первые 2 слова как потенциальное имя: '{mentioned_actor_en}' (будет проверено в базе)")
+            logger.info(f"[SEARCH MOVIES] Имя актёра/режиссёра не найдено в топ-списках - не предполагаем что это актёр")
         
         logger.info(f"[SEARCH MOVIES] Упомянут актёр/режиссёр? {bool(mentioned_actor_en)}, имя (en): {mentioned_actor_en}")
         
@@ -1005,42 +1039,48 @@ def search_movies(query, top_k=15):
             # Нормализуем имя для поиска (убираем пунктуацию, приводим к нижнему регистру)
             actor_name_for_search = _normalize_text(mentioned_actor_en)
             
-            # Проверяем, является ли имя актёром или режиссёром из топ-списков (если списки не пустые)
+            # Проверяем, является ли имя актёром или режиссёром из топ-списков
+            # ВАЖНО: ищем только если имя найдено в топ-списках
             is_actor = top_actors_set and actor_name_for_search in top_actors_set
             is_director = top_directors_set and actor_name_for_search in top_directors_set
             
-            # Если топ-списки пустые, проверяем оба варианта (актёр и режиссёр)
-            check_both = not top_actors_set and not top_directors_set
-            
-            # Сначала собираем фильмы с актёром (приоритет №1)
-            actor_indices = []
-            actor_distances = []
-            # Затем собираем фильмы с режиссёром (приоритет №2, только если нет актёров)
-            director_indices = []
-            director_distances = []
-            
-            for i, idx in enumerate(I[0]):
-                if idx < len(movies):
-                    row = movies.iloc[idx]
-                    # Нормализуем тексты из базы
-                    actors_normalized = _normalize_text(row.get('actors_str', '')) if 'actors_str' in row.index else ''
-                    director_normalized = _normalize_text(row.get('director_str', '')) if 'director_str' in row.index else ''
-                    
-                    # ПРИОРИТЕТ №1: Проверяем актёров
-                    # Если имя в топ-актёрах ИЛИ топ-списки пустые (проверяем оба варианта)
-                    if (is_actor or check_both) and actor_name_for_search in actors_normalized:
-                        actor_indices.append(idx)
-                        actor_distances.append(float(D[0][i]))
-                    # ПРИОРИТЕТ №2: Проверяем режиссёров (только если не нашли в актёрах)
-                    elif (is_director or (check_both and not actor_indices)) and actor_name_for_search in director_normalized:
-                        director_indices.append(idx)
-                        director_distances.append(float(D[0][i]))
-            
-            # Сначала добавляем фильмы с актёром, потом с режиссёром
-            candidate_indices = actor_indices + director_indices
-            candidate_distances = actor_distances + director_distances
-            
-            logger.info(f"[SEARCH MOVIES] Найдено фильмов с актёром '{actor_name_for_search}': {len(actor_indices)}, с режиссёром: {len(director_indices)}")
+            # Если имя не найдено в топ-списках, не ищем (это не должно происходить, но на всякий случай)
+            if not is_actor and not is_director:
+                logger.warning(f"[SEARCH MOVIES] Имя '{actor_name_for_search}' не найдено в топ-списках, но mentioned_actor_en не None - пропускаем фильтрацию по актёру")
+                mentioned_actor_en = None
+                # Переходим к обычному поиску
+                candidate_indices = I[0].tolist()
+                candidate_distances = [float(D[0][i]) for i in range(len(I[0]))]
+                logger.info(f"[SEARCH MOVIES] Обычный поиск, кандидатов: {len(candidate_indices)}")
+            else:
+                # Сначала собираем фильмы с актёром (приоритет №1)
+                actor_indices = []
+                actor_distances = []
+                # Затем собираем фильмы с режиссёром (приоритет №2, только если нет актёров)
+                director_indices = []
+                director_distances = []
+                
+                for i, idx in enumerate(I[0]):
+                    if idx < len(movies):
+                        row = movies.iloc[idx]
+                        # Нормализуем тексты из базы
+                        actors_normalized = _normalize_text(row.get('actors_str', '')) if 'actors_str' in row.index else ''
+                        director_normalized = _normalize_text(row.get('director_str', '')) if 'director_str' in row.index else ''
+                        
+                        # ПРИОРИТЕТ №1: Проверяем актёров (если имя в топ-актёрах)
+                        if is_actor and actor_name_for_search in actors_normalized:
+                            actor_indices.append(idx)
+                            actor_distances.append(float(D[0][i]))
+                        # ПРИОРИТЕТ №2: Проверяем режиссёров (только если не нашли в актёрах)
+                        elif (is_director and not is_actor) and actor_name_for_search in director_normalized:
+                            director_indices.append(idx)
+                            director_distances.append(float(D[0][i]))
+                
+                # Сначала добавляем фильмы с актёром, потом с режиссёром
+                candidate_indices = actor_indices + director_indices
+                candidate_distances = actor_distances + director_distances
+                
+                logger.info(f"[SEARCH MOVIES] Найдено фильмов с актёром '{actor_name_for_search}': {len(actor_indices)}, с режиссёром: {len(director_indices)}")
         else:
             # Обычный поиск - берём все результаты
             candidate_indices = I[0].tolist()
@@ -1079,17 +1119,17 @@ def search_movies(query, top_k=15):
                 director_normalized = _normalize_text(row.get('director_str', '')) if 'director_str' in row.index else ''
                 actor_name_for_search = _normalize_text(mentioned_actor_en)
                 
-                # Проверяем, является ли имя актёром или режиссёром из топ-списков (если списки не пустые)
+                # Проверяем, является ли имя актёром или режиссёром из топ-списков
+                # ВАЖНО: ищем только если имя найдено в топ-списках
                 is_actor = top_actors_set and actor_name_for_search in top_actors_set
                 is_director = top_directors_set and actor_name_for_search in top_directors_set
-                check_both = not top_actors_set and not top_directors_set
                 
-                # ПРИОРИТЕТ №1: Актёры (если имя в топ-актёрах ИЛИ топ-списки пустые)
-                if (is_actor or check_both) and actor_name_for_search in actors_normalized:
+                # ПРИОРИТЕТ №1: Актёры (если имя в топ-актёрах)
+                if is_actor and actor_name_for_search in actors_normalized:
                     actor_boost = 400
                     logger.info(f"[SEARCH MOVIES] Полное имя актёра '{actor_name_for_search}' найдено → +400 для {imdb_id_clean}")
                 # ПРИОРИТЕТ №2: Режиссёры (такой же буст, если актёров нет)
-                elif (is_director or check_both) and actor_name_for_search in director_normalized:
+                elif is_director and actor_name_for_search in director_normalized:
                     actor_boost = 400
                     logger.info(f"[SEARCH MOVIES] Полное имя режиссёра '{actor_name_for_search}' найдено → +400 для {imdb_id_clean}")
             

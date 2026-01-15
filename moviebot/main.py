@@ -63,6 +63,22 @@ from moviebot.bot.bot_init import setup_bot_commands, sync_commands_periodically
 # Инициализация базы данных
 init_database()
 
+# Удаление файла top_actors.txt если установлена переменная окружения
+if os.getenv('DELETE_TOP_ACTORS_FILE', '0').strip().lower() in ('1', 'true', 'yes', 'on'):
+    logger.info("DELETE_TOP_ACTORS_FILE=1 - удаляем файл top_actors.txt...")
+    try:
+        from pathlib import Path
+        DATA_DIR = Path('data/shazam')
+        TOP_ACTORS_PATH = DATA_DIR / 'top_actors.txt'
+        if TOP_ACTORS_PATH.exists():
+            file_size = TOP_ACTORS_PATH.stat().st_size
+            TOP_ACTORS_PATH.unlink()
+            logger.info(f"✅ Файл top_actors.txt удалён (размер был: {file_size} байт)")
+        else:
+            logger.info(f"ℹ️ Файл top_actors.txt не существует: {TOP_ACTORS_PATH.absolute()}")
+    except Exception as e:
+        logger.error(f"❌ Ошибка удаления файла top_actors.txt: {e}", exc_info=True)
+
 # Импорты для бота
 from apscheduler.schedulers.background import BackgroundScheduler
 
