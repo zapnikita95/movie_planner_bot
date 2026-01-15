@@ -482,186 +482,220 @@ def register_series_callbacks(bot):
             except:
                 pass
     
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("series_subscribe:"))
-    def series_subscribe_callback(call):
-        """Обработчик подписки на новые серии сериала"""
-        user_id = call.from_user.id
-        chat_id = call.message.chat.id
+@bot.callback_query_handler(func=lambda call: call.data.startswith("series_subscribe:"))
+def series_subscribe_callback(call):
+    """Обработчик подписки на новые серии сериала"""
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    
+    # Сразу отвечаем на callback, чтобы убрать "крутилку"
+    try:
+        bot.answer_callback_query(call.id, text="⏳ Обрабатываю...")
+        logger.info(f"[SERIES SUBSCRIBE] answer_callback_query вызван сразу, callback_id={call.id}")
+    except Exception as e:
+        logger.warning(f"[SERIES SUBSCRIBE] Не удалось вызвать answer_callback_query сразу: {e}")
+    
+    try:
+        logger.info(f"[SERIES SUBSCRIBE] ===== START: callback_id={call.id}, user_id={user_id}, chat_id={chat_id}")
         
-        # Сразу отвечаем на callback, чтобы убрать "крутилку"
+        data = call.data.split(':')
+        kp_id = data[1]
+        logger.info(f"[SERIES SUBSCRIBE] Парсинг данных: kp_id={kp_id}, chat_id={chat_id}, user_id={user_id}")
+        
+        # Проверяем доступ к функциям уведомлений
+        if not has_notifications_access(chat_id, user_id):
+            logger.warning(f"[SERIES SUBSCRIBE] Нет доступа к уведомлениям для user_id={user_id}, chat_id={chat_id}")
+            bot.answer_callback_query(
+                call.id, 
+                "🔒 Функционал можно подключить через /payment", 
+                show_alert=True
+            )
+            return
+        
+        # Используем локальные соединение и курсор
+        from moviebot.database.db_connection import get_db_connection, get_db_cursor
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        
+        # Получение film_id и title из БД (добавляем в базу, если нет)
+        with db_lock:
+            try:
+                cursor_local.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
+                row = cursor_local.fetchone()
+            except Exception as db_e:
+                logger.error(f"[SERIES SUBSCRIBE] Ошибка запроса film_id: {db_e}", exc_info=True)
+                row = None
+                
+            if row:
+                film_id = row.get("id") if isinstance(row, dict) else (row[0] if row else None) if isinstance(row, tuple) else row.get('id')
+                title = row[1] if isinstance(row, tuple) else row.get('title')
+                logger.info(f"[SERIES SUBSCRIBE] Найден сериал: film_id={film_id}, title={title}")
+            else:
+                # Сериал не в базе - добавляем через API
+                logger.info(f"[SERIES SUBSCRIBE] Сериал не найден в БД, добавляем через API")
+                link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+                
+                logger.info(f"[SERIES SUBSCRIBE] Вызываю extract_movie_info для kp_id={kp_id}, link={link}")
+                
+                try:
+                    movie_data = extract_movie_info(link)
+                    logger.info(f"[SERIES SUBSCRIBE] extract_movie_info завершен, title={movie_data.get('title', 'N/A')}")
+                except Exception as api_e:
+                    logger.error(f"[SERIES SUBSCRIBE] Ошибка в extract_movie_info: {api_e}", exc_info=True)
+                    bot.answer_callback_query(call.id, "❌ Ошибка при получении информации о сериале", show_alert=True)
+                    return
+                
+                if not movie_data or not movie_data.get('title'):
+                    logger.error(f"[SERIES SUBSCRIBE] extract_movie_info вернул пустой/невалидный результат для kp_id={kp_id}")
+                    bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о сериале", show_alert=True)
+                    return
+                
+                logger.info(f"[SERIES SUBSCRIBE] Информация получена: title={movie_data.get('title')}, is_series={movie_data.get('is_series', False)}")
+                
+                logger.info(f"[SERIES SUBSCRIBE] Вызываю ensure_movie_in_database: chat_id={chat_id}, kp_id={kp_id}, user_id={user_id}")
+                try:
+                    film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, movie_data, user_id)
+                    logger.info(f"[SERIES SUBSCRIBE] ensure_movie_in_database завершен: film_id={film_id}, was_inserted={was_inserted}")
+                except Exception as db_e:
+                    logger.error(f"[SERIES SUBSCRIBE] Ошибка в ensure_movie_in_database: {db_e}", exc_info=True)
+                    bot.answer_callback_query(call.id, "❌ Ошибка при добавлении сериала в базу", show_alert=True)
+                    return
+                
+                if not film_id:
+                    logger.error(f"[SERIES SUBSCRIBE] Не удалось добавить сериал в базу для kp_id={kp_id}")
+                    bot.answer_callback_query(call.id, "❌ Ошибка при добавлении сериала в базу", show_alert=True)
+                    return
+                
+                title = movie_data.get('title', 'Сериал')
+                logger.info(f"[SERIES SUBSCRIBE] Сериал добавлен/найден в БД: film_id={film_id}, title={title}, was_inserted={was_inserted}")
+                
+                # Если сериал был добавлен, отправляем уведомление
+                if was_inserted:
+                    bot.send_message(chat_id, f"✅ Сериал добавлен в базу!")
+                    logger.info(f"[SERIES SUBSCRIBE] Уведомление об добавлении отправлено")
+        
+        # Добавление подписки
+        logger.info(f"[SERIES SUBSCRIBE] Добавляю подписку в БД: chat_id={chat_id}, film_id={film_id}, kp_id={kp_id}, user_id={user_id}")
+        with db_lock:
+            try:
+                cursor_local.execute('''
+                    INSERT INTO series_subscriptions (chat_id, film_id, kp_id, user_id, subscribed)
+                    VALUES (%s, %s, %s, %s, TRUE)
+                    ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET subscribed = TRUE
+                ''', (chat_id, film_id, kp_id, user_id))
+                conn_local.commit()
+                logger.info(f"[SERIES SUBSCRIBE] Подписка добавлена в БД успешно")
+                
+                # Проверяем, что подписка действительно установлена
+                cursor_local.execute('''
+                    SELECT subscribed FROM series_subscriptions 
+                    WHERE chat_id = %s AND film_id = %s AND user_id = %s
+                ''', (chat_id, film_id, user_id))
+                check_row = cursor_local.fetchone()
+            except Exception as db_e:
+                logger.error(f"[SERIES SUBSCRIBE] Ошибка работы с БД: {db_e}", exc_info=True)
+                try:
+                    conn_local.rollback()
+                except:
+                    pass
+                check_row = None
+            if check_row:
+                subscribed_status = bool(check_row.get('subscribed') if isinstance(check_row, dict) else check_row[0])
+                logger.info(f"[SERIES SUBSCRIBE] ✅ ПОДТВЕРЖДЕНО: Пользователь {user_id} успешно подписан на сериал {title} (kp_id={kp_id}, film_id={film_id}, subscribed={subscribed_status})")
+            else:
+                logger.warning(f"[SERIES SUBSCRIBE] ⚠️ Предупреждение: Подписка не найдена после вставки для user_id={user_id}, film_id={film_id}")
+        
+        # Получение данных о сезонах (с try)
+        logger.info(f"[SERIES SUBSCRIBE] Получение данных о сезонах для kp_id={kp_id}")
         try:
-            bot.answer_callback_query(call.id, text="⏳ Обрабатываю...")
-            logger.info(f"[SERIES SUBSCRIBE] answer_callback_query вызван сразу, callback_id={call.id}")
+            seasons_data = get_seasons_data(kp_id)
+            logger.info(f"[SERIES SUBSCRIBE] Получено сезонов: {len(seasons_data)}")
         except Exception as e:
-            logger.warning(f"[SERIES SUBSCRIBE] Не удалось вызвать answer_callback_query сразу: {e}")
+            logger.error(f"[SERIES SUBSCRIBE] Ошибка get_seasons_data: {e}", exc_info=True)
+            seasons_data = []  # Fallback
         
-        try:
-            logger.info(f"[SERIES SUBSCRIBE] ===== START: callback_id={call.id}, user_id={user_id}, chat_id={chat_id}")
-            
-            data = call.data.split(':')
-            kp_id = data[1]
-            logger.info(f"[SERIES SUBSCRIBE] Парсинг данных: kp_id={kp_id}, chat_id={chat_id}, user_id={user_id}")
-            
-            # Проверяем доступ к функциям уведомлений
-            if not has_notifications_access(chat_id, user_id):
-                logger.warning(f"[SERIES SUBSCRIBE] Нет доступа к уведомлениям для user_id={user_id}, chat_id={chat_id}")
-                bot.answer_callback_query(
-                    call.id, 
-                    "🔒 Функционал можно подключить через /payment", 
-                    show_alert=True
-                )
-                return
-            
-            # Используем локальные соединение и курсор
-            from moviebot.database.db_connection import get_db_connection, get_db_cursor
-            conn_local = get_db_connection()
-            cursor_local = get_db_cursor()
-            
-            # Получение film_id и title из БД (добавляем в базу, если нет)
-            with db_lock:
-                try:
-                    cursor_local.execute('SELECT id, title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
-                    row = cursor_local.fetchone()
-                except Exception as db_e:
-                    logger.error(f"[SERIES SUBSCRIBE] Ошибка запроса film_id: {db_e}", exc_info=True)
-                    row = None
-                    
-                if row:
-                    film_id = row.get("id") if isinstance(row, dict) else (row[0] if row else None) if isinstance(row, tuple) else row.get('id')
-                    title = row[1] if isinstance(row, tuple) else row.get('title')
-                    logger.info(f"[SERIES SUBSCRIBE] Найден сериал: film_id={film_id}, title={title}")
-                else:
-                    # Сериал не в базе - добавляем через API
-                    logger.info(f"[SERIES SUBSCRIBE] Сериал не найден в БД, добавляем через API")
-                    link = f"https://www.kinopoisk.ru/series/{kp_id}/"
-                    
-                    logger.info(f"[SERIES SUBSCRIBE] Вызываю extract_movie_info для kp_id={kp_id}, link={link}")
-                    
+        # Постановка задачи проверки
+        next_check_date = None
+        nearest_release_date = None
+        for season in seasons_data:
+            episodes = season.get('episodes', [])
+            for ep in episodes:
+                release_str = ep.get('releaseDate', '')
+                if release_str and release_str != '—':
                     try:
-                        movie_data = extract_movie_info(link)   # ← переименовали info → movie_data
-                        logger.info(f"[SERIES SUBSCRIBE] extract_movie_info завершен, title={movie_data.get('title', 'N/A')}")
-                    except Exception as api_e:
-                        logger.error(f"[SERIES SUBSCRIBE] Ошибка в extract_movie_info: {api_e}", exc_info=True)
-                        bot.answer_callback_query(call.id, "❌ Ошибка при получении информации о сериале", show_alert=True)
-                        return
-                    
-                    if not movie_data or not movie_data.get('title'):
-                        logger.error(f"[SERIES SUBSCRIBE] extract_movie_info вернул пустой/невалидный результат для kp_id={kp_id}")
-                        bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о сериале", show_alert=True)
-                        return
-                    
-                    logger.info(f"[SERIES SUBSCRIBE] Информация получена: title={movie_data.get('title')}, is_series={movie_data.get('is_series', False)}")
-                    
-                    logger.info(f"[SERIES SUBSCRIBE] Вызываю ensure_movie_in_database: chat_id={chat_id}, kp_id={kp_id}, user_id={user_id}")
-                    try:
-                        film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, movie_data, user_id)  # ← тоже заменили info → movie_data
-                        logger.info(f"[SERIES SUBSCRIBE] ensure_movie_in_database завершен: film_id={film_id}, was_inserted={was_inserted}")
-                    except Exception as db_e:
-                        logger.error(f"[SERIES SUBSCRIBE] Ошибка в ensure_movie_in_database: {db_e}", exc_info=True)
-                        bot.answer_callback_query(call.id, "❌ Ошибка при добавлении сериала в базу", show_alert=True)
-                        return
-                    
-                    if not film_id:
-                        logger.error(f"[SERIES SUBSCRIBE] Не удалось добавить сериал в базу для kp_id={kp_id}")
-                        bot.answer_callback_query(call.id, "❌ Ошибка при добавлении сериала в базу", show_alert=True)
-                        return
-                    
-                    title = movie_data.get('title', 'Сериал')
-                    logger.info(f"[SERIES SUBSCRIBE] Сериал добавлен/найден в БД: film_id={film_id}, title={title}, was_inserted={was_inserted}")
-                    
-                    # Если сериал был добавлен, отправляем уведомление
-                    if was_inserted:
-                        bot.send_message(chat_id, f"✅ Сериал добавлен в базу!")
-                        logger.info(f"[SERIES SUBSCRIBE] Уведомление об добавлении отправлено")
-            
-            # Добавление подписки
-            logger.info(f"[SERIES SUBSCRIBE] Добавляю подписку в БД: chat_id={chat_id}, film_id={film_id}, kp_id={kp_id}, user_id={user_id}")
-            with db_lock:
-                try:
-                    cursor_local.execute('''
-                        INSERT INTO series_subscriptions (chat_id, film_id, kp_id, user_id, subscribed)
-                        VALUES (%s, %s, %s, %s, TRUE)
-                        ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET subscribed = TRUE
-                    ''', (chat_id, film_id, kp_id, user_id))
-                    conn_local.commit()
-                    logger.info(f"[SERIES SUBSCRIBE] Подписка добавлена в БД успешно")
-                    
-                    # Проверяем, что подписка действительно установлена
-                    cursor_local.execute('''
-                        SELECT subscribed FROM series_subscriptions 
-                        WHERE chat_id = %s AND film_id = %s AND user_id = %s
-                    ''', (chat_id, film_id, user_id))
-                    check_row = cursor_local.fetchone()
-                except Exception as db_e:
-                    logger.error(f"[SERIES SUBSCRIBE] Ошибка работы с БД: {db_e}", exc_info=True)
-                    try:
-                        conn_local.rollback()
+                        release_date = datetime.strptime(release_str, '%Y-%m-%d').replace(tzinfo=pytz.utc)
+                        if release_date > datetime.now(pytz.utc):
+                            if nearest_release_date is None or release_date < nearest_release_date:
+                                nearest_release_date = release_date
                     except:
                         pass
-                    check_row = None
-                if check_row:
-                    subscribed_status = bool(check_row.get('subscribed') if isinstance(check_row, dict) else check_row[0])
-                    logger.info(f"[SERIES SUBSCRIBE] ✅ ПОДТВЕРЖДЕНО: Пользователь {user_id} успешно подписан на сериал {title} (kp_id={kp_id}, film_id={film_id}, subscribed={subscribed_status})")
-                else:
-                    logger.warning(f"[SERIES SUBSCRIBE] ⚠️ Предупреждение: Подписка не найдена после вставки для user_id={user_id}, film_id={film_id}")
+        
+        if nearest_release_date:
+            next_check_date = nearest_release_date - timedelta(days=1)  # Проверяем за день до выхода
+        else:
+            next_check_date = datetime.now(pytz.utc) + timedelta(weeks=3)  # Если нет дат, проверка через 3 недели
+        
+        logger.info(f"[SERIES SUBSCRIBE] Постановка задачи проверки на {next_check_date}")
+        scheduler.add_job(
+            check_series_for_new_episodes,
+            'date',
+            run_date=next_check_date,
+            args=[kp_id, film_id, chat_id, user_id]
+        )
+        logger.info(f"[SERIES SUBSCRIBE] Задача проверки поставлена успешно")
+        
+        logger.info(f"[SERIES SUBSCRIBE] Пользователь {user_id} подписался на сериал {title} (kp_id={kp_id})")
+        
+        # Обновление сообщения - используем show_film_info_with_buttons для обновления описания
+        logger.info("[SERIES SUBSCRIBE] Обновление описания через show_film_info_with_buttons")
+        try:
+            # Импорт extract_movie_info УДАЛЁН — он уже есть в начале файла
             
-            # Получение данных о сезонах (с try)
-            logger.info(f"[SERIES SUBSCRIBE] Получение данных о сезонах для kp_id={kp_id}")
+            from moviebot.bot.handlers.series import show_film_info_with_buttons
+            
+            # Получаем link из БД
+            link = None
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
             try:
-                seasons_data = get_seasons_data(kp_id)
-                logger.info(f"[SERIES SUBSCRIBE] Получено сезонов: {len(seasons_data)}")
-            except Exception as e:
-                logger.error(f"[SERIES SUBSCRIBE] Ошибка get_seasons_data: {e}", exc_info=True)
-                seasons_data = []  # Fallback
+                with db_lock:
+                    cursor_local.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
+                    link_row = cursor_local.fetchone()
+                    if link_row:
+                        link = link_row.get('link') if isinstance(link_row, dict) else link_row[0]
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
             
-            # Постановка задачи проверки
-            next_check_date = None
-            nearest_release_date = None
-            for season in seasons_data:
-                episodes = season.get('episodes', [])
-                for ep in episodes:
-                    release_str = ep.get('releaseDate', '')
-                    if release_str and release_str != '—':
-                        try:
-                            release_date = datetime.strptime(release_str, '%Y-%m-%d').replace(tzinfo=pytz.utc)
-                            if release_date > datetime.now(pytz.utc):
-                                if nearest_release_date is None or release_date < nearest_release_date:
-                                    nearest_release_date = release_date
-                        except:
-                            pass
+            if not link:
+                link = f"https://www.kinopoisk.ru/series/{kp_id}/"
             
-            if nearest_release_date:
-                next_check_date = nearest_release_date - timedelta(days=1)  # Проверяем за день до выхода
-            else:
-                next_check_date = datetime.now(pytz.utc) + timedelta(weeks=3)  # Если нет дат, проверка через 3 недели
-            
-            logger.info(f"[SERIES SUBSCRIBE] Постановка задачи проверки на {next_check_date}")
-            scheduler.add_job(
-                check_series_for_new_episodes,
-                'date',
-                run_date=next_check_date,
-                args=[kp_id, film_id, chat_id, user_id]
-            )
-            logger.info(f"[SERIES SUBSCRIBE] Задача проверки поставлена успешно")
-            
-            logger.info(f"[SERIES SUBSCRIBE] Пользователь {user_id} подписался на сериал {title} (kp_id={kp_id})")
-            
-            # Обновление сообщения - используем show_film_info_with_buttons для обновления описания
-            logger.info("[SERIES SUBSCRIBE] Обновление описания через show_film_info_with_buttons")
-            try:
-                from moviebot.api.kinopoisk_api import extract_movie_info
-                from moviebot.bot.handlers.series import show_film_info_with_buttons
-                
-                # Получаем link из БД
-                link = None
+            # Получаем информацию из API
+            info = extract_movie_info(link)
+            if not info:
+                # Если API не сработал, получаем из БД
                 conn_local = get_db_connection()
                 cursor_local = get_db_cursor()
                 try:
                     with db_lock:
-                        cursor_local.execute('SELECT link FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
-                        link_row = cursor_local.fetchone()
-                        if link_row:
-                            link = link_row.get('link') if isinstance(link_row, dict) else link_row[0]
+                        cursor_local.execute('SELECT title, year, genres, description, director, actors, is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
+                        db_row = cursor_local.fetchone()
+                        if db_row:
+                            info = {
+                                'title': db_row.get('title') if isinstance(db_row, dict) else db_row[0],
+                                'year': db_row.get('year') if isinstance(db_row, dict) else (db_row[1] if len(db_row) > 1 else None),
+                                'genres': db_row.get('genres') if isinstance(db_row, dict) else (db_row[2] if len(db_row) > 2 else None),
+                                'description': db_row.get('description') if isinstance(db_row, dict) else (db_row[3] if len(db_row) > 3 else None),
+                                'director': db_row.get('director') if isinstance(db_row, dict) else (db_row[4] if len(db_row) > 4 else None),
+                                'actors': db_row.get('actors') if isinstance(db_row, dict) else (db_row[5] if len(db_row) > 5 else None),
+                                'is_series': bool(db_row.get('is_series') if isinstance(db_row, dict) else (db_row[6] if len(db_row) > 6 else 0))
+                            }
                 finally:
                     try:
                         cursor_local.close()
@@ -671,76 +705,43 @@ def register_series_callbacks(bot):
                         conn_local.close()
                     except:
                         pass
-                
-                if not link:
-                    link = f"https://www.kinopoisk.ru/series/{kp_id}/"
-                
-                # Получаем информацию из API
-                info = extract_movie_info(link)
-                if not info:
-                    # Если API не сработал, получаем из БД
-                    conn_local = get_db_connection()
-                    cursor_local = get_db_cursor()
-                    try:
-                        with db_lock:
-                            cursor_local.execute('SELECT title, year, genres, description, director, actors, is_series FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
-                            db_row = cursor_local.fetchone()
-                            if db_row:
-                                info = {
-                                    'title': db_row.get('title') if isinstance(db_row, dict) else db_row[0],
-                                    'year': db_row.get('year') if isinstance(db_row, dict) else (db_row[1] if len(db_row) > 1 else None),
-                                    'genres': db_row.get('genres') if isinstance(db_row, dict) else (db_row[2] if len(db_row) > 2 else None),
-                                    'description': db_row.get('description') if isinstance(db_row, dict) else (db_row[3] if len(db_row) > 3 else None),
-                                    'director': db_row.get('director') if isinstance(db_row, dict) else (db_row[4] if len(db_row) > 4 else None),
-                                    'actors': db_row.get('actors') if isinstance(db_row, dict) else (db_row[5] if len(db_row) > 5 else None),
-                                    'is_series': bool(db_row.get('is_series') if isinstance(db_row, dict) else (db_row[6] if len(db_row) > 6 else 0))
-                                }
-                    finally:
-                        try:
-                            cursor_local.close()
-                        except:
-                            pass
-                        try:
-                            conn_local.close()
-                        except:
-                            pass
-                
-                if info:
-                    message_id = call.message.message_id if call.message else None
-                    message_thread_id = getattr(call.message, 'message_thread_id', None)
-                    
-                    show_film_info_with_buttons(
-                        chat_id=chat_id,
-                        user_id=user_id,
-                        info=info,
-                        link=link,
-                        kp_id=int(kp_id),
-                        existing=None,  # Будет получено внутри функции через get_film_current_state
-                        message_id=message_id,
-                        message_thread_id=message_thread_id
-                    )
-                    logger.info("[SERIES SUBSCRIBE] Описание обновлено через show_film_info_with_buttons")
-                else:
-                    logger.warning("[SERIES SUBSCRIBE] Не удалось получить информацию для обновления описания")
             
-            except Exception as e:
-                logger.error(f"[SERIES SUBSCRIBE] Ошибка обновления описания: {e}", exc_info=True)
+            if info:
+                message_id = call.message.message_id if call.message else None
+                message_thread_id = getattr(call.message, 'message_thread_id', None)
+                
+                show_film_info_with_buttons(
+                    chat_id=chat_id,
+                    user_id=user_id,
+                    info=info,
+                    link=link,
+                    kp_id=int(kp_id),
+                    existing=None,  # Будет получено внутри функции через get_film_current_state
+                    message_id=message_id,
+                    message_thread_id=message_thread_id
+                )
+                logger.info("[SERIES SUBSCRIBE] Описание обновлено через show_film_info_with_buttons")
+            else:
+                logger.warning("[SERIES SUBSCRIBE] Не удалось получить информацию для обновления описания")
         
         except Exception as e:
-            logger.error(f"[SERIES SUBSCRIBE] КРИТИЧЕСКАЯ ошибка в хэндлере: {e}", exc_info=True)
-            try:
-                bot.send_message(chat_id, "🔔 Подписка добавлена с ошибкой. Попробуйте позже.")
-            except:
-                pass
-        
-        finally:
-            # answer_callback_query уже вызван в начале, но вызываем еще раз для финального уведомления
-            try:
-                bot.answer_callback_query(call.id, text="🔔 Подписка добавлена", show_alert=False)
-                logger.info(f"[SERIES SUBSCRIBE] Финальный answer_callback_query вызван с id={call.id}")
-            except Exception as e:
-                logger.warning(f"[SERIES SUBSCRIBE] Не удалось вызвать финальный answer_callback_query: {e}")
-            logger.info(f"[SERIES SUBSCRIBE] ===== END: callback_id={call.id}")
+            logger.error(f"[SERIES SUBSCRIBE] Ошибка обновления описания: {e}", exc_info=True)
+    
+    except Exception as e:
+        logger.error(f"[SERIES SUBSCRIBE] КРИТИЧЕСКАЯ ошибка в хэндлере: {e}", exc_info=True)
+        try:
+            bot.send_message(chat_id, "🔔 Подписка добавлена с ошибкой. Попробуйте позже.")
+        except:
+            pass
+    
+    finally:
+        # answer_callback_query уже вызван в начале, но вызываем еще раз для финального уведомления
+        try:
+            bot.answer_callback_query(call.id, text="🔔 Подписка добавлена", show_alert=False)
+            logger.info(f"[SERIES SUBSCRIBE] Финальный answer_callback_query вызван с id={call.id}")
+        except Exception as e:
+            logger.warning(f"[SERIES SUBSCRIBE] Не удалось вызвать финальный answer_callback_query: {e}")
+        logger.info(f"[SERIES SUBSCRIBE] ===== END: callback_id={call.id}")
 
     @bot.callback_query_handler(func=lambda call: call.data.startswith("series_unsubscribe:"))
     def series_unsubscribe_callback(call):
