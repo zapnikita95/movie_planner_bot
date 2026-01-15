@@ -280,7 +280,7 @@ def process_plan(bot, user_id, chat_id, link, plan_type, day_or_date, message_da
     
     text = f"✅ <b>{title}</b> запланирован на {date_str} {type_text}"
     
-    # Для планов "дома" проверяем, есть ли источники (онлайн-кинотеатры)
+    # Для планов "дома" показываем кнопку ТОЛЬКО если источники уже есть в БД
     if plan_type == 'home' and plan_id and kp_id:
         # Если кинотеатр уже выбран, показываем его с галкой
         if selected_streaming_service:
@@ -301,7 +301,7 @@ def process_plan(bot, user_id, chat_id, link, plan_type, day_or_date, message_da
                         if ticket_file_id:
                             try:
                                 sources_dict = json.loads(ticket_file_id)
-                                if sources_dict:
+                                if isinstance(sources_dict, dict) and len(sources_dict) > 0:
                                     has_sources = True
                             except:
                                 pass
@@ -315,19 +315,14 @@ def process_plan(bot, user_id, chat_id, link, plan_type, day_or_date, message_da
                 except:
                     pass
             
-            # Показываем кнопку, если источники есть или загружаются в фоне (если есть kp_id, источники могут быть)
-            if has_sources or (sources is not None and len(sources) > 0):
+            # Показываем кнопку ТОЛЬКО если источники уже есть
+            if has_sources:
                 text += "\n\nВы можете выбрать онлайн-кинотеатр для просмотра:"
                 if not markup.keyboard:
                     markup = InlineKeyboardMarkup(row_width=1)
                 markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"plan:show_streaming:{plan_id}"))
-            elif kp_id:
-                # Если kp_id есть, но источники еще не загружены, все равно показываем кнопку
-                # Источники загрузятся при нажатии на кнопку
-                text += "\n\nВы можете выбрать онлайн-кинотеатр для просмотра:"
-                if not markup.keyboard:
-                    markup = InlineKeyboardMarkup(row_width=1)
-                markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"plan:show_streaming:{plan_id}"))
+            else:
+                logger.info(f"[PROCESS PLAN] Источники ещё не загружены в БД для plan_id={plan_id} — кнопку не показываем")
     
     bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup if markup.keyboard else None)
     
@@ -337,7 +332,6 @@ def process_plan(bot, user_id, chat_id, link, plan_type, day_or_date, message_da
         logger.info(f"[PROCESS PLAN] Состояние планирования очищено для user_id={user_id}")
     
     return True
-
 
 def register_plan_handlers(bot):
     """Регистрирует обработчики команд /plan и /schedule"""
