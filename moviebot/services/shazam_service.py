@@ -828,24 +828,42 @@ def search_movies(query, top_k=15):
         D, I = index.search(query_emb, k=top_k * 5)
         logger.info(f"[SEARCH MOVIES] Поиск завершен, найдено индексов: {len(I[0])}")
         
-        # Если актёр упомянут — фильтруем только его фильмы
+        # Если актёр/режиссёр упомянут — фильтруем только его фильмы
+        # ПРИОРИТЕТ: сначала актёры, потом режиссёры
         candidate_indices = []
         candidate_distances = []
         if mentioned_actor_en:
             # Нормализуем имя для поиска (убираем пунктуацию, приводим к нижнему регистру)
-            actor_name_for_search = _normalize_text(mentioned_actor_en)  # Используем извлечённое имя, а не весь запрос
+            actor_name_for_search = _normalize_text(mentioned_actor_en)
+            
+            # Сначала собираем фильмы с актёром (приоритет №1)
+            actor_indices = []
+            actor_distances = []
+            # Затем собираем фильмы с режиссёром (приоритет №2, только если нет актёров)
+            director_indices = []
+            director_distances = []
             
             for i, idx in enumerate(I[0]):
                 if idx < len(movies):
                     row = movies.iloc[idx]
-                    # Нормализуем тексты из базы (убираем пунктуацию, приводим к нижнему регистру)
+                    # Нормализуем тексты из базы
                     actors_normalized = _normalize_text(row.get('actors_str', '')) if 'actors_str' in row.index else ''
                     director_normalized = _normalize_text(row.get('director_str', '')) if 'director_str' in row.index else ''
-                    # Ищем имя в актёрах или режиссёрах (оба нормализованы)
-                    if actor_name_for_search in actors_normalized or actor_name_for_search in director_normalized:
-                        candidate_indices.append(idx)
-                        candidate_distances.append(float(D[0][i]))
-            logger.info(f"[SEARCH MOVIES] Найдено фильмов с актёром/режиссёром '{actor_name_for_search}': {len(candidate_indices)}")
+                    
+                    # ПРИОРИТЕТ №1: Проверяем актёров
+                    if actor_name_for_search in actors_normalized:
+                        actor_indices.append(idx)
+                        actor_distances.append(float(D[0][i]))
+                    # ПРИОРИТЕТ №2: Проверяем режиссёров (только если не нашли в актёрах)
+                    elif actor_name_for_search in director_normalized:
+                        director_indices.append(idx)
+                        director_distances.append(float(D[0][i]))
+            
+            # Сначала добавляем фильмы с актёром, потом с режиссёром
+            candidate_indices = actor_indices + director_indices
+            candidate_distances = actor_distances + director_distances
+            
+            logger.info(f"[SEARCH MOVIES] Найдено фильмов с актёром '{actor_name_for_search}': {len(actor_indices)}, с режиссёром: {len(director_indices)}")
         else:
             # Обычный поиск - берём все результаты
             candidate_indices = I[0].tolist()
@@ -876,15 +894,22 @@ def search_movies(query, top_k=15):
             overview_boost = 30 if has_overview else 0  # бонус за наличие overview
             
             # ПРИОРИТЕТ №1: Буст за полное имя актёра/режиссёра (+400 если найдено) - САМЫЙ СИЛЬНЫЙ
+            # Сначала проверяем актёров (приоритет №1), потом режиссёров (приоритет №2)
             actor_boost = 0
             if mentioned_actor_en:
-                # Нормализуем тексты для сравнения (убираем пунктуацию, приводим к нижнему регистру)
+                # Нормализуем тексты для сравнения
                 actors_normalized = _normalize_text(row.get('actors_str', '')) if 'actors_str' in row.index else ''
                 director_normalized = _normalize_text(row.get('director_str', '')) if 'director_str' in row.index else ''
                 actor_name_for_search = _normalize_text(mentioned_actor_en)
-                if actor_name_for_search in actors_normalized or actor_name_for_search in director_normalized:
+                
+                # ПРИОРИТЕТ №1: Актёры
+                if actor_name_for_search in actors_normalized:
                     actor_boost = 400
-                    logger.info(f"[SEARCH MOVIES] Полное имя '{actor_name_for_search}' найдено → +400 для {imdb_id_clean}")
+                    logger.info(f"[SEARCH MOVIES] Полное имя актёра '{actor_name_for_search}' найдено → +400 для {imdb_id_clean}")
+                # ПРИОРИТЕТ №2: Режиссёры (такой же буст, если актёров нет)
+                elif actor_name_for_search in director_normalized:
+                    actor_boost = 400
+                    logger.info(f"[SEARCH MOVIES] Полное имя режиссёра '{actor_name_for_search}' найдено → +400 для {imdb_id_clean}")
             
             # ПРИОРИТЕТ №2: Keyword-матчинг по overview (×25 за каждое совпадение)
             overview_keyword_matches = 0
