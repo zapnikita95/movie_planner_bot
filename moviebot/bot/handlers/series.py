@@ -2188,7 +2188,6 @@ def register_series_handlers(bot_param):
                         # Годы из импортированных оценок (film_id = NULL) - проверяем тип через поле type в ratings
                         # Если type есть в ratings - используем его, иначе проверяем через movies по kp_id
                         if content_type == 'films':
-                            # Для фильмов: только те, где type = 'FILM' или (type NULL и в movies is_series = FALSE) или нет записи в movies
                             cursor_local.execute("""
                                 SELECT DISTINCT r.year
                                 FROM ratings r
@@ -2199,7 +2198,6 @@ def register_series_handlers(bot_param):
                                 ORDER BY r.year
                             """, (chat_id, user_id))
                         elif content_type == 'series':
-                            # Для сериалов: только те, где type = 'TV_SERIES' или (type NULL и в movies is_series = TRUE)
                             cursor_local.execute("""
                                 SELECT DISTINCT r.year
                                 FROM ratings r
@@ -2210,7 +2208,6 @@ def register_series_handlers(bot_param):
                                 ORDER BY r.year
                             """, (chat_id, user_id))
                         else:
-                            # Для mixed - все импортированные оценки
                             cursor_local.execute("""
                                 SELECT DISTINCT r.year
                                 FROM ratings r
@@ -2262,6 +2259,7 @@ def register_series_handlers(bot_param):
                         elif period == "2020–сейчас":
                             if any(y >= 2020 for y in years):
                                 available_periods.append(period)
+
                 elif mode == 'group_votes':
                     # Для режима "По оценкам в базе" - получаем годы из фильмов со средней оценкой группы >= 7.5
                     # Учитываем content_type: films - только фильмы, series - только сериалы, mixed - оба
@@ -2270,25 +2268,40 @@ def register_series_handlers(bot_param):
                     years = []
                     try:
                         # Добавляем фильтр по is_series в зависимости от content_type
-                        is_series_filter = ""
+                        is_series_param = None
                         if content_type == 'films':
-                            is_series_filter = "AND m.is_series = FALSE"
+                            is_series_param = 0
                         elif content_type == 'series':
-                            is_series_filter = "AND m.is_series = TRUE"
-                        # Если mixed - фильтр не добавляем
+                            is_series_param = 1
+                        # mixed - фильтр не добавляем (is_series_param = None)
+
+                        if is_series_param is not None:
+                            cursor_local.execute("""
+                                SELECT DISTINCT m.year
+                                FROM movies m
+                                WHERE m.chat_id = %s AND m.year IS NOT NULL AND m.is_series = %s
+                                AND EXISTS (
+                                    SELECT 1 FROM ratings r 
+                                    WHERE r.film_id = m.id AND r.chat_id = m.chat_id AND (r.is_imported = FALSE OR r.is_imported IS NULL) 
+                                    GROUP BY r.film_id, r.chat_id 
+                                    HAVING AVG(r.rating) >= 7.5
+                                )
+                                ORDER BY m.year
+                            """, (chat_id, is_series_param))
+                        else:
+                            cursor_local.execute("""
+                                SELECT DISTINCT m.year
+                                FROM movies m
+                                WHERE m.chat_id = %s AND m.year IS NOT NULL
+                                AND EXISTS (
+                                    SELECT 1 FROM ratings r 
+                                    WHERE r.film_id = m.id AND r.chat_id = m.chat_id AND (r.is_imported = FALSE OR r.is_imported IS NULL) 
+                                    GROUP BY r.film_id, r.chat_id 
+                                    HAVING AVG(r.rating) >= 7.5
+                                )
+                                ORDER BY m.year
+                            """, (chat_id,))
                         
-                        cursor_local.execute(f"""
-                            SELECT DISTINCT m.year
-                            FROM movies m
-                            WHERE m.chat_id = %s AND m.year IS NOT NULL {is_series_filter}
-                            AND EXISTS (
-                                SELECT 1 FROM ratings r 
-                                WHERE r.film_id = m.id AND r.chat_id = m.chat_id AND (r.is_imported = FALSE OR r.is_imported IS NULL) 
-                                GROUP BY r.film_id, r.chat_id 
-                                HAVING AVG(r.rating) >= 7.5
-                            )
-                            ORDER BY m.year
-                        """, (chat_id,))
                         years_rows = cursor_local.fetchall()
                         years = [row.get('year') if isinstance(row, dict) else row[0] for row in years_rows if row]
                     finally:
