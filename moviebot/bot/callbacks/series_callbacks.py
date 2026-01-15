@@ -817,7 +817,6 @@ def series_subscribe_callback(call):
             # Обновление сообщения - используем show_film_info_with_buttons для обновления описания
             logger.info("[SERIES UNSUBSCRIBE] Обновление описания через show_film_info_with_buttons")
             try:
-                from moviebot.api.kinopoisk_api import extract_movie_info
                 from moviebot.bot.handlers.series import show_film_info_with_buttons
                 
                 # Получаем link из БД
