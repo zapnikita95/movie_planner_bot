@@ -471,6 +471,44 @@ def build_tmdb_index():
     # Режиссёры (поле director уже готово как строка)
     df['director_str'] = df['director'].fillna('')
     
+    # Извлекаем всех актёров и режиссёров для построения топ-списков
+    logger.info("Извлечение всех актёров и режиссёров для построения топ-списков...")
+    from collections import Counter
+    
+    all_actors = []
+    all_directors = []
+    
+    for idx, row in df.iterrows():
+        # Актёры из cast
+        if pd.notna(row.get('cast')):
+            actors_list = parse_json_list(row['cast'], 'name', top_n=None)  # Все актёры
+            if actors_list:
+                all_actors.extend([actor.lower().strip() for actor in actors_list])
+        
+        # Режиссёры
+        if pd.notna(row.get('director')) and str(row['director']).strip():
+            director = str(row['director']).strip().lower()
+            if director and director != 'nan':
+                all_directors.append(director)
+    
+    # Подсчитываем частоту появления
+    actor_counts = Counter(all_actors)
+    director_counts = Counter(all_directors)
+    
+    # Топ-500 актёров и топ-100 режиссёров
+    top_500_actors = [actor for actor, count in actor_counts.most_common(500)]
+    top_100_directors = [director for director, count in director_counts.most_common(100)]
+    
+    # Сохраняем в файлы
+    TOP_ACTORS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(TOP_ACTORS_PATH, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(top_500_actors))
+    logger.info(f"✅ Сохранён топ-500 актёров: {len(top_500_actors)} имён (файл: {TOP_ACTORS_PATH})")
+    
+    with open(TOP_DIRECTORS_PATH, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(top_100_directors))
+    logger.info(f"✅ Сохранён топ-100 режиссёров: {len(top_100_directors)} имён (файл: {TOP_DIRECTORS_PATH})")
+    
     # Продюсеры
     df['producers_str'] = df['producers'].fillna('')
     
@@ -592,6 +630,43 @@ def build_tmdb_index():
     logger.info(f"Готово! Создан индекс на {len(processed)} фильмов")
     return index, processed
 
+def load_top_actors_and_directors():
+    """Загружает топ-500 актёров и топ-100 режиссёров из файлов"""
+    global _top_actors_set, _top_directors_set
+    
+    if _top_actors_set is not None and _top_directors_set is not None:
+        return _top_actors_set, _top_directors_set
+    
+    _top_actors_set = set()
+    _top_directors_set = set()
+    
+    # Загружаем топ-500 актёров
+    if TOP_ACTORS_PATH.exists():
+        try:
+            with open(TOP_ACTORS_PATH, 'r', encoding='utf-8') as f:
+                _top_actors_set = {line.strip().lower() for line in f if line.strip()}
+            logger.info(f"✅ Загружено {len(_top_actors_set)} актёров из топ-500")
+        except Exception as e:
+            logger.warning(f"Ошибка загрузки топ-актёров: {e}")
+            _top_actors_set = set()
+    else:
+        logger.warning(f"Файл топ-актёров не найден: {TOP_ACTORS_PATH}")
+    
+    # Загружаем топ-100 режиссёров
+    if TOP_DIRECTORS_PATH.exists():
+        try:
+            with open(TOP_DIRECTORS_PATH, 'r', encoding='utf-8') as f:
+                _top_directors_set = {line.strip().lower() for line in f if line.strip()}
+            logger.info(f"✅ Загружено {len(_top_directors_set)} режиссёров из топ-100")
+        except Exception as e:
+            logger.warning(f"Ошибка загрузки топ-режиссёров: {e}")
+            _top_directors_set = set()
+    else:
+        logger.warning(f"Файл топ-режиссёров не найден: {TOP_DIRECTORS_PATH}")
+    
+    return _top_actors_set, _top_directors_set
+
+
 def get_index_and_movies():
     global _index, _movies_df
     
@@ -634,6 +709,8 @@ def get_index_and_movies():
             _index, _movies_df = build_tmdb_index()
             if _index is not None and _movies_df is not None:
                 logger.info(f"[GET INDEX] Индекс успешно загружен, фильмов: {len(_movies_df)}")
+                # Загружаем топ-списки актёров и режиссёров
+                load_top_actors_and_directors()
             else:
                 logger.warning("[GET INDEX] build_tmdb_index() вернул None")
             return _index, _movies_df
@@ -836,6 +913,10 @@ def search_movies(query, top_k=15):
             # Нормализуем имя для поиска (убираем пунктуацию, приводим к нижнему регистру)
             actor_name_for_search = _normalize_text(mentioned_actor_en)
             
+            # Проверяем, является ли имя актёром или режиссёром из топ-списков
+            is_actor = actor_name_for_search in top_actors_set
+            is_director = actor_name_for_search in top_directors_set
+            
             # Сначала собираем фильмы с актёром (приоритет №1)
             actor_indices = []
             actor_distances = []
@@ -850,12 +931,12 @@ def search_movies(query, top_k=15):
                     actors_normalized = _normalize_text(row.get('actors_str', '')) if 'actors_str' in row.index else ''
                     director_normalized = _normalize_text(row.get('director_str', '')) if 'director_str' in row.index else ''
                     
-                    # ПРИОРИТЕТ №1: Проверяем актёров
-                    if actor_name_for_search in actors_normalized:
+                    # ПРИОРИТЕТ №1: Проверяем актёров (если имя в топ-актёрах или просто проверяем)
+                    if is_actor and actor_name_for_search in actors_normalized:
                         actor_indices.append(idx)
                         actor_distances.append(float(D[0][i]))
                     # ПРИОРИТЕТ №2: Проверяем режиссёров (только если не нашли в актёрах)
-                    elif actor_name_for_search in director_normalized:
+                    elif (is_director or not is_actor) and actor_name_for_search in director_normalized:
                         director_indices.append(idx)
                         director_distances.append(float(D[0][i]))
             
@@ -902,12 +983,16 @@ def search_movies(query, top_k=15):
                 director_normalized = _normalize_text(row.get('director_str', '')) if 'director_str' in row.index else ''
                 actor_name_for_search = _normalize_text(mentioned_actor_en)
                 
-                # ПРИОРИТЕТ №1: Актёры
-                if actor_name_for_search in actors_normalized:
+                # Проверяем, является ли имя актёром или режиссёром из топ-списков
+                is_actor = actor_name_for_search in top_actors_set
+                is_director = actor_name_for_search in top_directors_set
+                
+                # ПРИОРИТЕТ №1: Актёры (если имя в топ-актёрах или просто проверяем)
+                if is_actor and actor_name_for_search in actors_normalized:
                     actor_boost = 400
                     logger.info(f"[SEARCH MOVIES] Полное имя актёра '{actor_name_for_search}' найдено → +400 для {imdb_id_clean}")
                 # ПРИОРИТЕТ №2: Режиссёры (такой же буст, если актёров нет)
-                elif actor_name_for_search in director_normalized:
+                elif (is_director or not is_actor) and actor_name_for_search in director_normalized:
                     actor_boost = 400
                     logger.info(f"[SEARCH MOVIES] Полное имя режиссёра '{actor_name_for_search}' найдено → +400 для {imdb_id_clean}")
             
