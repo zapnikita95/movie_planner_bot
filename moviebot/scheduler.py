@@ -811,76 +811,76 @@ def clean_home_plans():
 
     try:
         with db_lock:
-        # Если сегодня понедельник, удаляем все планы дома на прошедшие выходные (суббота и воскресенье)
-        if today_weekday == 0:  # Monday
-            # Находим субботу и воскресенье прошлой недели
-            saturday = yesterday - timedelta(days=1)  # Вчера было воскресенье, значит суббота - позавчера
-            sunday = yesterday
+            # Если сегодня понедельник, удаляем все планы дома на прошедшие выходные (суббота и воскресенье)
+            if today_weekday == 0:  # Monday
+                # Находим субботу и воскресенье прошлой недели
+                saturday = yesterday - timedelta(days=1)  # Вчера было воскресенье, значит суббота - позавчера
+                sunday = yesterday
 
+                cursor_local.execute('''
+                    SELECT p.id, p.film_id, p.chat_id, m.title, m.link
+                    FROM plans p
+                    JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                    WHERE p.plan_type = 'home' 
+                    AND DATE(p.plan_datetime AT TIME ZONE 'Europe/Moscow') IN (%s, %s)
+                ''', (saturday, sunday))
+
+                weekend_rows = cursor_local.fetchall()
+
+                for row in weekend_rows:
+                    plan_id = row.get('id') if isinstance(row, dict) else row[0]
+                    film_id = row.get('film_id') if isinstance(row, dict) else row[1]
+                    chat_id = row.get('chat_id') if isinstance(row, dict) else row[2]
+                    title = row.get('title') if isinstance(row, dict) else row[3]
+                    link = row.get('link') if isinstance(row, dict) else row[4]
+                    
+                    cursor_local.execute('DELETE FROM plans WHERE id = %s', (plan_id,))
+                    deleted_count += 1
+                    
+                    if bot:
+                        try:
+                            message_text = f"📅 План на фильм <b>{title}</b> удалён (выходные прошли)."
+                            if link:
+                                message_text += f"\n\n{link}"
+                            bot.send_message(chat_id, message_text, parse_mode='HTML')
+                        except:
+                            pass
+                
+                logger.info(f"Очищены планы дома на выходные: {len(weekend_rows)} планов")
+            
+            # Находим планы дома на вчера (используем AT TIME ZONE для корректной работы с TIMESTAMP WITH TIME ZONE)
             cursor_local.execute('''
-                SELECT p.id, p.film_id, p.chat_id, m.title, m.link
+                SELECT p.id, p.film_id, p.chat_id
                 FROM plans p
-                JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
-                WHERE p.plan_type = 'home' 
-                AND DATE(p.plan_datetime AT TIME ZONE 'Europe/Moscow') IN (%s, %s)
-            ''', (saturday, sunday))
+                WHERE p.plan_type = 'home' AND DATE(p.plan_datetime AT TIME ZONE 'Europe/Moscow') = %s
+            ''', (yesterday,))
 
-            weekend_rows = cursor_local.fetchall()
+            rows = cursor_local.fetchall()
 
-            for row in weekend_rows:
+            for row in rows:
+                # RealDictCursor возвращает словари, но поддерживает доступ по индексу
                 plan_id = row.get('id') if isinstance(row, dict) else row[0]
                 film_id = row.get('film_id') if isinstance(row, dict) else row[1]
                 chat_id = row.get('chat_id') if isinstance(row, dict) else row[2]
-                title = row.get('title') if isinstance(row, dict) else row[3]
-                link = row.get('link') if isinstance(row, dict) else row[4]
-                
-                cursor_local.execute('DELETE FROM plans WHERE id = %s', (plan_id,))
-                deleted_count += 1
-                
-                if bot:
-                    try:
-                        message_text = f"📅 План на фильм <b>{title}</b> удалён (выходные прошли)."
-                        if link:
-                            message_text += f"\n\n{link}"
-                        bot.send_message(chat_id, message_text, parse_mode='HTML')
-                    except:
-                        pass
-            
-            logger.info(f"Очищены планы дома на выходные: {len(weekend_rows)} планов")
-        
-        # Находим планы дома на вчера (используем AT TIME ZONE для корректной работы с TIMESTAMP WITH TIME ZONE)
-        cursor_local.execute('''
-            SELECT p.id, p.film_id, p.chat_id
-            FROM plans p
-            WHERE p.plan_type = 'home' AND DATE(p.plan_datetime AT TIME ZONE 'Europe/Moscow') = %s
-        ''', (yesterday,))
 
-        rows = cursor_local.fetchall()
+                # Проверяем, есть ли оценки по фильму
+                cursor_local.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
 
-        for row in rows:
-            # RealDictCursor возвращает словари, но поддерживает доступ по индексу
-            plan_id = row.get('id') if isinstance(row, dict) else row[0]
-            film_id = row.get('film_id') if isinstance(row, dict) else row[1]
-            chat_id = row.get('chat_id') if isinstance(row, dict) else row[2]
+                count_row = cursor_local.fetchone()
 
-            # Проверяем, есть ли оценки по фильму
-            cursor_local.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+                count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
 
-            count_row = cursor_local.fetchone()
+                if count == 0:
+                    cursor_local.execute('DELETE FROM plans WHERE id = %s', (plan_id,))
+                    deleted_count += 1
 
-            count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
+                    if bot:
+                        try:
+                            bot.send_message(chat_id, f"📅 План на фильм удалён (нет оценок за вчера).")
+                        except:
+                            pass
 
-            if count == 0:
-                cursor_local.execute('DELETE FROM plans WHERE id = %s', (plan_id,))
-                deleted_count += 1
-
-                if bot:
-                    try:
-                        bot.send_message(chat_id, f"📅 План на фильм удалён (нет оценок за вчера).")
-                    except:
-                        pass
-
-        conn_local.commit()
+            conn_local.commit()
 
     finally:
         try:
