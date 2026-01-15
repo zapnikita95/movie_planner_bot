@@ -2155,21 +2155,32 @@ def register_series_handlers(bot_param):
                     cursor_local = get_db_cursor()
                     try:
                         # Добавляем фильтр по is_series в зависимости от content_type
-                        is_series_filter = ""
+                        is_series_param = None
                         if content_type == 'films':
-                            is_series_filter = "AND m.is_series = FALSE"
+                            is_series_param = 0
                         elif content_type == 'series':
-                            is_series_filter = "AND m.is_series = TRUE"
-                        # Если mixed - фильтр не добавляем
+                            is_series_param = 1
+                        # mixed - фильтр не добавляем (is_series_param = None)
+
+                        if is_series_param is not None:
+                            cursor_local.execute("""
+                                SELECT DISTINCT m.year
+                                FROM movies m
+                                JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
+                                WHERE m.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
+                                AND m.year IS NOT NULL AND m.is_series = %s
+                                ORDER BY m.year
+                            """, (chat_id, user_id, is_series_param))
+                        else:
+                            cursor_local.execute("""
+                                SELECT DISTINCT m.year
+                                FROM movies m
+                                JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
+                                WHERE m.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
+                                AND m.year IS NOT NULL
+                                ORDER BY m.year
+                            """, (chat_id, user_id))
                         
-                        cursor_local.execute(f"""
-                            SELECT DISTINCT m.year
-                            FROM movies m
-                            JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
-                            WHERE m.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
-                            AND m.year IS NOT NULL {is_series_filter}
-                            ORDER BY m.year
-                        """, (chat_id, user_id))
                         years_rows = cursor_local.fetchall()
                         years_from_movies = [row.get('year') if isinstance(row, dict) else row[0] for row in years_rows if row]
                         years.extend(years_from_movies)
@@ -2184,7 +2195,7 @@ def register_series_handlers(bot_param):
                                 LEFT JOIN movies m ON r.kp_id = m.kp_id AND r.chat_id = m.chat_id
                                 WHERE r.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
                                 AND r.film_id IS NULL AND r.year IS NOT NULL
-                                AND (r.type = 'FILM' OR (r.type IS NULL AND (m.id IS NULL OR m.is_series = FALSE)))
+                                AND (r.type = 'FILM' OR (r.type IS NULL AND (m.id IS NULL OR m.is_series = 0)))
                                 ORDER BY r.year
                             """, (chat_id, user_id))
                         elif content_type == 'series':
@@ -2195,7 +2206,7 @@ def register_series_handlers(bot_param):
                                 LEFT JOIN movies m ON r.kp_id = m.kp_id AND r.chat_id = m.chat_id
                                 WHERE r.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
                                 AND r.film_id IS NULL AND r.year IS NOT NULL
-                                AND (r.type = 'TV_SERIES' OR (r.type IS NULL AND m.id IS NOT NULL AND m.is_series = TRUE))
+                                AND (r.type = 'TV_SERIES' OR (r.type IS NULL AND m.id IS NOT NULL AND m.is_series = 1))
                                 ORDER BY r.year
                             """, (chat_id, user_id))
                         else:
@@ -2208,9 +2219,13 @@ def register_series_handlers(bot_param):
                                 ORDER BY r.year
                             """, (chat_id, user_id))
                         
-                        years_rows_imported = cursor_local.fetchall()
-                        years_from_imported = [row.get('year') if isinstance(row, dict) else row[0] for row in years_rows_imported if row]
-                        years.extend(years_from_imported)
+                        years_rows = cursor_local.fetchall()
+                        years_from_ratings = [row.get('year') if isinstance(row, dict) else row[0] for row in years_rows if row]
+                        years.extend(years_from_ratings)
+                        
+                        # Уникальные годы
+                        years = sorted(set(years))
+                        
                     finally:
                         try:
                             cursor_local.close()
