@@ -12,7 +12,9 @@ logger = logging.getLogger(__name__)
 # Глобальные переменные для подключения
 _conn = None
 _cursor = None
-db_lock = threading.Lock()
+# ВАЖНО: Используем RLock (реентерабельный lock) вместо Lock, чтобы избежать дедлоков
+# когда одна функция с db_lock вызывает другую функцию с db_lock в том же потоке
+db_lock = threading.RLock()
 
 def get_db_connection():
     """Получить подключение к БД"""

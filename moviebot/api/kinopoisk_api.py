@@ -528,11 +528,18 @@ def get_sequels(kp_id):
         logger.error(f"Ошибка get_sequels: {e}", exc_info=True)
         return {'sequels': [], 'remakes': []}
 
-def get_external_sources(kp_id: int):
+def get_external_sources(kp_id):
     """Получает внешние источники для просмотра фильма/сериала"""
-    if not isinstance(kp_id, int) or kp_id <= 0:
-            logger.warning(f"Некорректный kp_id: {kp_id} (не число или <=0)")
-            return []
+    # Конвертируем kp_id в int, если это возможно
+    try:
+        kp_id = int(kp_id)
+    except (ValueError, TypeError):
+        logger.warning(f"Некорректный kp_id: {kp_id} (не может быть преобразован в число)")
+        return []
+    
+    if kp_id <= 0:
+        logger.warning(f"Некорректный kp_id: {kp_id} (должно быть > 0)")
+        return []
     headers = {
         'X-API-KEY': KP_TOKEN,
         'Content-Type': 'application/json'

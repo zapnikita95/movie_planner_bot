@@ -414,7 +414,7 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
                 logger.info(f"[SHOW FILM INFO] Извлечен film_id_for_check={film_id_for_check} из existing={existing} (тип: {type(existing)})")
                 if film_id_for_check:
                     try:
-                        from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+                        # Используем импорт из начала файла, не создаем локальный
                         conn_check = get_db_connection()
                         cursor_check = get_db_cursor()
                         try:
