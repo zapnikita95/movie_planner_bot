@@ -238,7 +238,11 @@ def get_film_current_state(chat_id, kp_id, user_id=None):
     logger.info(f"[GET FILM STATE] ===== END: existing={existing is not None}, plan_info={plan_info is not None}, has_tickets={has_tickets}, is_subscribed={is_subscribed}")
     return result
 
-def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=None, message_id=None, message_thread_id=None):
+def show_film_info_with_buttons(
+    chat_id, user_id, info, link, kp_id,
+    existing=None, message_id=None, message_thread_id=None,
+    override_is_subscribed=None   # ← ДОБАВЛЕН ПАРАМЕТР
+):
     """Показывает описание фильма с кнопками действий"""
     import inspect
     import traceback
@@ -270,7 +274,6 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
 
     try:
         # ВАЖНО: Всегда проверяем актуальное состояние из БД для правильного chat_id
-        # Даже если existing передан, нужно убедиться, что он соответствует текущему chat_id
         logger.info(f"[SHOW FILM INFO] Проверка состояния фильма: chat_id={chat_id}, kp_id={kp_id}, existing передан={existing is not None}")
         
         # Всегда получаем актуальное состояние из БД для текущего chat_id
@@ -278,7 +281,10 @@ def show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing=No
         actual_existing = current_state['existing']
         plan_info = current_state['plan_info']
         has_tickets = current_state['has_tickets']
-        is_subscribed = current_state['is_subscribed']
+        
+        # Используем override, если передан (важно после подписки/отписки)
+        is_subscribed = override_is_subscribed if override_is_subscribed is not None else current_state['is_subscribed']
+        logger.info(f"[SHOW FILM INFO] is_subscribed = {is_subscribed} (override={override_is_subscribed is not None})")
         
         # Используем актуальный existing из БД (для правильного chat_id)
         if actual_existing:
