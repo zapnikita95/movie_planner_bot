@@ -610,18 +610,30 @@ def get_film_filters():
         return []
 
 
-def search_films_by_filters(genres=None, film_type='ALL', year_from=None, year_to=None, page=1):
-    """Поиск фильмов по фильтрам через API Кинопоиска"""
+def search_films_by_filters(genres=None, film_type=None, year_from=None, year_to=None, page=1):
+    """Поиск фильмов по фильтрам через API Кинопоиска
+    
+    Args:
+        genres: ID жанра (число) или список ID жанров
+        film_type: 'FILM' для фильмов, 'TV_SERIES' для сериалов, None для обоих типов
+        year_from: Начальный год (по умолчанию 1000)
+        year_to: Конечный год (по умолчанию 3000)
+        page: Номер страницы (по умолчанию 1)
+    """
     headers = {'X-API-KEY': KP_TOKEN, 'accept': 'application/json'}
     url = "https://kinopoiskapiunofficial.tech/api/v2.2/films"
     
     params = {
         'order': 'RATING',
-        'type': film_type,
         'ratingFrom': 0,
         'ratingTo': 10,
         'page': page
     }
+    
+    # Добавляем параметр type только если он указан (FILM или TV_SERIES)
+    # Если None - не передаем type, получим оба типа
+    if film_type:
+        params['type'] = film_type  # FILM или TV_SERIES
     
     if genres is not None:
         # Если список жанров, берем первый (API не поддерживает несколько одновременно)

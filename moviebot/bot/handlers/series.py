@@ -2115,8 +2115,8 @@ def register_series_handlers(bot_param):
                 bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
             
             return
-    
-    def _show_period_step(call, chat_id, user_id):
+
+def _show_period_step(call, chat_id, user_id):
         """Показывает шаг выбора периода для рандома с учетом типа контента (films/series/mixed)"""
         try:
             logger.info(f"[RANDOM] Showing period step for user {user_id}")
@@ -4657,7 +4657,17 @@ def register_series_handlers(bot_param):
                 # Получаем фильтры из состояния
                 periods = state.get('periods', [])
                 genres = state.get('genres', [])  # Это список id жанров
-                content_type = state.get('content_type', 'ALL')
+                content_type = state.get('content_type', 'mixed')  # films, series, mixed
+                
+                # Преобразуем content_type в формат API: FILM, TV_SERIES или None (для mixed не передаем type)
+                film_type_api = None
+                if content_type == 'films':
+                    film_type_api = 'FILM'
+                elif content_type == 'series':
+                    film_type_api = 'TV_SERIES'
+                # Если mixed - не передаем type (получим оба типа)
+                
+                logger.info(f"[RANDOM KINOPOISK] content_type={content_type}, film_type_api={film_type_api}")
                 
                 # Получаем любимый жанр из /total
                 fav_genre = None
@@ -4771,7 +4781,7 @@ def register_series_handlers(bot_param):
                             'genre_id': genre_id,
                             'year_from': year_from,
                             'year_to': year_to,
-                            'content_type': content_type
+                            'film_type_api': film_type_api  # FILM, TV_SERIES или None
                         })
                 
                 # Выполняем поиск по всем запросам
@@ -4783,13 +4793,13 @@ def register_series_handlers(bot_param):
                         genre_param = int(query['genre_id']) if query['genre_id'] else None
                         films = search_films_by_filters(
                             genres=genre_param,
-                            film_type=query['content_type'],
+                            film_type=query['film_type_api'],  # FILM, TV_SERIES или None (для mixed)
                             year_from=query['year_from'],
                             year_to=query['year_to'],
                             page=1
                         )
                         all_films.extend(films)
-                        logger.info(f"[RANDOM KINOPOISK] Найдено {len(films)} фильмов для запроса: genre={query['genre_id']}, year={query['year_from']}-{query['year_to']}, type={query['content_type']}")
+                        logger.info(f"[RANDOM KINOPOISK] Найдено {len(films)} фильмов для запроса: genre={query['genre_id']}, year={query['year_from']}-{query['year_to']}, type={query['film_type_api']}")
                     except Exception as e:
                         logger.error(f"[RANDOM KINOPOISK] Ошибка поиска для запроса {query}: {e}", exc_info=True)
                         continue
@@ -4847,7 +4857,14 @@ def register_series_handlers(bot_param):
                     
                     while attempt < max_attempts and not found_valid_film:
                         # Получаем полную информацию о фильме
-                        link = f"https://www.kinopoisk.ru/film/{kp_id_result}/"
+                        # Формируем ссылку в зависимости от типа (для сериалов /series/, для фильмов /film/)
+                        # Определяем тип из selected_film, если есть поле type
+                        film_type_from_result = selected_film.get('type', '').upper() if selected_film.get('type') else None
+                        if film_type_from_result == 'TV_SERIES':
+                            link = f"https://www.kinopoisk.ru/series/{kp_id_result}/"
+                        else:
+                            link = f"https://www.kinopoisk.ru/film/{kp_id_result}/"
+                        
                         movie_info = extract_movie_info(link)
                         
                         if movie_info:
@@ -4947,11 +4964,22 @@ def register_series_handlers(bot_param):
                     return
             
             # Для остальных режимов используем поиск в базе
+            # Получаем content_type из состояния для фильтрации
+            content_type = state.get('content_type', 'mixed')  # films, series, mixed
+            
             # Формируем запрос - исключаем фильмы, которые уже запланированы и фильмы с импортированными оценками
+            # Учитываем content_type: films - только фильмы, series - только сериалы, mixed - оба
+            is_series_filter = ""
+            if content_type == 'films':
+                is_series_filter = "AND m.is_series = FALSE"
+            elif content_type == 'series':
+                is_series_filter = "AND m.is_series = TRUE"
+            # Если mixed - фильтр не добавляем
+            
             query = """SELECT m.id, m.title, m.year, m.genres, m.director, m.actors, m.description, m.link, m.kp_id 
                        FROM movies m
                        LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
-                       WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
+                       WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL """ + is_series_filter + """
                        AND m.id NOT IN (SELECT film_id FROM plans WHERE chat_id = %s)"""
             params = [chat_id, chat_id]
             
@@ -4969,17 +4997,34 @@ def register_series_handlers(bot_param):
                     message_id = None
                 
                 # Получаем до 5 случайных фильмов с импортированной оценкой 9-10
+                # Учитываем content_type: films - только FILM, series - только TV_SERIES, mixed - оба
                 # Используем UNION для объединения фильмов из базы группы и импортированных оценок
+                
+                # Добавляем фильтр по is_series для фильмов из базы группы
+                is_series_filter = ""
+                if content_type == 'films':
+                    is_series_filter = "AND m.is_series = FALSE"
+                elif content_type == 'series':
+                    is_series_filter = "AND m.is_series = TRUE"
+                
+                # Добавляем фильтр по type для импортированных оценок (film_id = NULL)
+                type_filter = ""
+                if content_type == 'films':
+                    type_filter = "AND (r.type = 'FILM' OR (r.type IS NULL AND NOT EXISTS (SELECT 1 FROM movies m2 WHERE m2.kp_id = r.kp_id AND m2.chat_id = r.chat_id AND m2.is_series = TRUE)))"
+                elif content_type == 'series':
+                    type_filter = "AND (r.type = 'TV_SERIES' OR (r.type IS NULL AND EXISTS (SELECT 1 FROM movies m2 WHERE m2.kp_id = r.kp_id AND m2.chat_id = r.chat_id AND m2.is_series = TRUE)))"
+                # Если mixed - фильтр не добавляем
+                
                 conn_local = get_db_connection()
                 cursor_local = get_db_cursor()
                 favorite_films = []
                 try:
                     with db_lock:
-                        cursor_local.execute("""
+                        cursor_local.execute(f"""
                             (SELECT r.kp_id, NULL::integer as id
                             FROM ratings r
                             WHERE r.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
-                            AND r.film_id IS NULL AND r.kp_id IS NOT NULL
+                            AND r.film_id IS NULL AND r.kp_id IS NOT NULL {type_filter}
                             ORDER BY RANDOM()
                             LIMIT 5)
                             UNION ALL
@@ -4987,7 +5032,7 @@ def register_series_handlers(bot_param):
                             FROM movies m
                             JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
                             WHERE m.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
-                            AND m.kp_id IS NOT NULL
+                            AND m.kp_id IS NOT NULL {is_series_filter}
                             ORDER BY RANDOM()
                             LIMIT 5)
                         """, (chat_id, user_id, chat_id, user_id))
@@ -5121,6 +5166,7 @@ def register_series_handlers(bot_param):
             elif mode == 'group_votes':
                 # Для режима "По оценкам в базе" - выбираем до 5 фильмов из базы со средней оценкой >= 7.5,
                 # находим похожие к ним, фильтруем по критериям и показываем список с пагинацией
+                # Учитываем content_type: films - только фильмы, series - только сериалы, mixed - оба
                 
                 # Показываем индикатор загрузки
                 message_id = call.message.message_id
@@ -5134,6 +5180,9 @@ def register_series_handlers(bot_param):
                 genres = state.get('genres', [])
                 directors = state.get('directors', [])
                 actors = state.get('actors', [])
+                content_type = state.get('content_type', 'mixed')  # films, series, mixed
+                
+                logger.info(f"[RANDOM GROUP_VOTES] content_type={content_type}")
                 
                 # Получаем список kp_id фильмов, которые уже в базе (исключаем их)
                 exclude_kp_ids = set()
