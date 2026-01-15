@@ -77,8 +77,14 @@ def get_model():
             # Проверяем еще раз внутри блокировки
             if _model is None:
                 logger.info("Загрузка модели embeddings...")
-                _model = SentenceTransformer('BAAI/bge-large-en-v1.5')
-                logger.info("Модель embeddings загружена (bge-large-en-v1.5 — лучшая для retrieval на английском)")
+                # Позволяем выбрать модель через переменную окружения для оптимизации на Railway
+                model_name = os.getenv('EMBEDDINGS_MODEL', 'BAAI/bge-large-en-v1.5')
+                # Если установлен USE_FAST_EMBEDDINGS=1, используем более легкую модель
+                if os.getenv('USE_FAST_EMBEDDINGS', '0').strip().lower() in ('1', 'true', 'yes', 'on'):
+                    model_name = 'BAAI/bge-base-en-v1.5'
+                    logger.info("⚠️ USE_FAST_EMBEDDINGS=1 — используем более легкую модель для ускорения")
+                _model = SentenceTransformer(model_name)
+                logger.info(f"Модель embeddings загружена ({model_name} — лучшая для retrieval на английском)")
     return _model
 
 
@@ -541,12 +547,29 @@ def build_tmdb_index():
     model = get_model()
     descriptions = processed['description'].tolist()
     
+    # Оптимизация: увеличиваем batch_size для ускорения (можно настроить через переменную окружения)
+    batch_size = int(os.getenv('EMBEDDINGS_BATCH_SIZE', '64'))
+    logger.info(f"Используется batch_size={batch_size} для генерации эмбеддингов")
+    
     embeddings = []
-    batch_size = 32
-    for i in tqdm(range(0, len(descriptions), batch_size), desc="Embeddings"):
+    total_batches = (len(descriptions) + batch_size - 1) // batch_size
+    logger.info(f"Всего батчей для обработки: {total_batches}")
+    
+    for i in tqdm(range(0, len(descriptions), batch_size), desc="Embeddings", total=total_batches):
         batch = descriptions[i:i+batch_size]
-        batch_emb = model.encode(batch, show_progress_bar=False)
+        # Оптимизации для ускорения: convert_to_numpy=True, normalize_embeddings=False
+        batch_emb = model.encode(
+            batch, 
+            show_progress_bar=False,
+            convert_to_numpy=True,
+            normalize_embeddings=False,
+            batch_size=batch_size
+        )
         embeddings.extend(batch_emb)
+        
+        # Периодически логируем прогресс для мониторинга
+        if (i // batch_size + 1) % 10 == 0:
+            logger.info(f"Обработано {i + len(batch)}/{len(descriptions)} фильмов ({(i + len(batch)) / len(descriptions) * 100:.1f}%)")
     
     embeddings = np.array(embeddings).astype('float32')
     dimension = embeddings.shape[1]
