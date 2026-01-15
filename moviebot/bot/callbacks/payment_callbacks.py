@@ -3653,36 +3653,72 @@ def register_payment_callbacks(bot_instance):
                     
                     markup = InlineKeyboardMarkup(row_width=1)
                     
-                    # Главная кнопка — перейти к тарифам/периодам
-                    tariffs_callback = f"payment:tariffs:{subscription_type}:{subscription_id}"
-                    markup.add(InlineKeyboardButton("💰 Изменить тариф/период", callback_data=tariffs_callback))
-                    
-                    # Для группы — возможность докупить другие тарифы
-                    if subscription_type == 'group' and plan_type != 'all':
-                        group_size_str = str(group_size) if group_size else '2'
-                        # Определяем, какие тарифы отсутствуют
-                        missing_functions = []
-                        if plan_type != 'notifications':
-                            missing_functions.append(('notifications', '🔔 Уведомления о сериалах', SUBSCRIPTION_PRICES['group'][group_size_str]['notifications'].get('month', 0)))
-                        if plan_type != 'recommendations':
-                            missing_functions.append(('recommendations', '🎯 Рекомендации', SUBSCRIPTION_PRICES['group'][group_size_str]['recommendations'].get('month', 0)))
-                        if plan_type != 'tickets':
-                            missing_functions.append(('tickets', '🎫 Билеты', SUBSCRIPTION_PRICES['group'][group_size_str]['tickets'].get('month', 0)))
-                        
-                        # Предлагаем докупить недостающие тарифы или обновить до "Все режимы"
-                        if missing_functions:
-                            current_month_price = SUBSCRIPTION_PRICES['group'][group_size_str][plan_type].get('month', 0)
-                            all_month_price = SUBSCRIPTION_PRICES['group'][group_size_str]['all'].get('month', 0)
-                            upgrade_price = all_month_price - current_month_price
-                            if upgrade_price > 0:
-                                markup.add(InlineKeyboardButton(f"📦 Все режимы (+{upgrade_price}₽/мес)", callback_data=f"payment:upgrade_plan:{subscription_id}:all"))
+                    # Для личных и групповых подписок с отдельными функциями показываем кнопки с доплатой
+                    if plan_type != 'all':
+                        if subscription_type == 'personal':
+                            # Для личных подписок
+                            missing_functions = []
+                            if plan_type != 'notifications':
+                                missing_functions.append(('notifications', '🔔 Уведомления о сериалах', SUBSCRIPTION_PRICES['personal']['notifications'].get('month', 0)))
+                            if plan_type != 'recommendations':
+                                missing_functions.append(('recommendations', '🎯 Рекомендации', SUBSCRIPTION_PRICES['personal']['recommendations'].get('month', 0)))
+                            if plan_type != 'tickets':
+                                missing_functions.append(('tickets', '🎫 Билеты', SUBSCRIPTION_PRICES['personal']['tickets'].get('month', 0)))
                             
-                            # Предлагаем докупить отдельные функции (если их 1-2)
-                            if len(missing_functions) <= 2:
-                                for func_type, func_name, func_price in missing_functions:
-                                    add_price = func_price - current_month_price if func_price > current_month_price else func_price
-                                    if add_price > 0:
-                                        markup.add(InlineKeyboardButton(f"{func_name} (+{add_price}₽/мес)", callback_data=f"payment:upgrade_plan:{subscription_id}:{func_type}"))
+                            # Предлагаем докупить недостающие тарифы или обновить до "Все режимы"
+                            if missing_functions:
+                                current_month_price = SUBSCRIPTION_PRICES['personal'][plan_type].get('month', 0)
+                                all_month_price = SUBSCRIPTION_PRICES['personal']['all'].get('month', 0)
+                                upgrade_price = all_month_price - current_month_price
+                                if upgrade_price > 0:
+                                    markup.add(InlineKeyboardButton(f"📦 Все режимы (+{upgrade_price}₽/мес)", callback_data=f"payment:upgrade_plan:{subscription_id}:all"))
+                                
+                                # Предлагаем докупить отдельные функции (если их 1-2)
+                                if len(missing_functions) <= 2:
+                                    for func_type, func_name, func_price in missing_functions:
+                                        # Доплата = разница между новой ценой и текущей ценой
+                                        add_price = func_price - current_month_price
+                                        if add_price > 0:
+                                            markup.add(InlineKeyboardButton(f"{func_name} (+{add_price}₽/мес)", callback_data=f"payment:upgrade_plan:{subscription_id}:{func_type}"))
+                                        elif add_price < 0:
+                                            # Если цена меньше, показываем без "+"
+                                            markup.add(InlineKeyboardButton(f"{func_name} ({add_price}₽/мес)", callback_data=f"payment:upgrade_plan:{subscription_id}:{func_type}"))
+                                        else:
+                                            # Если цена одинаковая, показываем без доплаты
+                                            markup.add(InlineKeyboardButton(f"{func_name} (0₽/мес)", callback_data=f"payment:upgrade_plan:{subscription_id}:{func_type}"))
+                        else:
+                            # Для групповых подписок
+                            group_size_str = str(group_size) if group_size else '2'
+                            # Определяем, какие тарифы отсутствуют
+                            missing_functions = []
+                            if plan_type != 'notifications':
+                                missing_functions.append(('notifications', '🔔 Уведомления о сериалах', SUBSCRIPTION_PRICES['group'][group_size_str]['notifications'].get('month', 0)))
+                            if plan_type != 'recommendations':
+                                missing_functions.append(('recommendations', '🎯 Рекомендации', SUBSCRIPTION_PRICES['group'][group_size_str]['recommendations'].get('month', 0)))
+                            if plan_type != 'tickets':
+                                missing_functions.append(('tickets', '🎫 Билеты', SUBSCRIPTION_PRICES['group'][group_size_str]['tickets'].get('month', 0)))
+                            
+                            # Предлагаем докупить недостающие тарифы или обновить до "Все режимы"
+                            if missing_functions:
+                                current_month_price = SUBSCRIPTION_PRICES['group'][group_size_str][plan_type].get('month', 0)
+                                all_month_price = SUBSCRIPTION_PRICES['group'][group_size_str]['all'].get('month', 0)
+                                upgrade_price = all_month_price - current_month_price
+                                if upgrade_price > 0:
+                                    markup.add(InlineKeyboardButton(f"📦 Все режимы (+{upgrade_price}₽/мес)", callback_data=f"payment:upgrade_plan:{subscription_id}:all"))
+                                
+                                # Предлагаем докупить отдельные функции (если их 1-2)
+                                if len(missing_functions) <= 2:
+                                    for func_type, func_name, func_price in missing_functions:
+                                        # Доплата = разница между новой ценой и текущей ценой
+                                        add_price = func_price - current_month_price
+                                        if add_price > 0:
+                                            markup.add(InlineKeyboardButton(f"{func_name} (+{add_price}₽/мес)", callback_data=f"payment:upgrade_plan:{subscription_id}:{func_type}"))
+                                        elif add_price < 0:
+                                            # Если цена меньше, показываем без "+"
+                                            markup.add(InlineKeyboardButton(f"{func_name} ({add_price}₽/мес)", callback_data=f"payment:upgrade_plan:{subscription_id}:{func_type}"))
+                                        else:
+                                            # Если цена одинаковая, показываем без доплаты
+                                            markup.add(InlineKeyboardButton(f"{func_name} (0₽/мес)", callback_data=f"payment:upgrade_plan:{subscription_id}:{func_type}"))
                     
                     # Для группы — расширение размера (expand)
                     if subscription_type == 'group' and group_size and group_size < 10:
@@ -5937,29 +5973,40 @@ def register_payment_callbacks(bot_instance):
                 group_size = sub.get('group_size')
                 subscription_type = sub.get('subscription_type')
             
-                if subscription_type != 'group':
-                    bot_instance.answer_callback_query(call.id, "Эта функция доступна только для групповых подписок", show_alert=True)
-                    return
-            
                 if current_plan_type == new_plan_type:
                     bot_instance.answer_callback_query(call.id, "У вас уже есть эта подписка", show_alert=True)
                     return
             
                 # Вычисляем цену для новой подписки
-                group_size_str = str(group_size) if group_size else '2'
-            
-                # Для отдельных функций (notifications, recommendations, tickets) доступна только месячная подписка
-                # Для "all" используем текущий период подписки
-                if new_plan_type in ['notifications', 'recommendations', 'tickets']:
-                    # Отдельные функции - только месячная подписка
-                    new_price = SUBSCRIPTION_PRICES['group'][group_size_str][new_plan_type].get('month', 0)
-                    current_month_price = SUBSCRIPTION_PRICES['group'][group_size_str][current_plan_type].get('month', 0)
-                    upgrade_price = new_price - current_month_price
+                if subscription_type == 'personal':
+                    # Для личных подписок
+                    # Для отдельных функций (notifications, recommendations, tickets) доступна только месячная подписка
+                    # Для "all" используем текущий период подписки
+                    if new_plan_type in ['notifications', 'recommendations', 'tickets']:
+                        # Отдельные функции - только месячная подписка
+                        new_price = SUBSCRIPTION_PRICES['personal'][new_plan_type].get('month', 0)
+                        current_month_price = SUBSCRIPTION_PRICES['personal'][current_plan_type].get('month', 0)
+                        upgrade_price = new_price - current_month_price
+                    else:
+                        # Для "all" используем текущий период
+                        new_price = SUBSCRIPTION_PRICES['personal'][new_plan_type].get(period_type, 0)
+                        current_price = SUBSCRIPTION_PRICES['personal'][current_plan_type].get(period_type, 0)
+                        upgrade_price = new_price - current_price
                 else:
-                    # Для "all" используем текущий период
-                    new_price = SUBSCRIPTION_PRICES['group'][group_size_str][new_plan_type].get(period_type, 0)
-                    current_price = SUBSCRIPTION_PRICES['group'][group_size_str][current_plan_type].get(period_type, 0)
-                    upgrade_price = new_price - current_price
+                    # Для групповых подписок
+                    group_size_str = str(group_size) if group_size else '2'
+                    # Для отдельных функций (notifications, recommendations, tickets) доступна только месячная подписка
+                    # Для "all" используем текущий период подписки
+                    if new_plan_type in ['notifications', 'recommendations', 'tickets']:
+                        # Отдельные функции - только месячная подписка
+                        new_price = SUBSCRIPTION_PRICES['group'][group_size_str][new_plan_type].get('month', 0)
+                        current_month_price = SUBSCRIPTION_PRICES['group'][group_size_str][current_plan_type].get('month', 0)
+                        upgrade_price = new_price - current_month_price
+                    else:
+                        # Для "all" используем текущий период
+                        new_price = SUBSCRIPTION_PRICES['group'][group_size_str][new_plan_type].get(period_type, 0)
+                        current_price = SUBSCRIPTION_PRICES['group'][group_size_str][current_plan_type].get(period_type, 0)
+                        upgrade_price = new_price - current_price
             
                 # Получаем информацию о следующем списании
                 next_payment_date = sub.get('next_payment_date')
@@ -6020,20 +6067,50 @@ def register_payment_callbacks(bot_instance):
                     text += "Подписка будет изменена со следующего списания.\n"
                     markup.add(InlineKeyboardButton("✅ Подтвердить", callback_data=f"payment:change_from_next:{subscription_id}:{new_plan_type}"))
                 
-                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
+                # Кнопка "Назад" в зависимости от типа подписки
+                if subscription_type == 'personal':
+                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:personal"))
+                else:
+                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
             
+                # Сначала отвечаем на callback query
                 try:
-                    safe_edit_message(
-                        bot_instance,
+                    bot_instance.answer_callback_query(call.id)
+                except Exception as e:
+                    logger.warning(f"[PAYMENT] Ошибка answer_callback_query: {e}")
+                
+                try:
+                    bot_instance.edit_message_text(
+                        text=text,
                         chat_id=call.message.chat.id,
                         message_id=call.message.message_id,
-                        text=text,
                         reply_markup=markup,
                         parse_mode='HTML'
                     )
+                    logger.info(f"[PAYMENT] Сообщение обновлено для upgrade_plan: user_id={user_id}, subscription_id={subscription_id}, new_plan_type={new_plan_type}")
                 except Exception as e:
-                    if "message is not modified" not in str(e):
-                        logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
+                    error_str = str(e).lower()
+                    if "message is not modified" not in error_str:
+                        logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}", exc_info=True)
+                        try:
+                            bot_instance.send_message(
+                                call.message.chat.id,
+                                text,
+                                reply_markup=markup,
+                                parse_mode='HTML'
+                            )
+                        except Exception as e2:
+                            logger.error(f"[PAYMENT] Ошибка отправки нового сообщения: {e2}", exc_info=True)
+                    else:
+                        # Обновляем только клавиатуру
+                        try:
+                            bot_instance.edit_message_reply_markup(
+                                chat_id=call.message.chat.id,
+                                message_id=call.message.message_id,
+                                reply_markup=markup
+                            )
+                        except Exception as e2:
+                            logger.error(f"[PAYMENT] Ошибка обновления клавиатуры: {e2}", exc_info=True)
                 return
         
             if action.startswith("change_from_next:"):
@@ -6063,14 +6140,23 @@ def register_payment_callbacks(bot_instance):
                 current_plan_type = sub.get('plan_type')
                 period_type = sub.get('period_type', 'month')
                 group_size = sub.get('group_size')
+                subscription_type = sub.get('subscription_type')
                 next_payment_date = sub.get('next_payment_date')
                 
                 # Вычисляем новую цену
-                group_size_str = str(group_size) if group_size else '2'
-                if new_plan_type in ['notifications', 'recommendations', 'tickets']:
-                    new_price = SUBSCRIPTION_PRICES['group'][group_size_str][new_plan_type].get('month', 0)
+                if subscription_type == 'personal':
+                    # Для личных подписок
+                    if new_plan_type in ['notifications', 'recommendations', 'tickets']:
+                        new_price = SUBSCRIPTION_PRICES['personal'][new_plan_type].get('month', 0)
+                    else:
+                        new_price = SUBSCRIPTION_PRICES['personal'][new_plan_type].get(period_type, 0)
                 else:
-                    new_price = SUBSCRIPTION_PRICES['group'][group_size_str][new_plan_type].get(period_type, 0)
+                    # Для групповых подписок
+                    group_size_str = str(group_size) if group_size else '2'
+                    if new_plan_type in ['notifications', 'recommendations', 'tickets']:
+                        new_price = SUBSCRIPTION_PRICES['group'][group_size_str][new_plan_type].get('month', 0)
+                    else:
+                        new_price = SUBSCRIPTION_PRICES['group'][group_size_str][new_plan_type].get(period_type, 0)
                 
                 # Обновляем подписку: меняем plan_type и price, но сохраняем next_payment_date
                 update_subscription_plan_type(subscription_id, new_plan_type, new_price)
@@ -6103,7 +6189,11 @@ def register_payment_callbacks(bot_instance):
                 text += f"💰 <b>Сумма списания:</b> {new_price}₽"
                 
                 markup = InlineKeyboardMarkup(row_width=1)
-                markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
+                # Кнопка "Назад" в зависимости от типа подписки
+                if subscription_type == 'personal':
+                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:personal"))
+                else:
+                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
                 
                 try:
                     safe_edit_message(
