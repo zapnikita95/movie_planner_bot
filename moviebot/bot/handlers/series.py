@@ -2348,10 +2348,11 @@ def register_series_handlers(bot_param):
                     # Добавляем фильтр по is_series в зависимости от content_type
                     is_series_filter = ""
                     if content_type == 'films':
-                        is_series_filter = "AND m.is_series = FALSE"
+                        is_series_filter = "AND m.is_series = 0"
                     elif content_type == 'series':
-                        is_series_filter = "AND m.is_series = TRUE"
-                    # Если mixed - фильтр не добавляем
+                        is_series_filter = "AND m.is_series = 1"
+                    else:
+                        is_series_filter = ""
                     
                     base_query += f" {is_series_filter}"
                     params = [chat_id]
@@ -2864,9 +2865,10 @@ def register_series_handlers(bot_param):
                 # Добавляем фильтр по is_series для фильмов из базы группы
                 is_series_filter = ""
                 if content_type == 'films':
-                    is_series_filter = "AND m.is_series = FALSE"
+                    is_series_filter = "AND m.is_series = 0"
                 elif content_type == 'series':
-                    is_series_filter = "AND m.is_series = TRUE"
+                    is_series_filter = "AND m.is_series = 1"
+                # mixed - фильтр не добавляем
                 
                 base_query = """
                     SELECT DISTINCT genre FROM (
@@ -2944,9 +2946,10 @@ def register_series_handlers(bot_param):
                 # Учитываем content_type: films - только фильмы, series - только сериалы, mixed - оба
                 is_series_filter = ""
                 if content_type == 'films':
-                    is_series_filter = "AND m.is_series = FALSE"
+                    is_series_filter = "AND m.is_series = 0"
                 elif content_type == 'series':
-                    is_series_filter = "AND m.is_series = TRUE"
+                    is_series_filter = "AND m.is_series = 1"
+                # mixed - фильтр не добавляем
                 
                 base_query = """
                     SELECT DISTINCT TRIM(UNNEST(string_to_array(m.genres, ', '))) as genre
@@ -2967,9 +2970,10 @@ def register_series_handlers(bot_param):
                 # Учитываем content_type: films - только фильмы, series - только сериалы, mixed - оба
                 is_series_filter = ""
                 if content_type == 'films':
-                    is_series_filter = "AND m.is_series = FALSE"
+                    is_series_filter = "AND m.is_series = 0"
                 elif content_type == 'series':
-                    is_series_filter = "AND m.is_series = TRUE"
+                    is_series_filter = "AND m.is_series = 1"
+                # mixed - фильтр не добавляем
                 
                 base_query = """
                     SELECT DISTINCT TRIM(UNNEST(string_to_array(m.genres, ', '))) as genre
@@ -3100,9 +3104,10 @@ def register_series_handlers(bot_param):
             # Учитываем content_type: films - только фильмы, series - только сериалы, mixed - оба
             is_series_filter = ""
             if content_type == 'films':
-                is_series_filter = "AND m.is_series = FALSE"
+                is_series_filter = "AND m.is_series = 0"
             elif content_type == 'series':
-                is_series_filter = "AND m.is_series = TRUE"
+                is_series_filter = "AND m.is_series = 1"
+            # mixed - фильтр не добавляем
             
             base_query = """
                 SELECT m.director, COUNT(*) as cnt
@@ -3237,14 +3242,18 @@ def register_series_handlers(bot_param):
             
             logger.info(f"[RANDOM] Actor step group_votes: content_type={content_type}")
             
-            # Формируем WHERE условие с учетом всех фильтров и средней оценки >= 7.5
-            # Учитываем content_type: films - только фильмы, series - только сериалы, mixed - оба
+            # Добавляем фильтр по is_series в зависимости от content_type
             is_series_filter = ""
             if content_type == 'films':
-                is_series_filter = "AND m.is_series = FALSE"
+                is_series_filter = "AND m.is_series = 0"
             elif content_type == 'series':
-                is_series_filter = "AND m.is_series = TRUE"
+                is_series_filter = "AND m.is_series = 1"
+            else:
+                is_series_filter = ""
             
+            base_query += f" {is_series_filter}"
+            params = [chat_id]
+
             base_query = """
                 SELECT m.actors 
                 FROM movies m
@@ -3398,9 +3407,10 @@ def register_series_handlers(bot_param):
             # Добавляем фильтр по is_series для фильмов из базы группы
             is_series_filter = ""
             if content_type == 'films':
-                is_series_filter = "AND m.is_series = FALSE"
+                is_series_filter = "AND m.is_series = 0"
             elif content_type == 'series':
-                is_series_filter = "AND m.is_series = TRUE"
+                is_series_filter = "AND m.is_series = 1"
+            # mixed - фильтр не добавляем
             
             base_query = """
                 SELECT DISTINCT kp_id FROM (
@@ -3599,9 +3609,10 @@ def register_series_handlers(bot_param):
             # Добавляем фильтр по is_series для фильмов из базы группы
             is_series_filter = ""
             if content_type == 'films':
-                is_series_filter = "AND m.is_series = FALSE"
+                is_series_filter = "AND m.is_series = 0"
             elif content_type == 'series':
-                is_series_filter = "AND m.is_series = TRUE"
+                is_series_filter = "AND m.is_series = 1"
+            # mixed - фильтр не добавляем
             
             base_query = """
                 SELECT DISTINCT m.kp_id
@@ -5176,16 +5187,17 @@ def register_series_handlers(bot_param):
                 # Добавляем фильтр по is_series для фильмов из базы группы
                 is_series_filter = ""
                 if content_type == 'films':
-                    is_series_filter = "AND m.is_series = FALSE"
+                    is_series_filter = "AND m.is_series = 0"
                 elif content_type == 'series':
-                    is_series_filter = "AND m.is_series = TRUE"
+                    is_series_filter = "AND m.is_series = 1"
+                # mixed - фильтр не добавляем
                 
                 # Добавляем фильтр по type для импортированных оценок (film_id = NULL)
                 type_filter = ""
                 if content_type == 'films':
-                    type_filter = "AND (r.type = 'FILM' OR (r.type IS NULL AND NOT EXISTS (SELECT 1 FROM movies m2 WHERE m2.kp_id = r.kp_id AND m2.chat_id = r.chat_id AND m2.is_series = TRUE)))"
+                    type_filter = "AND (r.type = 'FILM' OR (r.type IS NULL AND NOT EXISTS (SELECT 1 FROM movies m2 WHERE m2.kp_id = r.kp_id AND m2.chat_id = r.chat_id AND m2.is_series = 0)))"
                 elif content_type == 'series':
-                    type_filter = "AND (r.type = 'TV_SERIES' OR (r.type IS NULL AND EXISTS (SELECT 1 FROM movies m2 WHERE m2.kp_id = r.kp_id AND m2.chat_id = r.chat_id AND m2.is_series = TRUE)))"
+                    type_filter = "AND (r.type = 'TV_SERIES' OR (r.type IS NULL AND EXISTS (SELECT 1 FROM movies m2 WHERE m2.kp_id = r.kp_id AND m2.chat_id = r.chat_id AND m2.is_series = 1)))"
                 # Если mixed - фильтр не добавляем
                 
                 conn_local = get_db_connection()
@@ -5383,9 +5395,10 @@ def register_series_handlers(bot_param):
                 # Учитываем content_type: films - только фильмы, series - только сериалы, mixed - оба
                 is_series_filter = ""
                 if content_type == 'films':
-                    is_series_filter = "AND m.is_series = FALSE"
+                    is_series_filter = "AND m.is_series = 0"
                 elif content_type == 'series':
-                    is_series_filter = "AND m.is_series = TRUE"
+                    is_series_filter = "AND m.is_series = 1"
+                # mixed - фильтр не добавляем
                 
                 base_query = """
                     SELECT m.kp_id, m.title, m.year, m.genres
