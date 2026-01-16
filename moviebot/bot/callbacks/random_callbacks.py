@@ -8,7 +8,7 @@ from moviebot.database.db_operations import get_user_films_count
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 from moviebot.bot.handlers.text_messages import expect_text_from_user, user_search_state
 from moviebot.states import user_random_state
-
+from moviebot.bot.handlers.series import _show_genre_step
 from moviebot.utils.helpers import has_recommendations_access
 
 
@@ -374,40 +374,45 @@ def register_random_callbacks(bot):
         """Обработчик выбора периода для рандома"""
         try:
             logger.info(f"[RANDOM PERIOD] ===== START: callback_id={call.id}, user_id={call.from_user.id}, data={call.data}")
+            
             user_id = call.from_user.id
             chat_id = call.message.chat.id
+            message_id = call.message.message_id
             
-            bot.answer_callback_query(call.id)  # сразу отвечаем Telegram
+            # Сразу отвечаем телеграму, чтобы не было "часиков"
+            bot.answer_callback_query(call.id)
             
-            data = call.data.split(":", 1)[1]   # "2010–2020" или "skip" или "done"
+            # Разбираем действие
+            action = call.data.split(":", 1)[1]   # "До 1980", "2010–2020", "skip", "done"
             
             if user_id not in user_random_state:
                 logger.warning(f"[RANDOM PERIOD] State not found for user_id={user_id}")
-                bot.answer_callback_query(call.id, "❌ Состояние потеряно", show_alert=True)
+                bot.answer_callback_query(call.id, "❌ Состояние потеряно. Начни заново (/random)", show_alert=True)
                 return
             
             state = user_random_state[user_id]
-            periods = state.get('periods', [])
+            periods = state.get('periods', [])  # list выбранных периодов
             
-            if data == "skip":
-                state['periods'] = []  # пропуск = без фильтра по периоду
-                logger.info(f"[RANDOM PERIOD] Periods skipped")
-            elif data == "done":
-                logger.info(f"[RANDOM PERIOD] Periods confirmed: {periods}")
-                # идём дальше к жанрам
+            if action == "skip":
+                state['periods'] = []
+                logger.info(f"[RANDOM PERIOD] Periods skipped (user={user_id})")
+            elif action == "done":
+                logger.info(f"[RANDOM PERIOD] Periods confirmed: {periods} (user={user_id})")
+                # дальше к жанрам
             else:
                 # toggle периода
-                if data in periods:
-                    periods.remove(data)
-                    logger.info(f"[RANDOM PERIOD] Period removed: {data}")
+                if action in periods:
+                    periods.remove(action)
+                    logger.info(f"[RANDOM PERIOD] Period removed: {action} (user={user_id})")
                 else:
-                    periods.append(data)
-                    logger.info(f"[RANDOM PERIOD] Period added: {data}")
+                    periods.append(action)
+                    logger.info(f"[RANDOM PERIOD] Period added: {action} (user={user_id})")
                 state['periods'] = periods
             
-            # Обновляем клавиатуру (показываем выбранные галочки)
+            # Формируем обновлённую клавиатуру
             available_periods = state.get('available_periods', [])
             markup = InlineKeyboardMarkup(row_width=1)
+            
             for period in available_periods:
                 label = f"✓ {period}" if period in periods else period
                 markup.add(InlineKeyboardButton(label, callback_data=f"rand_period:{period}"))
@@ -416,32 +421,43 @@ def register_random_callbacks(bot):
                 markup.add(InlineKeyboardButton("Продолжить ➡️", callback_data="rand_period:done"))
             else:
                 markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
+            
             markup.add(InlineKeyboardButton("⬅️ Назад к режимам", callback_data="rand_mode:back"))
             
-            # Текст сообщения (можно сделать динамическим, но для начала простой)
-            text = "🎲 <b>Выберите период</b>\n\nВыбрано: " + (", ".join(periods) if periods else "ничего") + "\n(можно выбрать несколько)"
+            # Текст
+            selected_text = ", ".join(periods) if periods else "ничего"
+            text = f"🎲 <b>Выберите период</b>\n\nВыбрано: {selected_text}\n(можно выбрать несколько)"
             
             try:
-                bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-            except Exception as e:
-                logger.warning(f"[RANDOM PERIOD] Edit failed: {e}")
-                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                bot.edit_message_text(
+                    text,
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    reply_markup=markup,
+                    parse_mode='HTML'
+                )
+            except Exception as edit_e:
+                logger.warning(f"[RANDOM PERIOD] Edit failed: {edit_e}")
+                bot.send_message(
+                    chat_id,
+                    text,
+                    reply_markup=markup,
+                    parse_mode='HTML'
+                )
             
-            # Если нажали "done" или "skip" — переходим к жанрам
-            if data in ["done", "skip"]:
+            # Переход к следующему шагу
+            if action in ["done", "skip"]:
                 state['step'] = 'genre'
-                _show_genre_step(call, chat_id, user_id)  # ← твоя функция показа жанров
+                _show_genre_step(call, chat_id, user_id)
             
-            logger.info(f"[RANDOM PERIOD] ✅ Handled: {data}, periods now: {state['periods']}")
+            logger.info(f"[RANDOM PERIOD] ✅ Handled action={action}, periods now={state.get('periods')} (user={user_id})")
         
         except Exception as e:
-            logger.error(f"[RANDOM PERIOD] ❌ ERROR: {e}", exc_info=True)
+            logger.error(f"[RANDOM PERIOD] ❌ CRITICAL ERROR: {e}", exc_info=True)
             try:
-                bot.answer_callback_query(call.id, "Ошибка обработки периода", show_alert=True)
+                bot.answer_callback_query(call.id, "Ошибка обработки периода. Попробуй заново.", show_alert=True)
             except:
-                pass
-
-    logger.info("✅ Random callbacks registered")
+                pass  # если answer уже был — не страшно
     
     @bot.callback_query_handler(func=lambda call: call.data == "rand_mode:back")
     def handle_rand_mode_back(call):
