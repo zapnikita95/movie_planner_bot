@@ -1205,7 +1205,13 @@ def series_subscribe_callback(call):
                 if state.get('kp_id') == kp_id and state.get('season_num') == season_num:
                     current_page = state.get('page', 1)
             
-            show_episodes_page(kp_id, season_num, chat_id, user_id, page=current_page, message_id=message_id, message_thread_id=message_thread_id)
+            result = show_episodes_page(kp_id, season_num, chat_id, user_id, page=current_page, message_id=message_id, message_thread_id=message_thread_id)
+            if not result:
+                logger.warning(f"[EPISODE TOGGLE] show_episodes_page вернула False, возможно ошибка обновления сообщения")
+                try:
+                    bot.answer_callback_query(call.id, "⚠️ Не удалось обновить сообщение", show_alert=False)
+                except:
+                    pass
         except Exception as e:
             logger.error(f"[EPISODE TOGGLE] Ошибка: {e}", exc_info=True)
             try:
