@@ -1779,6 +1779,10 @@ def rate_film_callback(call):
                 bot.answer_callback_query(call.id, "❌ Ошибка при загрузке фактов", show_alert=True)
             except:
                 pass
+    
+    logger.info(f"[REGISTER SERIES CALLBACKS] ✅ Все обработчики сериалов зарегистрированы (включая handle_episode_toggle)")
+    logger.info(f"[REGISTER SERIES CALLBACKS] ===== END =====")
+    logger.info("=" * 80)
 
     # Обработчик plan_from_added перенесен в moviebot/bot/handlers/plan.py
     # чтобы избежать конфликтов с дублирующим обработчиком
