@@ -1018,7 +1018,14 @@ def handle_seasons_pagination(call):
                 kp_id = item['kp_id']
                 is_airing, next_ep = get_series_airing_status(kp_id)
                 seasons_count = len(get_seasons_data(str(kp_id))) if get_seasons_data(kp_id) else 0
-                next_ep_json = json.dumps(next_ep) if next_ep else None
+                
+                # Сериализуем next_ep с обработкой datetime
+                def default_serializer(o):
+                    if isinstance(o, datetime):
+                        return o.isoformat()
+                    raise TypeError("not serializable")
+                
+                next_ep_json = json.dumps(next_ep, default=default_serializer) if next_ep else None
                 conn_local = get_db_connection()
                 cursor_local = get_db_cursor()
                 try:

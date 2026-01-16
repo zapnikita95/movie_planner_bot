@@ -272,15 +272,6 @@ from moviebot.bot.callbacks.series_callbacks import register_series_callbacks
 register_series_callbacks(bot)
 logger.info("✅ series_callbacks зарегистрированы")
 
-# Временный глобальный обработчик для отладки - логирует ВСЕ series_episode callbacks
-# Регистрируем ПОСЛЕ register_series_callbacks, чтобы не блокировать основной обработчик
-@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("series_episode:"))
-def debug_all_episode_callbacks(call):
-    """Временный обработчик для отладки - логирует все series_episode callbacks"""
-    logger.info(f"[DEBUG GLOBAL] ===== ПЕРЕХВАТЧИК series_episode: callback_id={call.id}, user_id={call.from_user.id}, data={call.data}")
-    logger.info(f"[DEBUG GLOBAL] Этот обработчик должен перехватывать ВСЕ series_episode callbacks")
-    # НЕ отвечаем на callback и НЕ делаем return - пусть обрабатывается дальше другими обработчиками
-
 from moviebot.bot.callbacks.payment_callbacks import register_payment_callbacks
 register_payment_callbacks(bot)
 logger.info("✅ payment_callbacks зарегистрированы")
@@ -354,7 +345,10 @@ try:
     import sys
     import os
     # Добавляем корневую директорию проекта в путь для импорта utils
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    # Файл находится в moviebot/main.py, поэтому поднимаемся на два уровня вверх
+    current_file = os.path.abspath(__file__)
+    moviebot_dir = os.path.dirname(current_file)  # moviebot/
+    project_root = os.path.dirname(moviebot_dir)  # корень проекта/
     if project_root not in sys.path:
         sys.path.insert(0, project_root)
     from utils.watchdog import get_watchdog
