@@ -214,10 +214,33 @@ def process_shazam_text_query(message, query, reply_to_message=None, loading_msg
             try:
                 film_info = get_film_by_imdb_id(imdb_id_raw)
                 if film_info and film_info.get('kp_id'):
-                    result['kp_id'] = film_info.get('kp_id')
-                    result['kp_title'] = film_info.get('title')
-                    result['kp_year'] = film_info.get('year')
-                    valid_results.append(result)
+                    # Проверяем фильтрацию по жанрам для позиций 4-5
+                    primary_genre = result.get('primary_genre')
+                    has_conflicting_genres = result.get('has_conflicting_genres', False)
+                    
+                    # Если жанр определен без сомнений (нет противоречий) - фильтруем фильмы без этого жанра
+                    should_filter = False
+                    if primary_genre and not has_conflicting_genres:
+                        # Получаем русское название жанра
+                        from moviebot.services.shazam_service import _get_genre_mapping
+                        genre_mapping = _get_genre_mapping()
+                        genre_ru = genre_mapping.get(primary_genre)
+                        
+                        if genre_ru:
+                            film_genres = film_info.get('genres', [])
+                            film_genres_lower = [g.lower() for g in film_genres]
+                            
+                            # Если жанра нет в фильме - пропускаем этот фильм
+                            if genre_ru.lower() not in film_genres_lower:
+                                should_filter = True
+                                logger.info(f"[SHAZAM TEXT] Позиция {idx+1}: фильм {imdb_id_raw} отфильтрован - нет жанра '{genre_ru}'")
+                    
+                    if not should_filter:
+                        result['kp_id'] = film_info.get('kp_id')
+                        result['kp_title'] = film_info.get('title')
+                        result['kp_year'] = film_info.get('year')
+                        result['kp_genres'] = film_info.get('genres', [])
+                        valid_results.append(result)
             except Exception as e:
                 logger.warning(f"[SHAZAM TEXT] Ошибка получения данных из Кинопоиска для {imdb_id_raw}: {e}")
                 continue
