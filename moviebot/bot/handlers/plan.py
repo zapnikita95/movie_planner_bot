@@ -1499,36 +1499,23 @@ def get_plan_day_or_date_internal(message, state):
                 logger.info(f"[PLAN DAY/DATE INTERNAL] Найдено время в тексте: {hour}:{minute:02d}")
     
     if not plan_dt:
-        target_weekday = None
-        for phrase, wd in days_full.items():
-            if phrase in text_lower:
-                target_weekday = wd
-                logger.info(f"[PLAN DAY/DATE INTERNAL] Найден день недели: {phrase} -> {wd}")
-                break
-        
-        if target_weekday is not None:
-            current_wd = now.weekday()
-            delta = (target_weekday - current_wd + 7) % 7
-            if delta == 0:
-                delta = 7
-            plan_date = now.date() + timedelta(days=delta)
-            
+        # ВАЖНО: Сначала проверяем "завтра" и "сегодня", чтобы избежать ложных срабатываний
+        # (например, "вт" внутри слова "завтра")
+        if 'завтра' in text_lower:
+            plan_date = (now.date() + timedelta(days=1))
             # Используем извлеченное время, если есть, иначе стандартное
             if extracted_time:
                 hour, minute = extracted_time
             elif plan_type == 'home':
-                hour = 19 if target_weekday < 5 else 10
+                hour = 19 if plan_date.weekday() < 5 else 10
                 minute = 0
             else:
                 hour = 9
                 minute = 0
-            
             plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour, minute=minute))
             plan_dt = user_tz.localize(plan_dt)
-            logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата по дню недели: {plan_dt}")
-        else:
-            # Обработка специальных форматов: "сегодня", "завтра", "следующая неделя"
-            if 'сегодня' in text_lower:
+            logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата 'завтра': {plan_dt}")
+        elif 'сегодня' in text_lower:
                 plan_date = now.date()
                 # Используем извлеченное время, если есть, иначе стандартное
                 if extracted_time:
@@ -1539,25 +1526,10 @@ def get_plan_day_or_date_internal(message, state):
                 else:
                     hour = 9
                     minute = 0
-                plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour, minute=minute))
-                plan_dt = user_tz.localize(plan_dt)
-                logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата 'сегодня': {plan_dt}")
-            elif 'завтра' in text_lower:
-                plan_date = (now.date() + timedelta(days=1))
-                # Используем извлеченное время, если есть, иначе стандартное
-                if extracted_time:
-                    hour, minute = extracted_time
-                elif plan_type == 'home':
-                    hour = 19 if plan_date.weekday() < 5 else 10
-                    minute = 0
-                else:
-                    hour = 9
-                    minute = 0
-                plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour, minute=minute))
-                plan_dt = user_tz.localize(plan_dt)
-                logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата 'завтра': {plan_dt}")
-                
-            elif 'следующая неделя' in text_lower or 'след неделя' in text_lower or 'след. неделя' in text_lower or 'на следующей неделе' in text_lower:
+            plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour, minute=minute))
+            plan_dt = user_tz.localize(plan_dt)
+            logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата 'сегодня': {plan_dt}")
+        elif 'следующая неделя' in text_lower or 'след неделя' in text_lower or 'след. неделя' in text_lower or 'на следующей неделе' in text_lower:
                 if plan_type == 'home':
                     # Для дома - суббота следующей недели в 10:00
                     current_wd = now.weekday()
@@ -1582,6 +1554,38 @@ def get_plan_day_or_date_internal(message, state):
                     plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=9))
                     plan_dt = user_tz.localize(plan_dt)
                     logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата 'на следующей неделе' (кино): {plan_dt}")
+        elif not plan_dt:
+            # Проверка дней недели (только после проверки "завтра"/"сегодня", чтобы избежать ложных срабатываний)
+            # Используем границы слов \b, чтобы "вт" не находилось внутри "завтра"
+            target_weekday = None
+            for phrase, wd in days_full.items():
+                # Используем регулярное выражение с границами слов для точного поиска
+                pattern = r'\b' + re.escape(phrase) + r'\b'
+                if re.search(pattern, text_lower):
+                    target_weekday = wd
+                    logger.info(f"[PLAN DAY/DATE INTERNAL] Найден день недели: {phrase} -> {wd}")
+                    break
+            
+            if target_weekday is not None:
+                current_wd = now.weekday()
+                delta = (target_weekday - current_wd + 7) % 7
+                if delta == 0:
+                    delta = 7
+                plan_date = now.date() + timedelta(days=delta)
+                
+                # Используем извлеченное время, если есть, иначе стандартное
+                if extracted_time:
+                    hour, minute = extracted_time
+                elif plan_type == 'home':
+                    hour = 19 if target_weekday < 5 else 10
+                    minute = 0
+                else:
+                    hour = 9
+                    minute = 0
+                
+                plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour, minute=minute))
+                plan_dt = user_tz.localize(plan_dt)
+                logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата по дню недели: {plan_dt}")
 
             # ← УБРАН лишний else — теперь это просто следующий блок логики
             # Парсинг дат: "15 января", "15 января 17:00", "10.01", "14 апреля"
