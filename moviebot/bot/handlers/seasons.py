@@ -346,11 +346,29 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
         if message_id:
             try:
                 logger.info(f"[SHOW EPISODES PAGE] Обновление сообщения: message_id={message_id}, message_thread_id={message_thread_id}")
-                bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
-                logger.info(f"[SHOW EPISODES PAGE] Сообщение обновлено успешно")
+                try:
+                    bot.edit_message_text(text, chat_id, message_id, reply_markup=markup, parse_mode='HTML')
+                    logger.info(f"[SHOW EPISODES PAGE] Сообщение обновлено успешно")
+                except Exception as edit_e:
+                    error_str = str(edit_e).lower()
+                    if "message is not modified" in error_str:
+                        # Если сообщение не изменилось, пытаемся обновить только клавиатуру
+                        logger.warning(f"[SHOW EPISODES PAGE] Сообщение не изменилось, обновляю только клавиатуру")
+                        try:
+                            bot.edit_message_reply_markup(chat_id, message_id, reply_markup=markup)
+                            logger.info(f"[SHOW EPISODES PAGE] Клавиатура обновлена успешно")
+                        except Exception as markup_e:
+                            logger.error(f"[SHOW EPISODES PAGE] Ошибка обновления клавиатуры: {markup_e}", exc_info=True)
+                            # Последняя попытка - новое сообщение
+                            bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
+                    else:
+                        raise  # Прокидываем другие ошибки дальше
             except Exception as e:
                 logger.error(f"[SHOW EPISODES PAGE] Ошибка редактирования сообщения: {e}", exc_info=True)
-                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
+                try:
+                    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
+                except Exception as send_e:
+                    logger.error(f"[SHOW EPISODES PAGE] Не удалось отправить новое сообщение: {send_e}", exc_info=True)
         else:
             logger.info(f"[SHOW EPISODES PAGE] Отправка нового сообщения")
             bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
