@@ -147,8 +147,9 @@ from moviebot.scheduler import (
     process_recurring_payments,
     check_weekend_schedule,
     check_premiere_reminder,
-    choose_random_participant,
-    start_dice_game
+    check_and_send_random_events,
+    choose_random_participant,  # Оставлено для обратной совместимости
+    start_dice_game  # Оставлено для обратной совместимости
 )
 from moviebot.config import PLANS_TZ
 
@@ -167,11 +168,13 @@ if process_recurring_payments:
 scheduler.add_job(clean_home_plans, 'cron', hour=9, minute=0, timezone=PLANS_TZ, id='clean_home_plans')
 scheduler.add_job(hourly_stats, 'interval', hours=1, id='hourly_stats')
 
-# Случайные события и уведомления
-scheduler.add_job(check_weekend_schedule, 'cron', day_of_week='fri', hour=10, minute=0, timezone=PLANS_TZ, id='check_weekend_schedule')
-scheduler.add_job(check_premiere_reminder, 'cron', day_of_week='fri', hour=10, minute=30, timezone=PLANS_TZ, id='check_premiere_reminder')
-scheduler.add_job(choose_random_participant, 'cron', day_of_week='mon-sun', hour=12, minute=0, timezone=PLANS_TZ, id='choose_random_participant')
-scheduler.add_job(start_dice_game, 'cron', day_of_week='mon-sun', hour=14, minute=0, timezone=PLANS_TZ, id='start_dice_game')
+# Уведомления о планах и случайные события
+# ПРИОРИТЕТ 1: Уведомление о нет планов дома - пятница, базовое время пользователя (проверяется внутри функции)
+scheduler.add_job(check_weekend_schedule, 'cron', day_of_week='fri', hour=19, minute=0, timezone=PLANS_TZ, id='check_weekend_schedule')
+# ПРИОРИТЕТ 2: Уведомление о нет планов в кино - четверг
+scheduler.add_job(check_premiere_reminder, 'cron', day_of_week='thu', hour=19, minute=0, timezone=PLANS_TZ, id='check_premiere_reminder')
+# ПРИОРИТЕТ 3: Случайные события - пт/сб/вс (проверяется внутри функции)
+scheduler.add_job(check_and_send_random_events, 'cron', day_of_week='fri-sun', hour=20, minute=0, timezone=PLANS_TZ, id='check_and_send_random_events')
 
 # Регистрация ВСЕХ хэндлеров
 logger.info("=" * 80)

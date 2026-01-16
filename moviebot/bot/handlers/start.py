@@ -330,12 +330,11 @@ def register_start_handlers(bot):
                 msg.text = '/help'
                 help_command(msg)
 
-            # Удаляем старое меню, если не перешли в seasons
-            if action != 'seasons':
-                try:
-                    bot.delete_message(chat_id, message_id)
-                except:
-                    pass
+            # Удаляем старое меню для всех действий
+            try:
+                bot.delete_message(chat_id, message_id)
+            except:
+                pass
 
         except Exception as e:
             logger.error(f"[START MENU] Ошибка в обработчике: {e}", exc_info=True)

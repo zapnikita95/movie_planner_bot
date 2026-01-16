@@ -1314,6 +1314,8 @@ def handle_episode_toggle(call):
                 if watched_row:
                     is_watched = bool(watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
                 
+                logger.info(f"[EPISODE TOGGLE] Текущий статус: is_watched={is_watched}, user_episode_auto_mark_state для user_id={user_id}: {user_episode_auto_mark_state.get(user_id)}")
+                
                 # Логика обработки
                 auto_marked_episodes = []
                 
@@ -1449,13 +1451,18 @@ def handle_episode_toggle(call):
                     # ПЕРВЫЙ КЛИК: эпизод не просмотрен
                     # Проверяем, был ли это двойной клик на ту же серию, которую только что сняли
                     is_double_click_on_unwatched = False
+                    auto_marked_episodes = []
+                    
                     if user_id in user_episode_auto_mark_state:
                         auto_state = user_episode_auto_mark_state[user_id]
-                        if auto_state.get('kp_id') == kp_id and auto_state.get('season_num') == season_num:
+                        logger.info(f"[EPISODE TOGGLE] Проверка двойного клика: auto_state={auto_state}, kp_id={kp_id}, season_num={season_num}, ep_num={ep_num}")
+                        if str(auto_state.get('kp_id')) == str(kp_id) and str(auto_state.get('season_num')) == str(season_num):
                             last_clicked = auto_state.get('last_clicked_ep')
-                            if last_clicked == (season_num, ep_num):
+                            logger.info(f"[EPISODE TOGGLE] last_clicked={last_clicked}, current=({season_num}, {ep_num})")
+                            if last_clicked and str(last_clicked[0]) == str(season_num) and str(last_clicked[1]) == str(ep_num):
                                 # Это двойной клик! Запускаем автоотметку
                                 is_double_click_on_unwatched = True
+                                logger.info(f"[EPISODE TOGGLE] ДВОЙНОЙ КЛИК обнаружен!")
                     
                     if is_double_click_on_unwatched:
                         # ДВОЙНОЙ КЛИК на непросмотренную серию (которую только что сняли): запускаем автоотметку
