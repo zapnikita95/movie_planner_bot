@@ -4732,7 +4732,7 @@ def handle_event_file(message):
         conn.close()
         del user_ticket_state[user_id]
 
-@bot_param.callback_query_handler(func=lambda call: call.data.startswith("rand_mode:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("rand_mode:"))
 def handle_rand_mode(call):
     """Обработчик выбора режима рандомайзера"""
     try:
@@ -4914,7 +4914,7 @@ def handle_rand_mode(call):
             pass
         
 
-@bot_param.callback_query_handler(func=lambda call: call.data.startswith("rand_mode_locked:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("rand_mode_locked:"))
 def handle_rand_mode_locked(call):
     """Обработчик заблокированных режимов рандомайзера"""
     try:
@@ -6277,7 +6277,7 @@ def _show_actor_step(call, chat_id, user_id):
 
 # ========== ОБРАБОТЧИКИ CALLBACK ДЛЯ РАНДОМА ==========
 
-@bot_param.callback_query_handler(func=lambda call: call.data.startswith("rand_genre:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("rand_genre:"))
 def handle_rand_genre(call):
     """Обработчик выбора жанра для рандома"""
     try:
@@ -6523,7 +6523,7 @@ def handle_rand_genre(call):
         except:
             pass
 
-@bot_param.callback_query_handler(func=lambda call: call.data.startswith("rand_dir:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("rand_dir:"))
 def handle_rand_dir(call):
     """Обработчик выбора режиссёра для рандома"""
     try:
@@ -6605,7 +6605,7 @@ def handle_rand_dir(call):
         except:
             pass
 
-@bot_param.callback_query_handler(func=lambda call: call.data.startswith("rand_actor:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("rand_actor:"))
 def handle_rand_actor(call):
     """Обработчик выбора актёра для рандома"""
     try:
@@ -6669,7 +6669,7 @@ def handle_rand_actor(call):
         except:
             pass
 
-@bot_param.callback_query_handler(func=lambda call: call.data.startswith("rand_final:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("rand_final:"))
 def handle_rand_final(call):
     """Обработчик финального шага рандома"""
     try:
@@ -6713,7 +6713,7 @@ def handle_rand_final(call):
         except:
             pass
 
-@bot_param.callback_query_handler(func=lambda call: call.data.startswith("rand_similar_page:"))
+@bot.callback_query_handler(func=lambda call: call.data.startswith("rand_similar_page:"))
 def handle_rand_similar_page(call):
     """Обработчик пагинации похожих фильмов"""
     try:
