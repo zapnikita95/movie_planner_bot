@@ -721,7 +721,9 @@ def check_and_send_plan_notifications():
                     notification_sent_current = notification_sent
                     try:
                         with db_lock:
-                            # Используем существующее соединение для проверки
+                            # Проверяем, что курсор не закрыт, и пересоздаем при необходимости
+                            if cursor_local.closed:
+                                cursor_local = get_db_cursor()
                             cursor_local.execute('SELECT notification_sent FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
                             sent_row = cursor_local.fetchone()
                             if sent_row:
@@ -737,6 +739,9 @@ def check_and_send_plan_notifications():
                                 # Перед отправкой еще раз проверяем флаг в БД с блокировкой
                                 try:
                                     with db_lock:
+                                        # Проверяем, что курсор не закрыт, и пересоздаем при необходимости
+                                        if cursor_local.closed:
+                                            cursor_local = get_db_cursor()
                                         cursor_local.execute('SELECT notification_sent FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
                                         final_check = cursor_local.fetchone()
                                         if final_check:
@@ -2878,7 +2883,14 @@ def update_series_status_cache():
                 is_airing, next_ep = get_series_airing_status(kp_id)
                 seasons_data = get_seasons_data(kp_id)
                 seasons_count = len(seasons_data) if seasons_data else 0
-                next_ep_json = json.dumps(next_ep) if next_ep else None
+                
+                # Преобразуем datetime в строку для JSON сериализации
+                if next_ep and 'date' in next_ep and isinstance(next_ep['date'], datetime):
+                    next_ep_copy = next_ep.copy()
+                    next_ep_copy['date'] = next_ep['date'].isoformat()
+                    next_ep_json = json.dumps(next_ep_copy)
+                else:
+                    next_ep_json = json.dumps(next_ep) if next_ep else None
 
                 # Обновляем — отдельный короткий conn + lock
                 conn_update = psycopg2.connect(DATABASE_URL)

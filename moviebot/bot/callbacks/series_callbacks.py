@@ -1784,7 +1784,25 @@ def rate_film_callback(call):
     # Проверяем, что обработчик действительно зарегистрирован
     logger.info(f"[REGISTER SERIES CALLBACKS] Проверка регистрации handle_episode_toggle...")
     logger.info(f"[REGISTER SERIES CALLBACKS] handle_episode_toggle функция: {handle_episode_toggle}")
-    logger.info(f"[REGISTER SERIES CALLBACKS] bot callback handlers count: {len(bot.callback_query_handlers)}")
+    logger.info(f"[REGISTER SERIES CALLBACKS] handle_episode_toggle.__name__: {handle_episode_toggle.__name__}")
+    
+    # Проверяем, есть ли обработчик в списке зарегистрированных
+    try:
+        handlers_count = len(bot.callback_query_handlers)
+        logger.info(f"[REGISTER SERIES CALLBACKS] bot callback handlers count: {handlers_count}")
+        
+        # Ищем наш обработчик в списке
+        found_handler = False
+        for handler in bot.callback_query_handlers:
+            if hasattr(handler, 'callback') and handler.callback == handle_episode_toggle:
+                found_handler = True
+                logger.info(f"[REGISTER SERIES CALLBACKS] ✅ handle_episode_toggle найден в списке обработчиков!")
+                break
+        
+        if not found_handler:
+            logger.warning(f"[REGISTER SERIES CALLBACKS] ⚠️ handle_episode_toggle НЕ найден в списке обработчиков!")
+    except Exception as e:
+        logger.error(f"[REGISTER SERIES CALLBACKS] Ошибка при проверке обработчиков: {e}", exc_info=True)
     
     logger.info(f"[REGISTER SERIES CALLBACKS] ✅ Все обработчики сериалов зарегистрированы (включая handle_episode_toggle)")
     logger.info(f"[REGISTER SERIES CALLBACKS] ===== END =====")

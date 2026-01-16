@@ -353,7 +353,10 @@ setup_bot_commands(bot)
 try:
     import sys
     import os
-    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    # Добавляем корневую директорию проекта в путь для импорта utils
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
     from utils.watchdog import get_watchdog
     watchdog = get_watchdog(check_interval=60)
     watchdog.register_scheduler(scheduler)
