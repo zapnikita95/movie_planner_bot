@@ -2600,7 +2600,7 @@ def handle_rand_content_type(call):
             bot.answer_callback_query(call.id, "Ошибка", show_alert=True)
             return
         
-        mode = data_parts[1]  # database, kinopoisk, my_votes, group_votes
+        mode = data_parts[1]          # database, kinopoisk, my_votes, group_votes
         content_type = data_parts[2]  # films, series, mixed
         
         # Инициализируем состояние, если его нет
@@ -2624,17 +2624,10 @@ def handle_rand_content_type(call):
         
         bot.answer_callback_query(call.id)
         
-        # Переходим к следующему этапу в зависимости от режима
-        if mode == 'kinopoisk':
-            # Для режима kinopoisk пропускаем периоды и сразу переходим к выбору года
-            state['step'] = 'year'
-            logger.info(f"[RANDOM CONTENT TYPE] Переход к году (kinopoisk), user_id={user_id}")
-            _show_year_step(call, chat_id, user_id)
-        else:
-            # Для остальных режимов переходим к выбору периода
-            state['step'] = 'period'
-            logger.info(f"[RANDOM CONTENT TYPE] Переход к периоду, user_id={user_id}")
-            _show_period_step(call, chat_id, user_id)
+        # Для ВСЕХ режимов теперь идём к шагу выбора периода
+        state['step'] = 'period'
+        logger.info(f"[RANDOM CONTENT TYPE] Переход к периоду, user_id={user_id}")
+        _show_period_step(call, chat_id, user_id)
         
     except Exception as e:
         logger.error(f"[RANDOM CONTENT TYPE] ❌ Ошибка: {e}", exc_info=True)
@@ -2778,76 +2771,7 @@ def handle_rand_content_type(call):
                 pass
     
     # ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ РАНДОМА ==========
-    
-    def _show_year_step(call, chat_id, user_id):
-        """Показывает шаг выбора года для режима kinopoisk"""
-        try:
-            logger.info(f"[RANDOM] Showing year step for user {user_id}")
-            
-            state = user_random_state.get(user_id, {})
-            selected_periods = state.get('periods', [])
-            mode_description = {
-                'kinopoisk': '🎬 <b>Рандом по кинопоиску</b>\n\nНа основании фильмов в вашей базе будет выбран случайный фильм на Кинопоиске, который может вам понравиться.'
-            }.get(state.get('mode'), '')
-            
-            # Используем те же промежутки, что и в режиме "Рандом по своей базе"
-            available_periods = ["До 1980", "1980–1990", "1990–2000", "2000–2010", "2010–2020", "2020–сейчас"]
-            
-            markup = InlineKeyboardMarkup(row_width=1)
-            for period in available_periods:
-                label = f"✓ {period}" if period in selected_periods else period
-                markup.add(InlineKeyboardButton(label, callback_data=f"rand_year:{period}"))
-            
-            if selected_periods:
-                markup.add(InlineKeyboardButton("Продолжить ➡️", callback_data="rand_year:done"))
-            else:
-                markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_year:skip"))
-            markup.add(InlineKeyboardButton("⬅️ Назад к режимам", callback_data="rand_mode:back"))
-            
-            content_type = state.get('content_type', 'mixed')
-            content_type_text = ""
-            if content_type == 'films':
-                content_type_text = "\n🎬 Выбрано: Фильмы"
-            elif content_type == 'series':
-                content_type_text = "\n📺 Выбрано: Сериалы"
-            else:
-                content_type_text = "\n🎬📺 Выбрано: Смешанный режим"
-            
-            content_type = state.get('content_type', 'mixed')
-            content_type_text = ""
-            if content_type == 'films':
-                content_type_text = "\n🎬 Выбрано: Фильмы"
-            elif content_type == 'series':
-                content_type_text = "\n📺 Выбрано: Сериалы"
-            else:
-                content_type_text = "\n🎬📺 Выбрано: Смешанный режим"
-            
-            selected = ', '.join(selected_periods) if selected_periods else 'ничего'
-            # Для режима kinopoisk это шаг 2/4 (тип контента, период, жанр, результат)
-            mode = state.get('mode')
-            if mode == 'kinopoisk':
-                step_text = "🎲 <b>Шаг 2/4: Выберите период</b>"
-            else:
-                step_text = "🎲 <b>Шаг 2/5: Выберите период</b>"
-            
-            mode_descriptions = {
-                'database': '🎲 <b>Рандом по своей базе</b>\n\nВыбираем случайный фильм из вашей базы по заданным фильтрам.',
-                'kinopoisk': '🎬 <b>Рандом по кинопоиску</b>\n\nНайдите случайный фильм по вашим фильтрам.',
-                'my_votes': '⭐ <b>По моим оценкам (9-10)</b>\n\nПолучите рекомендацию, основанную на ваших оценках на Кинопоиске.',
-                'group_votes': '👥 <b>По оценкам в базе (9-10)</b>\n\nПолучите рекомендацию, основанную на оценках в вашей локальной базе.\n\n💡 <i>Чем больше оценок в базе, тем больше будет вариантов фильмов и жанров.</i>'
-            }
-            mode_description = mode_descriptions.get(mode, '')
-            
-            text = f"{mode_description}{content_type_text}\n\n{step_text}\n\nВыбрано: {selected}\n\n(можно выбрать несколько или пропустить)"
-            
-            try:
-                bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
-            except:
-                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
-            
-            logger.info(f"[RANDOM] Year step shown for user {user_id}")
-        except Exception as e:
-            logger.error(f"[RANDOM] ERROR in _show_year_step: {e}", exc_info=True)
+
     
     def _show_genre_step(call, chat_id, user_id):
         """Показывает шаг выбора жанра с учетом выбранных периодов"""
