@@ -7879,7 +7879,7 @@ def _random_final(call, chat_id, user_id):
             'kp_id': kp_id,
             'title': title,
             'film_message_id': film_message_id,
-            'instruction_message_id': instruction_message_id,
+            'instruction_message_id': None,  # Не используется, оставлено для совместимости
             'chat_id': chat_id,
             'place_and_date_raw': None  # будет заполнено в process_random_plan после парсинга
         }
