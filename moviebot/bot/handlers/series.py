@@ -2165,6 +2165,11 @@ def _show_period_step(call, chat_id, user_id):
                 elif period == "2020–сейчас" and any(y >= 2020 for y in years):
                     available_periods.append(period)
 
+        elif mode == 'kinopoisk':
+            # Для режима kinopoisk показываем ВСЕ периоды, так как ищем на Кинопоиске
+            available_periods = all_periods.copy()
+            logger.info(f"[RANDOM] Kinopoisk mode: showing all periods")
+
         else:
             # database mode — САМЫЙ ЧАСТЫЙ СЛУЧАЙ → убираем lock полностью
             base_query = """

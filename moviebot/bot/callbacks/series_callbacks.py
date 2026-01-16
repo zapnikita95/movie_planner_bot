@@ -1413,6 +1413,35 @@ def series_subscribe_callback(call):
             except:
                 pass
 
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("episodes_page:"))
+    def handle_episodes_page_navigation(call):
+        """Обработчик навигации по страницам эпизодов"""
+        logger.info(f"[EPISODES PAGE] ===== START: callback_id={call.id}, user_id={call.from_user.id}, data={call.data}")
+        try:
+            bot.answer_callback_query(call.id)
+            parts = call.data.split(":")
+            if len(parts) < 4:
+                logger.error(f"[EPISODES PAGE] Неверный формат callback_data: {call.data}")
+                return
+            
+            kp_id = parts[1]
+            season_num = parts[2]
+            page = int(parts[3])
+            chat_id = call.message.chat.id
+            user_id = call.from_user.id
+            
+            from moviebot.bot.handlers.seasons import show_episodes_page
+            message_id = call.message.message_id if call.message else None
+            message_thread_id = getattr(call.message, 'message_thread_id', None)
+            
+            show_episodes_page(kp_id, season_num, chat_id, user_id, page=page, message_id=message_id, message_thread_id=message_thread_id)
+            logger.info(f"[EPISODES PAGE] ===== END: успешно обновлено, page={page}")
+        except Exception as e:
+            logger.error(f"[EPISODES PAGE] Ошибка: {e}", exc_info=True)
+            try:
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            except:
+                pass
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("episodes_back_to_seasons:"))
 def handle_episodes_back_to_seasons(call):
