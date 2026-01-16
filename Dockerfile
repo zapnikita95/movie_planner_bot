@@ -10,9 +10,14 @@ RUN apt-get update && \
 
 WORKDIR /app
 
+# Копируем requirements.txt отдельно для лучшего кэширования
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+# Устанавливаем зависимости с оптимизацией для больших пакетов
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Копируем только необходимые файлы
+COPY moviebot/ ./moviebot/
 
 CMD ["python3", "-m", "moviebot.main"]
