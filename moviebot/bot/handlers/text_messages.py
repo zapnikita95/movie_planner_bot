@@ -1770,6 +1770,42 @@ def main_text_handler(message):
             logger.info(f"[MAIN TEXT HANDLER] Пропускаем ответное сообщение об импорте (обработает handle_import_user_id_reply)")
             return
     
+    # ОСОБЫЙ СЛУЧАЙ: Если пользователь в состоянии планирования на step=3 (ввод даты),
+    # обрабатываем напрямую здесь, так как обработчик handle_plan_date регистрируется позже
+    if user_id in user_plan_state:
+        plan_state = user_plan_state.get(user_id, {})
+        if plan_state.get("step") == 3:
+            logger.info(f"[MAIN TEXT HANDLER] Пользователь {user_id} в состоянии планирования step=3, обрабатываем напрямую")
+            from moviebot.bot.handlers.plan import process_plan
+            from moviebot.utils.parsing import show_timezone_selection
+            import pytz
+            from datetime import datetime
+            
+            if not plan_state:
+                bot.send_message(chat_id, "❌ Состояние потеряно. Начните заново.")
+                return
+            
+            day_or_date = message.text.strip()
+            
+            # Получаем время сообщения в UTC для определения часового пояса
+            message_date_utc = message.date
+            if message_date_utc:
+                message_date_utc = datetime.fromtimestamp(message_date_utc, tz=pytz.utc)
+            
+            # Вызываем process_plan напрямую
+            result = process_plan(bot, user_id, chat_id, plan_state['link'], plan_state['plan_type'], day_or_date, message_date_utc=message_date_utc)
+            
+            if result == 'NEEDS_TIMEZONE':
+                show_timezone_selection(bot, chat_id, user_id)
+            elif result:
+                bot.send_message(chat_id, "✅ Просмотр успешно запланирован!")
+                del user_plan_state[user_id]
+                logger.info(f"[MAIN TEXT HANDLER] План успешно создан, состояние очищено")
+            else:
+                bot.send_message(chat_id, "❌ Не понял дату/время. Попробуйте ещё раз (примеры: завтра, 15 января 19:00).")
+                logger.warning(f"[MAIN TEXT HANDLER] Не удалось распарсить дату/время: {day_or_date}")
+            return
+    
     # Если пользователь в любом из состояний, пропускаем - специализированные handlers обработают
     if (user_id in user_ticket_state or user_id in user_search_state or 
         user_id in user_import_state or user_id in user_edit_state or 

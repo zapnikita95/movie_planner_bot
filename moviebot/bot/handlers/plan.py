@@ -883,7 +883,43 @@ def show_schedule(message):
             except:
                 pass
 
-    logger.info(f"[REGISTER PLAN HANDLERS] Все обработчики планирования зарегистрированы (включая show_film_description и schedule_back)")
+    @bot.message_handler(func=lambda message: message.from_user.id in user_plan_state and user_plan_state[message.from_user.id].get("step") == 3)
+    def handle_plan_date(message):
+        """Обработчик ввода даты/времени для планирования (step=3)"""
+        logger.info(f"[PLAN DATE HANDLER] ===== START: message_id={message.message_id}, user_id={message.from_user.id}, text={message.text}")
+        user_id = message.from_user.id
+        chat_id = message.chat.id
+        state = user_plan_state.get(user_id)
+        
+        if not state:
+            logger.warning(f"[PLAN DATE HANDLER] Состояние не найдено для user_id={user_id}")
+            bot.send_message(chat_id, "❌ Состояние потеряно. Начните заново.")
+            return
+        
+        logger.info(f"[PLAN DATE HANDLER] Состояние найдено: step={state.get('step')}, plan_type={state.get('plan_type')}, link={state.get('link')}")
+        
+        day_or_date = message.text.strip()
+        
+        # Получаем время сообщения в UTC для определения часового пояса
+        message_date_utc = message.date
+        if message_date_utc:
+            from datetime import datetime
+            message_date_utc = datetime.fromtimestamp(message_date_utc, tz=pytz.utc)
+        
+        # Вызываем существующую process_plan (она принимает link, plan_type, day_or_date, message_date_utc)
+        result = process_plan(bot, user_id, chat_id, state['link'], state['plan_type'], day_or_date, message_date_utc=message_date_utc)
+        
+        if result == 'NEEDS_TIMEZONE':
+            show_timezone_selection(bot, chat_id, user_id)  # Если есть такая функция
+        elif result:
+            bot.send_message(chat_id, "✅ Просмотр успешно запланирован!")
+            del user_plan_state[user_id]  # Очистка состояния
+            logger.info(f"[PLAN DATE HANDLER] План успешно создан, состояние очищено")
+        else:
+            bot.send_message(chat_id, "❌ Не понял дату/время. Попробуйте ещё раз (примеры: завтра, 15 января 19:00).")
+            logger.warning(f"[PLAN DATE HANDLER] Не удалось распарсить дату/время: {day_or_date}")
+
+    logger.info(f"[REGISTER PLAN HANDLERS] Все обработчики планирования зарегистрированы (включая show_film_description, schedule_back и handle_plan_date)")
     logger.info(f"[REGISTER PLAN HANDLERS] ===== END =====")
     logger.info("=" * 80)
 
@@ -2270,29 +2306,6 @@ def streaming_done_callback(call):
         except:
             pass
         
-@bot.message_handler(func=lambda message: message.from_user.id in user_plan_state and user_plan_state[message.from_user.id].get("step") == 3)
-def handle_plan_date(message):
-    user_id = message.from_user.id
-    chat_id = message.chat.id
-    state = user_plan_state.get(user_id)
-    
-    if not state:
-        bot.send_message(chat_id, "❌ Состояние потеряно. Начните заново.")
-        return
-    
-    day_or_date = message.text.strip()
-    
-    # Вызываем существующую process_plan (она принимает link, plan_type, day_or_date)
-    result = process_plan(bot, user_id, chat_id, state['link'], state['plan_type'], day_or_date, pre_selected_film_id=state.get('film_id'))
-    
-    if result == 'NEEDS_TIMEZONE':
-        show_timezone_selection(bot, chat_id, user_id)  # Если есть такая функция
-    elif result:
-        bot.send_message(chat_id, "✅ Просмотр успешно запланирован!")
-        del user_plan_state[user_id]  # Очистка состояния
-    else:
-        bot.send_message(chat_id, "❌ Не понял дату/время. Попробуйте ещё раз (примеры: завтра, 15 января 19:00).")
-
 def handle_edit_plan_datetime_internal(message, state):
     """Внутренняя функция для обработки изменения даты/времени плана"""
     logger.info(f"[EDIT PLAN DATETIME INTERNAL] ===== START: message_id={message.message_id}, user_id={message.from_user.id}")
