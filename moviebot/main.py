@@ -401,7 +401,13 @@ logger.info("[MAIN] Flask app создан на уровне модуля для
 # Устанавливаем webhook на уровне модуля (выполняется при импорте gunicorn'ом)
 # И добавляем fallback на polling, если webhook не установлен
 PORT = os.getenv('PORT')
-IS_RAILWAY = PORT is not None and PORT.strip() != ''
+# Проверяем, что мы на Railway по наличию PORT или других переменных Railway
+IS_RAILWAY = (
+    PORT is not None and PORT.strip() != '' or
+    os.getenv('RAILWAY_ENVIRONMENT') is not None or
+    os.getenv('RAILWAY_SERVICE_NAME') is not None or
+    os.getenv('RAILWAY_PUBLIC_DOMAIN') is not None
+)
 USE_WEBHOOK = os.getenv('USE_WEBHOOK', 'false').lower() == 'true'
 IS_PRODUCTION = os.getenv('IS_PRODUCTION', 'False').lower() == 'true'
 
@@ -510,8 +516,9 @@ if __name__ == "__main__":
             logger.info("⚠️ Webhook не установлен, используется fallback polling (уже запущен на уровне модуля)")
 
         # Flask в главном потоке — обязателен для Railway health checks и webhook
-        port = int(PORT or 8080)
-        logger.info(f"Запуск Flask на порту {port}")
+        # Railway автоматически устанавливает PORT, но если его нет - используем 8080
+        port = int(PORT) if PORT and PORT.strip() else 8080
+        logger.info(f"Запуск Flask на host=0.0.0.0, port={port} (PORT env: {PORT or 'не установлен'})")
         app.run(host="0.0.0.0", port=port, threaded=True, debug=False)
 
     else:
