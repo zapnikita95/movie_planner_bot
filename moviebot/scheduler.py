@@ -18,7 +18,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from config.settings import DATABASE_URL
+from moviebot.config import DATABASE_URL
 
 # 3. APScheduler
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -1757,7 +1757,7 @@ def process_recurring_payments():
     
     import psycopg2
     from psycopg2.extras import RealDictCursor
-    from config.settings import DATABASE_URL
+    from moviebot.config import DATABASE_URL
     from moviebot.database.db_connection import db_lock
     import logging
     from datetime import datetime, timedelta

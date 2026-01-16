@@ -12,7 +12,7 @@ from moviebot.config import DEFAULT_WATCHED_EMOJIS, KP_TOKEN
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from config.settings import DATABASE_URL
+from moviebot.config import DATABASE_URL
 
 logger = logging.getLogger(__name__)
 conn = get_db_connection()
