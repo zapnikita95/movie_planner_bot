@@ -948,12 +948,7 @@ def series_subscribe_callback(call):
     def handle_episode_toggle(call):
         """Обработчик переключения статуса просмотра эпизода с поддержкой двойного клика для автоотметки"""
         try:
-            try:
-                bot.answer_callback_query(call.id)
-            except Exception as e:
-                error_str = str(e)
-                if "query is too old" not in error_str and "query ID is invalid" not in error_str and "timeout expired" not in error_str:
-                    logger.warning(f"[EPISODE TOGGLE] Не удалось ответить на callback query: {e}")
+            logger.info(f"[EPISODE TOGGLE] ===== START: callback_id={call.id}, user_id={call.from_user.id}, data={call.data}")
             # Формат: series_episode:{kp_id}:{season_num}:{ep_num}
             parts = call.data.split(":")
             if len(parts) < 4:
@@ -1206,12 +1201,23 @@ def series_subscribe_callback(call):
                     current_page = state.get('page', 1)
             
             result = show_episodes_page(kp_id, season_num, chat_id, user_id, page=current_page, message_id=message_id, message_thread_id=message_thread_id)
+            
+            # Отвечаем на callback после обновления сообщения
+            try:
+                bot.answer_callback_query(call.id)
+            except Exception as e:
+                error_str = str(e)
+                if "query is too old" not in error_str and "query ID is invalid" not in error_str and "timeout expired" not in error_str:
+                    logger.warning(f"[EPISODE TOGGLE] Не удалось ответить на callback query: {e}")
+            
             if not result:
                 logger.warning(f"[EPISODE TOGGLE] show_episodes_page вернула False, возможно ошибка обновления сообщения")
                 try:
                     bot.answer_callback_query(call.id, "⚠️ Не удалось обновить сообщение", show_alert=False)
                 except:
                     pass
+            
+            logger.info(f"[EPISODE TOGGLE] ===== END: успешно обновлено")
         except Exception as e:
             logger.error(f"[EPISODE TOGGLE] Ошибка: {e}", exc_info=True)
             try:
