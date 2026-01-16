@@ -19,6 +19,7 @@ moviebot/tests/
 *.log
 .DS_Store
 venv/
+heavy_check_venv/
 env/
 *.sqlite3
 *.db
