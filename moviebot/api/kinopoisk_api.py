@@ -863,11 +863,16 @@ def get_film_by_imdb_id(imdb_id):
                 title = film.get('nameRu') or film.get('nameOriginal', 'Без названия')
                 year = film.get('year')
                 
+                # Извлекаем жанры из ответа API
+                genres_list = film.get('genres', [])
+                genres_ru = [g.get('genre', '') for g in genres_list if isinstance(g, dict) and g.get('genre')]
+                
                 return {
                     'kp_id': str(kp_id) if kp_id else None,
                     'title': title,
                     'year': year,
-                    'imdb_id': imdb_id
+                    'imdb_id': imdb_id,
+                    'genres': genres_ru  # Список жанров на русском
                 }
         
         logger.warning(f"Фильм с IMDB ID {imdb_id} не найден в Kinopoisk")

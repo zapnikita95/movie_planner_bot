@@ -142,12 +142,36 @@ def process_shazam_text_query(message, query, reply_to_message=None, loading_msg
                 # Пробуем найти по IMDB ID
                 film_info = get_film_by_imdb_id(imdb_id_raw)
                 if film_info and film_info.get('kp_id'):
-                    # Найден по IMDB ID - добавляем
-                    result['kp_id'] = film_info.get('kp_id')
-                    result['kp_title'] = film_info.get('title')
-                    result['kp_year'] = film_info.get('year')
-                    valid_results.append(result)
-                    logger.info(f"[SHAZAM TEXT] Топ-3 позиция {idx+1}: найден по IMDB ID {imdb_id_raw} → kp_id={result['kp_id']}")
+                    # Проверяем фильтрацию по жанрам, если основной жанр определен без сомнений
+                    primary_genre = result.get('primary_genre')
+                    has_conflicting_genres = result.get('has_conflicting_genres', False)
+                    
+                    # Если жанр определен без сомнений (нет противоречий) - фильтруем фильмы без этого жанра
+                    should_filter = False
+                    if primary_genre and not has_conflicting_genres:
+                        # Получаем русское название жанра
+                        from moviebot.services.shazam_service import _get_genre_mapping
+                        genre_mapping = _get_genre_mapping()
+                        genre_ru = genre_mapping.get(primary_genre)
+                        
+                        if genre_ru:
+                            film_genres = film_info.get('genres', [])
+                            # Нормализуем жанры для сравнения (приводим к нижнему регистру)
+                            film_genres_lower = [g.lower() for g in film_genres]
+                            
+                            # Если жанра нет в фильме - пропускаем этот фильм
+                            if genre_ru.lower() not in film_genres_lower:
+                                should_filter = True
+                                logger.info(f"[SHAZAM TEXT] Топ-3 позиция {idx+1}: фильм {imdb_id_raw} отфильтрован - нет жанра '{genre_ru}' (есть: {film_genres})")
+                    
+                    if not should_filter:
+                        # Найден по IMDB ID - добавляем
+                        result['kp_id'] = film_info.get('kp_id')
+                        result['kp_title'] = film_info.get('title')
+                        result['kp_year'] = film_info.get('year')
+                        result['kp_genres'] = film_info.get('genres', [])
+                        valid_results.append(result)
+                        logger.info(f"[SHAZAM TEXT] Топ-3 позиция {idx+1}: найден по IMDB ID {imdb_id_raw} → kp_id={result['kp_id']}")
                 else:
                     # Не найден по IMDB ID - применяем fallback: ищем по названию
                     title = result.get('title', '')
