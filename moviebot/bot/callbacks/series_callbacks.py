@@ -948,7 +948,7 @@ def series_subscribe_callback(call):
         except Exception as e:
             logger.error(f"[SERIES LOCKED] Ошибка: {e}", exc_info=True)
 
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("series_episode_toggle:") or call.data.startswith("series_episode:"))
+    @bot.callback_query_handler(func=lambda call: call.data and (call.data.startswith("series_episode_toggle:") or call.data.startswith("series_episode:")))
     def handle_episode_toggle(call):
         """Обработчик переключения статуса просмотра эпизода с поддержкой двойного клика для автоотметки"""
         try:
