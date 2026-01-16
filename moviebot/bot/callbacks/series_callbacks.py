@@ -948,8 +948,6 @@ def series_subscribe_callback(call):
         except Exception as e:
             logger.error(f"[SERIES LOCKED] Ошибка: {e}", exc_info=True)
 
-    @bot.callback_query_handler(func=lambda call: call.data and (call.data.startswith("series_episode_toggle:") or call.data.startswith("series_episode:")))
-    def handle_episode_toggle(call):
         """Обработчик переключения статуса просмотра эпизода с поддержкой двойного клика для автоотметки"""
         logger.info(f"[EPISODE TOGGLE] ===== START: callback_id={call.id}, user_id={call.from_user.id}, data={call.data}")
         logger.info(f"[EPISODE TOGGLE] Обработчик вызван! bot={bot}, id(bot)={id(bot)}")
@@ -1324,8 +1322,6 @@ def series_subscribe_callback(call):
             except:
                 pass
 
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("series_season_all:"))
-    def handle_season_all_toggle(call):
         """Обработчик отметки всех эпизодов сезона как просмотренных"""
         logger.info(f"[SEASON ALL] ===== START: callback_id={call.id}, user_id={call.from_user.id}, data={call.data}")
         try:
@@ -1417,35 +1413,6 @@ def series_subscribe_callback(call):
             except:
                 pass
 
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("episodes_page:"))
-    def handle_episodes_page_navigation(call):
-        """Обработчик навигации по страницам эпизодов"""
-        logger.info(f"[EPISODES PAGE] ===== START: callback_id={call.id}, user_id={call.from_user.id}, data={call.data}")
-        try:
-            bot.answer_callback_query(call.id)
-            parts = call.data.split(":")
-            if len(parts) < 4:
-                logger.error(f"[EPISODES PAGE] Неверный формат callback_data: {call.data}")
-                return
-            
-            kp_id = parts[1]
-            season_num = parts[2]
-            page = int(parts[3])
-            chat_id = call.message.chat.id
-            user_id = call.from_user.id
-            
-            from moviebot.bot.handlers.seasons import show_episodes_page
-            message_id = call.message.message_id if call.message else None
-            message_thread_id = getattr(call.message, 'message_thread_id', None)
-            
-            show_episodes_page(kp_id, season_num, chat_id, user_id, page=page, message_id=message_id, message_thread_id=message_thread_id)
-            logger.info(f"[EPISODES PAGE] ===== END: успешно обновлено, page={page}")
-        except Exception as e:
-            logger.error(f"[EPISODES PAGE] Ошибка: {e}", exc_info=True)
-            try:
-                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
-            except:
-                pass
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("episodes_back_to_seasons:"))
 def handle_episodes_back_to_seasons(call):
@@ -1499,6 +1466,99 @@ def handle_episodes_back_to_seasons(call):
         logger.error(f"[EPISODES BACK] Критическая ошибка: {e}", exc_info=True)
         try:
             bot.answer_callback_query(call.id, "❌ Не удалось вернуться к сезонам", show_alert=True)
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("series_season_all:"))
+def handle_season_all_toggle(call):
+    """Обработчик отметки всех эпизодов сезона как просмотренных"""
+    logger.info(f"[SEASON ALL] ===== START: callback_id={call.id}, user_id={call.from_user.id}, data={call.data}")
+    try:
+        bot.answer_callback_query(call.id)
+        parts = call.data.split(":")
+        if len(parts) < 3:
+            logger.error(f"[SEASON ALL] Неверный формат callback_data: {call.data}")
+            return
+        
+        kp_id = parts[1]
+        season_num = parts[2]
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        
+        logger.info(f"[SEASON ALL] Отметка всех эпизодов сезона: kp_id={kp_id}, season={season_num}, user_id={user_id}")
+        
+        # Используем локальные соединение и курсор
+        from moviebot.database.db_connection import get_db_connection, get_db_cursor
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        
+        # Получаем film_id и эпизоды сезона
+        with db_lock:
+            try:
+                cursor_local.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
+                row = cursor_local.fetchone()
+            except Exception as db_e:
+                logger.error(f"[SEASON ALL] Ошибка запроса film_id: {db_e}", exc_info=True)
+                bot.answer_callback_query(call.id, "❌ Ошибка доступа к базе данных", show_alert=True)
+                return
+                
+            if not row:
+                bot.answer_callback_query(call.id, "❌ Сериал не найден в базе", show_alert=True)
+                return
+            
+            film_id = row.get('id') if isinstance(row, dict) else row[0]
+            
+            # Получаем эпизоды сезона
+            seasons_data = get_seasons_data(kp_id)
+            if not seasons_data:
+                bot.answer_callback_query(call.id, "❌ Не удалось получить данные о сезонах", show_alert=True)
+                return
+            
+            season = next((s for s in seasons_data if str(s.get('number', '')) == str(season_num)), None)
+            if not season:
+                bot.answer_callback_query(call.id, "❌ Сезон не найден", show_alert=True)
+                return
+            
+            episodes = season.get('episodes', [])
+            
+            # Отмечаем все эпизоды как просмотренные
+            try:
+                for ep in episodes:
+                    ep_num = str(ep.get('episodeNumber', ''))
+                    cursor_local.execute('''
+                        INSERT INTO series_tracking (chat_id, film_id, user_id, season_number, episode_number, watched)
+                        VALUES (%s, %s, %s, %s, %s, TRUE)
+                        ON CONFLICT (chat_id, film_id, user_id, season_number, episode_number) 
+                        DO UPDATE SET watched = TRUE
+                    ''', (chat_id, film_id, user_id, season_num, ep_num))
+                
+                conn_local.commit()
+            except Exception as db_e:
+                logger.error(f"[SEASON ALL] Ошибка обновления эпизодов: {db_e}", exc_info=True)
+                try:
+                    conn_local.rollback()
+                except:
+                    pass
+                bot.answer_callback_query(call.id, "❌ Ошибка при обновлении эпизодов", show_alert=True)
+                return
+        
+        # Обновляем страницу эпизодов
+        from moviebot.bot.handlers.seasons import show_episodes_page
+        message_id = call.message.message_id if call.message else None
+        message_thread_id = getattr(call.message, 'message_thread_id', None)
+        
+        current_page = 1
+        if user_id in user_episodes_state:
+            state = user_episodes_state[user_id]
+            if state.get('kp_id') == kp_id and state.get('season_num') == season_num:
+                current_page = state.get('page', 1)
+        
+        show_episodes_page(kp_id, season_num, chat_id, user_id, page=current_page, message_id=message_id, message_thread_id=message_thread_id)
+        logger.info(f"[SEASON ALL] ===== END: успешно обновлено")
+    except Exception as e:
+        logger.error(f"[SEASON ALL] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
 
