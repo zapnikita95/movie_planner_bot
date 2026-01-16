@@ -1781,6 +1781,11 @@ def rate_film_callback(call):
             except:
                 pass
     
+    # Проверяем, что обработчик действительно зарегистрирован
+    logger.info(f"[REGISTER SERIES CALLBACKS] Проверка регистрации handle_episode_toggle...")
+    logger.info(f"[REGISTER SERIES CALLBACKS] handle_episode_toggle функция: {handle_episode_toggle}")
+    logger.info(f"[REGISTER SERIES CALLBACKS] bot callback handlers count: {len(bot.callback_query_handlers)}")
+    
     logger.info(f"[REGISTER SERIES CALLBACKS] ✅ Все обработчики сериалов зарегистрированы (включая handle_episode_toggle)")
     logger.info(f"[REGISTER SERIES CALLBACKS] ===== END =====")
     logger.info("=" * 80)
