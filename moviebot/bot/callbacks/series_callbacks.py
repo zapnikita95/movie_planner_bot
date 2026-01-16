@@ -948,6 +948,8 @@ def series_subscribe_callback(call):
         except Exception as e:
             logger.error(f"[SERIES LOCKED] Ошибка: {e}", exc_info=True)
 
+    @bot.callback_query_handler(func=lambda call: call.data and (call.data.startswith("series_episode_toggle:") or call.data.startswith("series_episode:")))
+    def handle_episode_toggle(call):
         """Обработчик переключения статуса просмотра эпизода с поддержкой двойного клика для автоотметки"""
         logger.info(f"[EPISODE TOGGLE] ===== START: callback_id={call.id}, user_id={call.from_user.id}, data={call.data}")
         logger.info(f"[EPISODE TOGGLE] Обработчик вызван! bot={bot}, id(bot)={id(bot)}")
