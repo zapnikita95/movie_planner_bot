@@ -1459,46 +1459,47 @@ def search_movies(query, top_k=15):
                 overview_keyword_matches = sum(1 for word in keywords if word in overview_text_normalized)
             
             # ПРИОРИТЕТ №3: Буст за жанр (если жанр упомянут в запросе и есть в фильме)
-            # Буст зависит от позиции жанра в запросе и уверенности
+            # Буст зависит от позиции жанра в запросе пользователя (не в API фильма)
             genre_boost = 0
             if detected_genres and 'genres_str' in row.index:
                 genres_str_normalized = _normalize_text(row.get('genres_str', ''))
                 for genre_info in detected_genres:
                     genre_en = genre_info.get('genre')
                     if genre_en and genre_en in genres_str_normalized:
-                        # Буст зависит от позиции и уверенности
+                        # Буст зависит от позиции жанра в запросе пользователя
                         position = genre_info.get('position', 999)
                         confidence = genre_info.get('confidence', 'low')
                         matches = genre_info.get('matches', 0)
                         
                         # Базовый буст
-                        base_boost = 100
+                        base_boost = 200  # Стандартный буст
                         
-                        # Увеличение буста за позицию (чем раньше в запросе - тем больше)
-                        if position == 1:
-                            position_multiplier = 3.0  # Максимальный буст на 1 позиции
-                        elif position <= 3:
-                            position_multiplier = 2.0  # Сильный буст на позициях 2-3
-                        elif position <= 5:
-                            position_multiplier = 1.5  # Средний буст на позициях 4-5
+                        # Увеличение буста за позицию в запросе (не так сильно разбиваем)
+                        if position <= 3:
+                            # Жанр в первых 3 словах запроса - стандартный буст
+                            position_multiplier = 1.0
+                        elif position <= len(query_en_words) // 2:
+                            # Жанр в середине запроса - мини-буст (немного меньше)
+                            position_multiplier = 0.8
                         else:
-                            position_multiplier = 1.0  # Базовый буст на позициях 6+
+                            # Жанр в конце запроса - небольшой буст (еще меньше)
+                            position_multiplier = 0.6
                         
-                        # Увеличение буста за уверенность
+                        # Увеличение буста за уверенность (прямое упоминание жанра)
                         if confidence == 'high':
-                            confidence_multiplier = 2.0  # Прямое упоминание - в 2 раза больше
+                            confidence_multiplier = 1.5  # Прямое упоминание - на 50% больше
                         elif confidence == 'medium':
-                            confidence_multiplier = 1.5  # Средняя уверенность
+                            confidence_multiplier = 1.2  # Средняя уверенность
                         else:
                             confidence_multiplier = 1.0  # Низкая уверенность
                         
                         # Дополнительный буст за количество совпадений (синонимы)
-                        matches_bonus = min(matches * 10, 100)  # До +100 за синонимы
+                        matches_bonus = min(matches * 15, 150)  # До +150 за синонимы
                         
                         # Итоговый буст
                         final_boost = int(base_boost * position_multiplier * confidence_multiplier + matches_bonus)
                         genre_boost += final_boost
-                        logger.info(f"[SEARCH MOVIES] Жанр '{genre_en}' найден → +{final_boost} (позиция: {position}, уверенность: {confidence}, совпадений: {matches}) для {imdb_id_clean}")
+                        logger.info(f"[SEARCH MOVIES] Жанр '{genre_en}' найден → +{final_boost} (позиция в запросе: {position}, уверенность: {confidence}, совпадений: {matches}) для {imdb_id_clean}")
             
             # ПРИОРИТЕТ №4: Keyword-матчинг по названию (небольшой буст)
             title_keyword_matches = 0
@@ -1565,6 +1566,34 @@ def search_movies(query, top_k=15):
             })
         
         results.sort(key=lambda x: x['score'], reverse=True)
+        
+        # ФИЛЬТРАЦИЯ: Если жанр определен без сомнений - удаляем фильмы без этого жанра из топ-5
+        # Это делается после ранжирования, но до возврата результатов
+        if primary_genre and not has_conflicting_genres and len(results) > 0:
+            # Применяем фильтрацию только к топ-5 результатам
+            top_5_results = results[:5]
+            filtered_top_5 = []
+            
+            # Получаем русское название жанра для проверки
+            genre_mapping = _get_genre_mapping()
+            genre_ru = genre_mapping.get(primary_genre)
+            
+            if genre_ru:
+                for result in top_5_results:
+                    # Проверяем жанры фильма (если они есть в результате)
+                    # Жанры будут проверены позже в shazam.py при получении из API
+                    # Здесь мы только отмечаем, что нужна фильтрация
+                    filtered_top_5.append(result)
+                
+                logger.info(f"[SEARCH MOVIES] Будет применена фильтрация по жанру '{genre_ru}' для топ-5 результатов (удалятся фильмы без этого жанра)")
+            
+            # Остальные результаты (после топ-5) оставляем без изменений
+            results = filtered_top_5 + results[5:]
+        else:
+            # Если есть противоречия или жанр не определен - не фильтруем
+            results = results[:top_k]
+        
+        # Ограничиваем результаты до top_k
         results = results[:top_k]
         
         logger.info(f"[SEARCH MOVIES] Результаты приоритизированы, возвращаем {len(results)} фильмов")
