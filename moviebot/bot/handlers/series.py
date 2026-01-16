@@ -5045,9 +5045,9 @@ def _show_genre_step(call, chat_id, user_id):
             # Добавляем фильтр по type для импортированных оценок (film_id = NULL)
             type_filter = ""
             if content_type == 'films':
-                type_filter = "AND (r.type = 'FILM' OR (r.type IS NULL AND NOT EXISTS (SELECT 1 FROM movies m2 WHERE m2.kp_id = r.kp_id AND m2.chat_id = r.chat_id AND m2.is_series = TRUE)))"
+                type_filter = "AND (r.type = 'FILM' OR (r.type IS NULL AND NOT EXISTS (SELECT 1 FROM movies m2 WHERE m2.kp_id = r.kp_id AND m2.chat_id = r.chat_id AND m2.is_series = 1)))"
             elif content_type == 'series':
-                type_filter = "AND (r.type = 'TV_SERIES' OR (r.type IS NULL AND EXISTS (SELECT 1 FROM movies m2 WHERE m2.kp_id = r.kp_id AND m2.chat_id = r.chat_id AND m2.is_series = TRUE)))"
+                type_filter = "AND (r.type = 'TV_SERIES' OR (r.type IS NULL AND EXISTS (SELECT 1 FROM movies m2 WHERE m2.kp_id = r.kp_id AND m2.chat_id = r.chat_id AND m2.is_series = 1)))"
             # Если mixed - фильтр не добавляем
             
             base_query += """
@@ -5596,9 +5596,9 @@ def _show_director_step_my_votes(call, chat_id, user_id):
         # Добавляем фильтр по type для импортированных оценок (film_id = NULL)
         type_filter = ""
         if content_type == 'films':
-            type_filter = "AND (r.type = 'FILM' OR (r.type IS NULL AND NOT EXISTS (SELECT 1 FROM movies m2 WHERE m2.kp_id = r.kp_id AND m2.chat_id = r.chat_id AND m2.is_series = TRUE)))"
+            type_filter = "AND (r.type = 'FILM' OR (r.type IS NULL AND NOT EXISTS (SELECT 1 FROM movies m2 WHERE m2.kp_id = r.kp_id AND m2.chat_id = r.chat_id AND m2.is_series = 1)))"
         elif content_type == 'series':
-            type_filter = "AND (r.type = 'TV_SERIES' OR (r.type IS NULL AND EXISTS (SELECT 1 FROM movies m2 WHERE m2.kp_id = r.kp_id AND m2.chat_id = r.chat_id AND m2.is_series = TRUE)))"
+            type_filter = "AND (r.type = 'TV_SERIES' OR (r.type IS NULL AND EXISTS (SELECT 1 FROM movies m2 WHERE m2.kp_id = r.kp_id AND m2.chat_id = r.chat_id AND m2.is_series = 1)))"
         # Если mixed - фильтр не добавляем
         
         base_query += """
@@ -7084,9 +7084,9 @@ def _random_final(call, chat_id, user_id):
         # Учитываем content_type: films - только фильмы, series - только сериалы, mixed - оба
         is_series_filter = ""
         if content_type == 'films':
-            is_series_filter = "AND m.is_series = FALSE"
+            is_series_filter = "AND m.is_series = 0"
         elif content_type == 'series':
-            is_series_filter = "AND m.is_series = TRUE"
+            is_series_filter = "AND m.is_series = 1"
         # Если mixed - фильтр не добавляем
         
         query = """SELECT m.id, m.title, m.year, m.genres, m.director, m.actors, m.description, m.link, m.kp_id 
@@ -7601,9 +7601,9 @@ def _random_final(call, chat_id, user_id):
             # Учитываем content_type: films - только фильмы, series - только сериалы, mixed - оба
             is_series_filter_similar = ""
             if content_type == 'films':
-                is_series_filter_similar = "AND m.is_series = FALSE"
+                is_series_filter_similar = "AND m.is_series = 0"
             elif content_type == 'series':
-                is_series_filter_similar = "AND m.is_series = TRUE"
+                is_series_filter_similar = "AND m.is_series = 1"
             
             similar_query = """SELECT m.title, m.year, m.link, m.kp_id
                                 FROM movies m 
