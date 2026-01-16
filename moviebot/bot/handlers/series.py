@@ -2208,7 +2208,6 @@ def _show_period_step(call, chat_id, user_id):
         
         logger.info(f"[RANDOM] Period step: mode={mode}, content_type={content_type}")
         
-        # Шаг 1: Выбор периода - показываем только те периоды, где есть фильмы/сериалы
         all_periods = ["До 1980", "1980–1990", "1990–2000", "2000–2010", "2010–2020", "2020–сейчас"]
         available_periods = []
         
@@ -2227,8 +2226,8 @@ def _show_period_step(call, chat_id, user_id):
                 elif content_type == 'series':
                     is_series_param = 1
 
-                with db_lock:
-                    if is_series_param is not None:
+                if is_series_param is not None:
+                    with db_lock:
                         cursor_local.execute("""
                             SELECT DISTINCT m.year
                             FROM movies m
@@ -2241,7 +2240,8 @@ def _show_period_step(call, chat_id, user_id):
                               AND m.is_series = %s
                             ORDER BY m.year
                         """, (chat_id, user_id, is_series_param))
-                    else:
+                else:
+                    with db_lock:
                         cursor_local.execute("""
                             SELECT DISTINCT m.year
                             FROM movies m
@@ -2254,9 +2254,9 @@ def _show_period_step(call, chat_id, user_id):
                             ORDER BY m.year
                         """, (chat_id, user_id))
                     
-                    years_rows = cursor_local.fetchall()
-                    years_from_movies = [row[0] for row in years_rows if row]
-                    years.extend(years_from_movies)
+                years_rows = cursor_local.fetchall()
+                years_from_movies = [row['year'] for row in years_rows if row['year'] is not None]
+                years.extend(years_from_movies)
             finally:
                 try:
                     cursor_local.close()
@@ -2271,8 +2271,8 @@ def _show_period_step(call, chat_id, user_id):
             conn_local = get_db_connection()
             cursor_local = get_db_cursor()
             try:
-                with db_lock:
-                    if content_type == 'films':
+                if content_type == 'films':
+                    with db_lock:
                         cursor_local.execute("""
                             SELECT DISTINCT r.year
                             FROM ratings r
@@ -2286,7 +2286,8 @@ def _show_period_step(call, chat_id, user_id):
                               AND (r.type = 'FILM' OR (r.type IS NULL AND (m.id IS NULL OR m.is_series = 0)))
                             ORDER BY r.year
                         """, (chat_id, user_id))
-                    elif content_type == 'series':
+                elif content_type == 'series':
+                    with db_lock:
                         cursor_local.execute("""
                             SELECT DISTINCT r.year
                             FROM ratings r
@@ -2300,7 +2301,8 @@ def _show_period_step(call, chat_id, user_id):
                               AND (r.type = 'TV_SERIES' OR (r.type IS NULL AND m.id IS NOT NULL AND m.is_series = 1))
                             ORDER BY r.year
                         """, (chat_id, user_id))
-                    else:
+                else:
+                    with db_lock:
                         cursor_local.execute("""
                             SELECT DISTINCT r.year
                             FROM ratings r
@@ -2313,9 +2315,9 @@ def _show_period_step(call, chat_id, user_id):
                             ORDER BY r.year
                         """, (chat_id, user_id))
                     
-                    years_rows = cursor_local.fetchall()
-                    years_from_ratings = [row[0] for row in years_rows if row]
-                    years.extend(years_from_ratings)
+                years_rows = cursor_local.fetchall()
+                years_from_ratings = [row['year'] for row in years_rows if row['year'] is not None]
+                years.extend(years_from_ratings)
             finally:
                 try:
                     cursor_local.close()
@@ -2357,8 +2359,8 @@ def _show_period_step(call, chat_id, user_id):
                 elif content_type == 'series':
                     is_series_param = 1
 
-                with db_lock:
-                    if is_series_param is not None:
+                if is_series_param is not None:
+                    with db_lock:
                         cursor_local.execute("""
                             SELECT DISTINCT m.year
                             FROM movies m
@@ -2375,7 +2377,8 @@ def _show_period_step(call, chat_id, user_id):
                               )
                             ORDER BY m.year
                         """, (chat_id, is_series_param))
-                    else:
+                else:
+                    with db_lock:
                         cursor_local.execute("""
                             SELECT DISTINCT m.year
                             FROM movies m
@@ -2392,8 +2395,8 @@ def _show_period_step(call, chat_id, user_id):
                             ORDER BY m.year
                         """, (chat_id,))
                     
-                    years_rows = cursor_local.fetchall()
-                    years = [row[0] for row in years_rows if row]
+                years_rows = cursor_local.fetchall()
+                years = [row['year'] for row in years_rows if row['year'] is not None]
             finally:
                 try:
                     cursor_local.close()
@@ -2406,15 +2409,25 @@ def _show_period_step(call, chat_id, user_id):
             
             logger.info(f"[RANDOM] Found {len(years)} years for group_votes mode")
             
+            # Определяем доступные периоды (аналогично my_votes)
             for period in all_periods:
                 if period == "До 1980" and any(y < 1980 for y in years):
                     available_periods.append(period)
-                # ... (аналогично остальным периодам — можно скопировать логику выше)
+                elif period == "1980–1990" and any(1980 <= y <= 1990 for y in years):
+                    available_periods.append(period)
+                elif period == "1990–2000" and any(1990 <= y <= 2000 for y in years):
+                    available_periods.append(period)
+                elif period == "2000–2010" and any(2000 <= y <= 2010 for y in years):
+                    available_periods.append(period)
+                elif period == "2010–2020" and any(2010 <= y <= 2020 for y in years):
+                    available_periods.append(period)
+                elif period == "2020–сейчас" and any(y >= 2020 for y in years):
+                    available_periods.append(period)
 
         else:
             # database mode
             base_query = """
-                SELECT COUNT(DISTINCT m.id) 
+                SELECT COUNT(DISTINCT m.id) AS count
                 FROM movies m
                 LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
                 WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
@@ -2451,8 +2464,9 @@ def _show_period_step(call, chat_id, user_id):
                 try:
                     with db_lock:
                         cursor_local.execute(query, tuple(params))
-                        count_row = cursor_local.fetchone()
-                        count = count_row[0] if count_row else 0
+                    count_row = cursor_local.fetchone()
+                    count = count_row['count'] if count_row else 0
+                    
                     if count > 0:
                         available_periods.append(period)
                 finally:
@@ -2469,6 +2483,9 @@ def _show_period_step(call, chat_id, user_id):
         
         user_random_state[user_id]['available_periods'] = available_periods
         
+        # ────────────────────────────────────────────────────────────────
+        # Дальше формирование клавиатуры и отправка сообщения — без изменений
+        # ────────────────────────────────────────────────────────────────
         markup = InlineKeyboardMarkup(row_width=1)
         if available_periods:
             for period in available_periods:
@@ -2476,7 +2493,6 @@ def _show_period_step(call, chat_id, user_id):
         markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
         markup.add(InlineKeyboardButton("⬅️ Назад к режимам", callback_data="rand_mode:back"))
 
-        # Определяем номер шага в зависимости от режима (теперь это шаг 2, так как шаг 1 - выбор типа контента)
         if mode in ['my_votes', 'group_votes']:
             step_text = "🎲 <b>Шаг 2/3: Выберите период</b>"
         elif mode == 'kinopoisk':
@@ -2484,7 +2500,6 @@ def _show_period_step(call, chat_id, user_id):
         else:
             step_text = "🎲 <b>Шаг 2/5: Выберите период</b>"
         
-        # Добавляем информацию о выбранном типе контента
         content_type_text = ""
         if content_type == 'films':
             content_type_text = "\n🎬 Выбрано: Фильмы"
@@ -2496,8 +2511,7 @@ def _show_period_step(call, chat_id, user_id):
         try:
             bot.answer_callback_query(call.id)
         except Exception as e:
-            error_str = str(e)
-            if "query is too old" not in error_str and "query ID is invalid" not in error_str and "timeout expired" not in error_str:
+            if "query is too old" not in str(e) and "query ID is invalid" not in str(e) and "timeout expired" not in str(e):
                 logger.warning(f"[RANDOM PERIOD] Не удалось ответить на callback query: {e}")
         
         mode_descriptions = {
@@ -2525,7 +2539,7 @@ def _show_period_step(call, chat_id, user_id):
         try:
             bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
-            pass    
+            pass
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rand_content_type:"))
 def handle_rand_content_type(call):
