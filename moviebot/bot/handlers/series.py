@@ -2127,7 +2127,7 @@ def register_series_handlers(bot_param):
                 bot.answer_callback_query(call.id, "❌ Произошла ошибка", show_alert=True)
             except:
                 pass
-    
+        
     def _show_period_step(call, chat_id, user_id):
         """Показывает шаг выбора периода для рандома с учетом типа контента (films/series/mixed)"""
         try:
@@ -2232,12 +2232,12 @@ def register_series_handlers(bot_param):
                             conn_local.close()
                         except:
                             pass
-                
+                    
                     
                     # Убираем дубликаты
                     years = sorted(list(set(years)))
                     
-                    logger.info(f"[RANDOM CALLBACK] Found {len(years)} years for my_votes mode (from movies: {len(years_from_movies)}, from imported: {len(years_from_imported)})")
+                    logger.info(f"[RANDOM CALLBACK] Found {len(years)} years for my_votes mode (from movies: {len(years_from_movies)}, from imported: {len(years_from_ratings)})")
                     
                     # Определяем доступные периоды на основе найденных годов
                     for period in all_periods:
@@ -2453,7 +2453,7 @@ def register_series_handlers(bot_param):
                 bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
                 pass
-    
+        
     @bot_param.callback_query_handler(func=lambda call: call.data.startswith("rand_mode_locked:"))
     def handle_rand_mode_locked(call):
         """Обработчик заблокированных режимов рандомайзера"""
