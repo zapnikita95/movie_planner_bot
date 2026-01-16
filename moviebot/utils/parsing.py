@@ -4,10 +4,10 @@
 import re
 import logging
 import pytz
-from datetime import datetime
+from datetime import datetime, timedelta
 from moviebot.config import MONTHS_MAP, DAYS_FULL, PLANS_TZ
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from moviebot.database.db_operations import get_user_timezone
+from moviebot.database.db_operations import get_user_timezone, get_user_timezone_or_default
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 from moviebot.bot.bot_init import bot
 

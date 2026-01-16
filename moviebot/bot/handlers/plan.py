@@ -17,7 +17,7 @@ from moviebot.database.db_connection import get_db_connection, get_db_cursor, db
 
 from moviebot.api.kinopoisk_api import extract_movie_info, get_seasons_data
 
-from moviebot.utils.parsing import parse_session_time, check_timezone_change, extract_kp_id_from_text, show_timezone_selection
+from moviebot.utils.parsing import parse_session_time, check_timezone_change, extract_kp_id_from_text, show_timezone_selection, parse_plan_date_text
 
 from moviebot.states import (
 
@@ -53,16 +53,20 @@ def process_plan(bot, user_id, chat_id, link, plan_type, day_or_date, message_da
     user_tz = get_user_timezone_or_default(user_id)
     now = datetime.now(user_tz)
     
-    # Сначала пробуем использовать parse_session_time
+    # Сначала пробуем использовать parse_session_time (для форматов типа "15 января 10:30", "17.01 15:20")
     parsed_dt = parse_session_time(day_or_date, user_tz)
     if parsed_dt:
         plan_dt = parsed_dt
         logger.info(f"[PROCESS_PLAN] Использован parse_session_time: {plan_dt}")
     else:
-        # TODO: Добавить полную логику парсинга дат из moviebot.py
-        # Это очень большая функция, нужно скопировать весь код
-        logger.warning(f"[PROCESS_PLAN] parse_session_time не сработал, нужна полная реализация")
-        return False
+        # Если parse_session_time не сработал, пробуем parse_plan_date_text (для "завтра", "сегодня", дней недели и т.д.)
+        parsed_dt = parse_plan_date_text(day_or_date, user_id)
+        if parsed_dt:
+            plan_dt = parsed_dt
+            logger.info(f"[PROCESS_PLAN] Использован parse_plan_date_text: {plan_dt}")
+        else:
+            logger.warning(f"[PROCESS_PLAN] Не удалось распарсить дату/время: {day_or_date}")
+            return False
     
     if not plan_dt:
         return False
