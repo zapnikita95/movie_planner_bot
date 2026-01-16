@@ -1598,24 +1598,49 @@ def rate_film_callback(call):
         else:
             link = f"https://www.kinopoisk.ru/film/{kp_id}/"
 
+        # Экранирование для MarkdownV2
+        def escape_md_v2(text):
+            chars = r'_[]()~`>#+-=|{}.!'
+            for char in chars:
+                text = text.replace(char, f'\\{char}')
+            return text
+
+        escaped_title = escape_md_v2(title)
+
         if not film_id:
-            # Фильм не в базе - сохраняем kp_id для обработки при оценке
+            # Фильм не в базе
             info = extract_movie_info(link)
             title = info.get('title', f'Фильм {kp_id}') if info else f'Фильм {kp_id}'
+            escaped_title = escape_md_v2(title)
 
-            msg = bot.reply_to(
-                call.message,
-                f"💬 Чтобы оценить *{title}*, ответьте на это сообщение числом от 1 до 10.\n\n"
-                f"Фильм/сериал будет добавлен в базу при оценке.",
-                parse_mode='Markdown'
+            text_new = (
+                f"💬 Чтобы оценить *{escaped_title}*, ответьте на это сообщение числом от 1 до 10.\n\n"
+                f"Фильм/сериал будет добавлен в базу при оценке."
             )
 
-            # ВАЖНО: Сохраняем kp_id в формате "kp_id:123", а не film_id
-            # Это позволит handle_rating_internal правильно обработать фильм не в базе
-            rating_messages[msg.message_id] = f"kp_id:{kp_id}"
-            logger.info(f"[RATE FILM] Добавлено в rating_messages: msg_id={msg.message_id} → kp_id:{kp_id}")
+            try:
+                msg = bot.reply_to(
+                    call.message,
+                    text_new,
+                    parse_mode='MarkdownV2'
+                )
+                rating_messages[msg.message_id] = f"kp_id:{kp_id}"
+                logger.info(f"[RATE FILM] Добавлено в rating_messages: msg_id={msg.message_id} → kp_id:{kp_id}")
+            except telebot.apihelper.ApiTelegramException as api_err:
+                if "can't parse entities" in str(api_err):
+                    logger.warning(f"[RATE FILM] MarkdownV2 сломался, fallback на plain текст")
+                    msg = bot.reply_to(
+                        call.message,
+                        text_new.replace('\\', ''),  # убираем экранирование
+                        parse_mode=None
+                    )
+                    rating_messages[msg.message_id] = f"kp_id:{kp_id}"
+                    logger.info(f"[RATE FILM] Добавлено (fallback): msg_id={msg.message_id}")
+                else:
+                    raise
             return
 
+        # Фильм в базе — проверяем оценку
         conn_local = get_db_connection()
         cursor_local = get_db_cursor()
         existing = None
@@ -1639,21 +1664,53 @@ def rate_film_callback(call):
 
         if existing:
             rating = existing[0] if isinstance(existing, tuple) else existing.get('rating')
-            bot.reply_to(
-                call.message,
-                f"✅ Вы уже оценили *{title}*: {rating}/10\n\n"
-                f"Чтобы изменить — ответьте на это сообщение числом от 1 до 10.",
-                parse_mode='Markdown'
+            text_already = (
+                f"✅ Вы уже оценили *{escaped_title}*: {rating}/10\n\n"
+                f"Чтобы изменить — ответьте на это сообщение числом от 1 до 10."
             )
+
+            try:
+                bot.reply_to(
+                    call.message,
+                    text_already,
+                    parse_mode='MarkdownV2'
+                )
+            except telebot.apihelper.ApiTelegramException as api_err:
+                if "can't parse entities" in str(api_err):
+                    logger.warning(f"[RATE FILM] MarkdownV2 сломался (уже оценено), fallback на plain")
+                    bot.reply_to(
+                        call.message,
+                        text_already.replace('\\', ''),
+                        parse_mode=None
+                    )
+                else:
+                    raise
         else:
-            msg = bot.reply_to(
-                call.message,
-                f"💬 Чтобы оценить *{title}*, ответьте на это сообщение числом от 1 до 10.\n\n"
-                f"Фильм/сериал будет добавлен в базу при оценке.",
-                parse_mode='Markdown'
+            text_new = (
+                f"💬 Чтобы оценить *{escaped_title}*, ответьте на это сообщение числом от 1 до 10.\n\n"
+                f"Фильм/сериал будет добавлен в базу при оценке."
             )
-            rating_messages[msg.message_id] = film_id
-            logger.info(f"[RATE FILM] rating_messages обновлено: msg_id={msg.message_id} → film_id={film_id}")
+
+            try:
+                msg = bot.reply_to(
+                    call.message,
+                    text_new,
+                    parse_mode='MarkdownV2'
+                )
+                rating_messages[msg.message_id] = film_id
+                logger.info(f"[RATE FILM] rating_messages обновлено: msg_id={msg.message_id} → film_id={film_id}")
+            except telebot.apihelper.ApiTelegramException as api_err:
+                if "can't parse entities" in str(api_err):
+                    logger.warning(f"[RATE FILM] MarkdownV2 сломался, fallback на plain")
+                    msg = bot.reply_to(
+                        call.message,
+                        text_new.replace('\\', ''),
+                        parse_mode=None
+                    )
+                    rating_messages[msg.message_id] = film_id
+                    logger.info(f"[RATE FILM] rating_messages обновлено (fallback): msg_id={msg.message_id}")
+                else:
+                    raise
 
     except Exception as e:
         logger.error(f"[RATE FILM] Критическая ошибка: {e}", exc_info=True)
