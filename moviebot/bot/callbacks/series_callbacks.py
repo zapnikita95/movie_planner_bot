@@ -35,6 +35,10 @@ SEASONS_PER_PAGE = 10
 
 def register_series_callbacks(bot):
     """Регистрирует callback handlers для сериалов"""
+    logger.info("=" * 80)
+    logger.info(f"[REGISTER SERIES CALLBACKS] ===== START: регистрация обработчиков сериалов =====")
+    logger.info(f"[REGISTER SERIES CALLBACKS] bot: {bot}, id(bot): {id(bot)}")
+    
     @bot.callback_query_handler(func=lambda call: call.data.startswith("series_track:"))
     def series_track_callback(call):
         """Обработчик для отметки сезонов/серий как просмотренных"""
