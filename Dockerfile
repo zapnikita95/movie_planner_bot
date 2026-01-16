@@ -17,7 +17,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Копируем только необходимые файлы
-COPY moviebot/ ./moviebot/
+# Копируем код проекта (лишние файлы исключены через .dockerignore)
+COPY . .
 
 CMD ["python3", "-m", "moviebot.main"]
