@@ -954,12 +954,12 @@ def series_subscribe_callback(call):
         try:
             bot.answer_callback_query(call.id)
             parts = call.data.split(":")
-            if len(parts) < 4:
+            if len(parts) < 3:
                 logger.error(f"[EPISODE CANCEL AUTO] Неверный формат callback_data: {call.data}")
                 return
             
-            kp_id = parts[2]
-            season_num = parts[3]
+            kp_id = parts[1]
+            season_num = parts[2]
             chat_id = call.message.chat.id
             user_id = call.from_user.id
             
@@ -1422,6 +1422,7 @@ def handle_episode_toggle(call):
                         'episodes': [(season_num, ep_num)],  # Сохраняем только этот эпизод для проверки двойного клика
                         'last_clicked_ep': (season_num, ep_num)
                     }
+                    logger.info(f"[EPISODE TOGGLE] Сохранено состояние для двойного клика: user_id={user_id}, state={user_episode_auto_mark_state[user_id]}")
                     
                     # Снимаем отметку с эпизода
                     cursor_local.execute('''

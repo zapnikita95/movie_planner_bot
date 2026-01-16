@@ -257,6 +257,7 @@ def register_start_handlers(bot):
 
             if action == 'seasons':
                 bot.answer_callback_query(call.id, "⏳ Загружаем сериалы и сезоны...")
+                # show_seasons_list редактирует существующее сообщение, не удаляем его
                 show_seasons_list(
                     chat_id=chat_id,
                     user_id=user_id,
@@ -264,6 +265,7 @@ def register_start_handlers(bot):
                     message_thread_id=message_thread_id,
                     bot=bot
                 )
+                return  # Не удаляем сообщение, так как оно редактируется
             elif action == 'premieres':
                 msg = call.message
                 msg.text = '/premieres'
