@@ -8,7 +8,8 @@ from moviebot.database.db_operations import get_user_films_count
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 from moviebot.bot.handlers.text_messages import expect_text_from_user, user_search_state
 from moviebot.states import user_random_state
-from moviebot.bot.handlers.series import _show_genre_step
+# Импортируем модуль series для доступа к _show_genre_step через series_handlers
+from moviebot.bot.handlers import series as series_handlers
 from moviebot.utils.helpers import has_recommendations_access
 
 
@@ -448,7 +449,8 @@ def register_random_callbacks(bot):
             # Переход к следующему шагу
             if action in ["done", "skip"]:
                 state['step'] = 'genre'
-                _show_genre_step(call, chat_id, user_id)
+                # Вызываем функцию через модуль series_handlers
+                series_handlers._show_genre_step(call, chat_id, user_id)
             
             logger.info(f"[RANDOM PERIOD] ✅ Handled action={action}, periods now={state.get('periods')} (user={user_id})")
         
