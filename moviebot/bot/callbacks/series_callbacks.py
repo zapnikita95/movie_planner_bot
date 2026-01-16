@@ -951,8 +951,9 @@ def series_subscribe_callback(call):
     @bot.callback_query_handler(func=lambda call: call.data and (call.data.startswith("series_episode_toggle:") or call.data.startswith("series_episode:")))
     def handle_episode_toggle(call):
         """Обработчик переключения статуса просмотра эпизода с поддержкой двойного клика для автоотметки"""
+        logger.info(f"[EPISODE TOGGLE] ===== START: callback_id={call.id}, user_id={call.from_user.id}, data={call.data}")
+        logger.info(f"[EPISODE TOGGLE] Обработчик вызван! bot={bot}, id(bot)={id(bot)}")
         try:
-            logger.info(f"[EPISODE TOGGLE] ===== START: callback_id={call.id}, user_id={call.from_user.id}, data={call.data}")
             # Формат: series_episode:{kp_id}:{season_num}:{ep_num}
             parts = call.data.split(":")
             if len(parts) < 4:
