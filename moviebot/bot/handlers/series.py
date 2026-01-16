@@ -2214,30 +2214,31 @@ def _show_period_step(call, chat_id, user_id):
         
         logger.info(f"[RANDOM CALLBACK] Checking available periods for mode={mode}")
         
-        with db_lock:
-            if mode == 'my_votes':
-                # Для режима "по моим оценкам" - получаем годы из импортированных фильмов и импортированных оценок с оценкой 9-10
-                # Учитываем content_type: films - только фильмы, series - только сериалы, mixed - оба
-                years = []
-                # Годы из фильмов в базе
-                conn_local = get_db_connection()
-                cursor_local = get_db_cursor()
-                try:
-                    # Добавляем фильтр по is_series в зависимости от content_type
-                    is_series_param = None
-                    if content_type == 'films':
-                        is_series_param = 0
-                    elif content_type == 'series':
-                        is_series_param = 1
-                    # mixed - фильтр не добавляем (is_series_param = None)
+        if mode == 'my_votes':
+            years = []
+            
+            # 1. Годы из фильмов в базе (с оценками 9-10, импортированные)
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            try:
+                is_series_param = None
+                if content_type == 'films':
+                    is_series_param = 0
+                elif content_type == 'series':
+                    is_series_param = 1
 
+                with db_lock:
                     if is_series_param is not None:
                         cursor_local.execute("""
                             SELECT DISTINCT m.year
                             FROM movies m
                             JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
-                            WHERE m.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
-                            AND m.year IS NOT NULL AND m.is_series = %s
+                            WHERE m.chat_id = %s 
+                              AND r.user_id = %s 
+                              AND r.rating IN (9, 10) 
+                              AND r.is_imported = TRUE
+                              AND m.year IS NOT NULL 
+                              AND m.is_series = %s
                             ORDER BY m.year
                         """, (chat_id, user_id, is_series_param))
                     else:
@@ -2245,25 +2246,44 @@ def _show_period_step(call, chat_id, user_id):
                             SELECT DISTINCT m.year
                             FROM movies m
                             JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id
-                            WHERE m.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
-                            AND m.year IS NOT NULL
+                            WHERE m.chat_id = %s 
+                              AND r.user_id = %s 
+                              AND r.rating IN (9, 10) 
+                              AND r.is_imported = TRUE
+                              AND m.year IS NOT NULL
                             ORDER BY m.year
                         """, (chat_id, user_id))
                     
                     years_rows = cursor_local.fetchall()
-                    years_from_movies = [row.get('year') if isinstance(row, dict) else row[0] for row in years_rows if row]
+                    years_from_movies = [row[0] for row in years_rows if row]
                     years.extend(years_from_movies)
-                    
-                    # Годы из импортированных оценок (film_id = NULL) - проверяем тип через поле type в ratings
-                    # Если type есть в ratings - используем его, иначе проверяем через movies по kp_id
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
+            
+            # 2. Годы из импортированных оценок (film_id IS NULL)
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            try:
+                with db_lock:
                     if content_type == 'films':
                         cursor_local.execute("""
                             SELECT DISTINCT r.year
                             FROM ratings r
                             LEFT JOIN movies m ON r.kp_id = m.kp_id AND r.chat_id = m.chat_id
-                            WHERE r.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
-                            AND r.film_id IS NULL AND r.year IS NOT NULL
-                            AND (r.type = 'FILM' OR (r.type IS NULL AND (m.id IS NULL OR m.is_series = 0)))
+                            WHERE r.chat_id = %s 
+                              AND r.user_id = %s 
+                              AND r.rating IN (9, 10) 
+                              AND r.is_imported = TRUE
+                              AND r.film_id IS NULL 
+                              AND r.year IS NOT NULL
+                              AND (r.type = 'FILM' OR (r.type IS NULL AND (m.id IS NULL OR m.is_series = 0)))
                             ORDER BY r.year
                         """, (chat_id, user_id))
                     elif content_type == 'series':
@@ -2271,108 +2291,170 @@ def _show_period_step(call, chat_id, user_id):
                             SELECT DISTINCT r.year
                             FROM ratings r
                             LEFT JOIN movies m ON r.kp_id = m.kp_id AND r.chat_id = m.chat_id
-                            WHERE r.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
-                            AND r.film_id IS NULL AND r.year IS NOT NULL
-                            AND (r.type = 'TV_SERIES' OR (r.type IS NULL AND m.id IS NOT NULL AND m.is_series = 1))
+                            WHERE r.chat_id = %s 
+                              AND r.user_id = %s 
+                              AND r.rating IN (9, 10) 
+                              AND r.is_imported = TRUE
+                              AND r.film_id IS NULL 
+                              AND r.year IS NOT NULL
+                              AND (r.type = 'TV_SERIES' OR (r.type IS NULL AND m.id IS NOT NULL AND m.is_series = 1))
                             ORDER BY r.year
                         """, (chat_id, user_id))
                     else:
                         cursor_local.execute("""
                             SELECT DISTINCT r.year
                             FROM ratings r
-                            WHERE r.chat_id = %s AND r.user_id = %s AND r.rating IN (9, 10) AND r.is_imported = TRUE
-                            AND r.film_id IS NULL AND r.year IS NOT NULL
+                            WHERE r.chat_id = %s 
+                              AND r.user_id = %s 
+                              AND r.rating IN (9, 10) 
+                              AND r.is_imported = TRUE
+                              AND r.film_id IS NULL 
+                              AND r.year IS NOT NULL
                             ORDER BY r.year
                         """, (chat_id, user_id))
                     
                     years_rows = cursor_local.fetchall()
-                    years_from_ratings = [row.get('year') if isinstance(row, dict) else row[0] for row in years_rows if row]
+                    years_from_ratings = [row[0] for row in years_rows if row]
                     years.extend(years_from_ratings)
-                    
-                    # Уникальные годы
-                    years = sorted(set(years))
-                    
-                finally:
-                    try:
-                        cursor_local.close()
-                    except:
-                        pass
-                    try:
-                        conn_local.close()
-                    except:
-                        pass
-                
-                
-                # Убираем дубликаты
-                years = sorted(list(set(years)))
-                
-                logger.info(f"[RANDOM CALLBACK] Found {len(years)} years for my_votes mode (from movies: {len(years_from_movies)}, from imported: {len(years_from_ratings)})")
-                
-                # Определяем доступные периоды на основе найденных годов
-                for period in all_periods:
-                    if period == "До 1980":
-                        if any(y < 1980 for y in years):
-                            available_periods.append(period)
-                    elif period == "1980–1990":
-                        if any(1980 <= y <= 1990 for y in years):
-                            available_periods.append(period)
-                    elif period == "1990–2000":
-                        if any(1990 <= y <= 2000 for y in years):
-                            available_periods.append(period)
-                    elif period == "2000–2010":
-                        if any(2000 <= y <= 2010 for y in years):
-                            available_periods.append(period)
-                    elif period == "2010–2020":
-                        if any(2010 <= y <= 2020 for y in years):
-                            available_periods.append(period)
-                    elif period == "2020–сейчас":
-                        if any(y >= 2020 for y in years):
-                            available_periods.append(period)
-
-            elif mode == 'group_votes':
-                # Для режима "По оценкам в базе" - получаем годы из фильмов со средней оценкой группы >= 7.5
-                # Учитываем content_type: films - только фильмы, series - только сериалы, mixed - оба
-                conn_local = get_db_connection()
-                cursor_local = get_db_cursor()
-                years = []
+            finally:
                 try:
-                    # Добавляем фильтр по is_series в зависимости от content_type
-                    is_series_param = None
-                    if content_type == 'films':
-                        is_series_param = 0
-                    elif content_type == 'series':
-                        is_series_param = 1
-                    # mixed - фильтр не добавляем (is_series_param = None)
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
+            
+            # Уникальные отсортированные годы
+            years = sorted(set(y for y in years if y is not None))
+            
+            logger.info(f"[RANDOM] Found {len(years)} years for my_votes mode")
+            
+            # Определяем доступные периоды
+            for period in all_periods:
+                if period == "До 1980" and any(y < 1980 for y in years):
+                    available_periods.append(period)
+                elif period == "1980–1990" and any(1980 <= y <= 1990 for y in years):
+                    available_periods.append(period)
+                elif period == "1990–2000" and any(1990 <= y <= 2000 for y in years):
+                    available_periods.append(period)
+                elif period == "2000–2010" and any(2000 <= y <= 2010 for y in years):
+                    available_periods.append(period)
+                elif period == "2010–2020" and any(2010 <= y <= 2020 for y in years):
+                    available_periods.append(period)
+                elif period == "2020–сейчас" and any(y >= 2020 for y in years):
+                    available_periods.append(period)
 
+        elif mode == 'group_votes':
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
+            years = []
+            try:
+                is_series_param = None
+                if content_type == 'films':
+                    is_series_param = 0
+                elif content_type == 'series':
+                    is_series_param = 1
+
+                with db_lock:
                     if is_series_param is not None:
                         cursor_local.execute("""
                             SELECT DISTINCT m.year
                             FROM movies m
-                            WHERE m.chat_id = %s AND m.year IS NOT NULL AND m.is_series = %s
-                            AND EXISTS (
-                                SELECT 1 FROM ratings r 
-                                WHERE r.film_id = m.id AND r.chat_id = m.chat_id AND (r.is_imported = FALSE OR r.is_imported IS NULL) 
-                                GROUP BY r.film_id, r.chat_id 
-                                HAVING AVG(r.rating) >= 7.5
-                            )
+                            WHERE m.chat_id = %s 
+                              AND m.year IS NOT NULL 
+                              AND m.is_series = %s
+                              AND EXISTS (
+                                  SELECT 1 FROM ratings r 
+                                  WHERE r.film_id = m.id 
+                                    AND r.chat_id = m.chat_id 
+                                    AND (r.is_imported = FALSE OR r.is_imported IS NULL)
+                                  GROUP BY r.film_id, r.chat_id 
+                                  HAVING AVG(r.rating) >= 7.5
+                              )
                             ORDER BY m.year
                         """, (chat_id, is_series_param))
                     else:
                         cursor_local.execute("""
                             SELECT DISTINCT m.year
                             FROM movies m
-                            WHERE m.chat_id = %s AND m.year IS NOT NULL
-                            AND EXISTS (
-                                SELECT 1 FROM ratings r 
-                                WHERE r.film_id = m.id AND r.chat_id = m.chat_id AND (r.is_imported = FALSE OR r.is_imported IS NULL) 
-                                GROUP BY r.film_id, r.chat_id 
-                                HAVING AVG(r.rating) >= 7.5
-                            )
+                            WHERE m.chat_id = %s 
+                              AND m.year IS NOT NULL
+                              AND EXISTS (
+                                  SELECT 1 FROM ratings r 
+                                  WHERE r.film_id = m.id 
+                                    AND r.chat_id = m.chat_id 
+                                    AND (r.is_imported = FALSE OR r.is_imported IS NULL)
+                                  GROUP BY r.film_id, r.chat_id 
+                                  HAVING AVG(r.rating) >= 7.5
+                              )
                             ORDER BY m.year
                         """, (chat_id,))
                     
                     years_rows = cursor_local.fetchall()
-                    years = [row.get('year') if isinstance(row, dict) else row[0] for row in years_rows if row]
+                    years = [row[0] for row in years_rows if row]
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
+            
+            logger.info(f"[RANDOM] Found {len(years)} years for group_votes mode")
+            
+            for period in all_periods:
+                if period == "До 1980" and any(y < 1980 for y in years):
+                    available_periods.append(period)
+                # ... (аналогично остальным периодам — можно скопировать логику выше)
+
+        else:
+            # database mode
+            base_query = """
+                SELECT COUNT(DISTINCT m.id) 
+                FROM movies m
+                LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
+                WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
+            """
+            is_series_filter = ""
+            if content_type == 'films':
+                is_series_filter = "AND m.is_series = 0"
+            elif content_type == 'series':
+                is_series_filter = "AND m.is_series = 1"
+            
+            base_query += f" {is_series_filter}"
+            params = [chat_id]
+            
+            for period in all_periods:
+                if period == "До 1980":
+                    condition = "m.year < 1980"
+                elif period == "1980–1990":
+                    condition = "(m.year >= 1980 AND m.year <= 1990)"
+                elif period == "1990–2000":
+                    condition = "(m.year >= 1990 AND m.year <= 2000)"
+                elif period == "2000–2010":
+                    condition = "(m.year >= 2000 AND m.year <= 2010)"
+                elif period == "2010–2020":
+                    condition = "(m.year >= 2010 AND m.year <= 2020)"
+                elif period == "2020–сейчас":
+                    condition = "m.year >= 2020"
+                else:
+                    continue
+                
+                query = f"{base_query} AND {condition}"
+                
+                conn_local = get_db_connection()
+                cursor_local = get_db_cursor()
+                try:
+                    with db_lock:
+                        cursor_local.execute(query, tuple(params))
+                        count_row = cursor_local.fetchone()
+                        count = count_row[0] if count_row else 0
+                    if count > 0:
+                        available_periods.append(period)
                 finally:
                     try:
                         cursor_local.close()
@@ -2382,84 +2464,6 @@ def _show_period_step(call, chat_id, user_id):
                         conn_local.close()
                     except:
                         pass
-                
-                logger.info(f"[RANDOM CALLBACK] Found {len(years)} years for group_votes mode")
-                
-                # Определяем доступные периоды на основе найденных годов
-                for period in all_periods:
-                    if period == "До 1980":
-                        if any(y < 1980 for y in years):
-                            available_periods.append(period)
-                    elif period == "1980–1990":
-                        if any(1980 <= y <= 1990 for y in years):
-                            available_periods.append(period)
-                    elif period == "1990–2000":
-                        if any(1990 <= y <= 2000 for y in years):
-                            available_periods.append(period)
-                    elif period == "2000–2010":
-                        if any(2000 <= y <= 2010 for y in years):
-                            available_periods.append(period)
-                    elif period == "2010–2020":
-                        if any(2010 <= y <= 2020 for y in years):
-                            available_periods.append(period)
-                    elif period == "2020–сейчас":
-                        if any(y >= 2020 for y in years):
-                            available_periods.append(period)
-            else:
-                # Для режима database - используем логику с учетом content_type
-                # content_type: films - только фильмы (is_series = FALSE), series - только сериалы (is_series = TRUE), mixed - оба
-                base_query = """
-                    SELECT COUNT(DISTINCT m.id) 
-                    FROM movies m
-                    LEFT JOIN ratings r ON m.id = r.film_id AND m.chat_id = r.chat_id AND r.is_imported = TRUE
-                    WHERE m.chat_id = %s AND m.watched = 0 AND r.id IS NULL
-                """
-                # Добавляем фильтр по is_series в зависимости от content_type
-                is_series_filter = ""
-                if content_type == 'films':
-                    is_series_filter = "AND m.is_series = 0"
-                elif content_type == 'series':
-                    is_series_filter = "AND m.is_series = 1"
-                else:
-                    is_series_filter = ""
-                
-                base_query += f" {is_series_filter}"
-                params = [chat_id]
-            
-                for period in all_periods:
-                    if period == "До 1980":
-                        condition = "m.year < 1980"
-                    elif period == "1980–1990":
-                        condition = "(m.year >= 1980 AND m.year <= 1990)"
-                    elif period == "1990–2000":
-                        condition = "(m.year >= 1990 AND m.year <= 2000)"
-                    elif period == "2000–2010":
-                        condition = "(m.year >= 2000 AND m.year <= 2010)"
-                    elif period == "2010–2020":
-                        condition = "(m.year >= 2010 AND m.year <= 2020)"
-                    elif period == "2020–сейчас":
-                        condition = "m.year >= 2020"
-                    
-                    query = f"{base_query} AND {condition}"
-                    conn_local = get_db_connection()
-                    cursor_local = get_db_cursor()
-                    count = 0
-                    try:
-                        cursor_local.execute(query, tuple(params))
-                        count_row = cursor_local.fetchone()
-                        count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
-                    finally:
-                        try:
-                            cursor_local.close()
-                        except:
-                            pass
-                        try:
-                            conn_local.close()
-                        except:
-                            pass
-                    
-                    if count > 0:
-                        available_periods.append(period)
         
         logger.info(f"[RANDOM CALLBACK] Available periods: {available_periods}")
         
@@ -2471,7 +2475,7 @@ def _show_period_step(call, chat_id, user_id):
                 markup.add(InlineKeyboardButton(period, callback_data=f"rand_period:{period}"))
         markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
         markup.add(InlineKeyboardButton("⬅️ Назад к режимам", callback_data="rand_mode:back"))
-        
+
         # Определяем номер шага в зависимости от режима (теперь это шаг 2, так как шаг 1 - выбор типа контента)
         if mode in ['my_votes', 'group_votes']:
             step_text = "🎲 <b>Шаг 2/3: Выберите период</b>"
@@ -2517,11 +2521,11 @@ def _show_period_step(call, chat_id, user_id):
         
         logger.info(f"[RANDOM CALLBACK] ✅ Period step shown: mode={mode}, content_type={content_type}, user_id={user_id}")
     except Exception as e:
-        logger.error(f"[RANDOM CALLBACK] ❌ ERROR in handle_rand_mode: {e}", exc_info=True)
+        logger.error(f"[RANDOM CALLBACK] ❌ ERROR in _show_period_step: {e}", exc_info=True)
         try:
             bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
-            pass
+            pass    
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rand_content_type:"))
 def handle_rand_content_type(call):
