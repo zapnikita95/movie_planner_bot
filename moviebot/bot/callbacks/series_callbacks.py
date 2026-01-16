@@ -1250,22 +1250,21 @@ def handle_episode_toggle(call):
         logger.info(f"[EPISODE TOGGLE] Переключение эпизода: kp_id={kp_id}, season={season_num}, episode={ep_num}, user_id={user_id}")
         
         # Используем локальные соединение и курсор
-        from moviebot.database.db_connection import get_db_connection, get_db_cursor
+        from moviebot.database.db_connection import get_db_connection
         conn_local = get_db_connection()
-        cursor_local = get_db_cursor()
         
         # Получаем film_id (добавляем сериал в базу, если его еще нет)
+        film_id = None
         with db_lock:
             try:
+                cursor_local = conn_local.cursor()
                 cursor_local.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
                 row = cursor_local.fetchone()
+                cursor_local.close()
+                if row:
+                    film_id = row.get('id') if isinstance(row, dict) else row[0]
             except Exception as db_e:
                 logger.error(f"[EPISODE TOGGLE] Ошибка запроса film_id: {db_e}", exc_info=True)
-                row = None
-            
-        film_id = None
-        if row:
-            film_id = row.get('id') if isinstance(row, dict) else row[0]
             
         # Если сериала нет в базе, добавляем его
         if not film_id:
@@ -1289,10 +1288,6 @@ def handle_episode_toggle(call):
             logger.warning(f"[EPISODE TOGGLE] Сезон не найден: season={season_num}, kp_id={kp_id}")
             bot.answer_callback_query(call.id, "❌ Сезон не найден", show_alert=True)
             try:
-                cursor_local.close()
-            except:
-                pass
-            try:
                 conn_local.close()
             except:
                 pass
@@ -1302,9 +1297,13 @@ def handle_episode_toggle(call):
         # Сортируем эпизоды по номеру
         episodes_sorted = sorted(episodes, key=lambda e: int(e.get('episodeNumber', 0)))
         
+        cursor_local = None
         try:
-            # Проверяем текущий статус
+            # Все операции с БД внутри одного блока db_lock
             with db_lock:
+                cursor_local = conn_local.cursor()
+                
+                # Проверяем текущий статус
                 cursor_local.execute('''
                     SELECT watched FROM series_tracking 
                     WHERE chat_id = %s AND film_id = %s AND user_id = %s 
@@ -1549,18 +1548,21 @@ def handle_episode_toggle(call):
                                 del user_episode_auto_mark_state[user_id]
                 
                 conn_local.commit()
+                if cursor_local:
+                    cursor_local.close()
         except Exception as db_e:
             logger.error(f"[EPISODE TOGGLE] Ошибка работы с БД: {db_e}", exc_info=True)
             try:
                 conn_local.rollback()
             except:
                 pass
-            raise
-        finally:
             try:
-                cursor_local.close()
+                if cursor_local:
+                    cursor_local.close()
             except:
                 pass
+            raise
+        finally:
             try:
                 conn_local.close()
             except:
