@@ -394,21 +394,44 @@ def register_random_callbacks(bot):
             state = user_random_state[user_id]
             periods = state.get('periods', [])  # list выбранных периодов
             
-            if action == "skip":
-                state['periods'] = []
-                logger.info(f"[RANDOM PERIOD] Periods skipped (user={user_id})")
-            elif action == "done":
-                logger.info(f"[RANDOM PERIOD] Periods confirmed: {periods} (user={user_id})")
-                # дальше к жанрам
-            else:
-                # toggle периода
-                if action in periods:
-                    periods.remove(action)
-                    logger.info(f"[RANDOM PERIOD] Period removed: {action} (user={user_id})")
+            # Если пользователь нажал "Продолжить" или "Пропустить", сразу переходим к жанрам
+            if action in ["done", "skip"]:
+                if action == "skip":
+                    state['periods'] = []
+                    logger.info(f"[RANDOM PERIOD] Periods skipped (user={user_id})")
                 else:
-                    periods.append(action)
-                    logger.info(f"[RANDOM PERIOD] Period added: {action} (user={user_id})")
-                state['periods'] = periods
+                    logger.info(f"[RANDOM PERIOD] Periods confirmed: {periods} (user={user_id})")
+                
+                state['step'] = 'genre'
+                # Вызываем функцию через модуль series_handlers - она сама отредактирует сообщение
+                # НЕ редактируем сообщение здесь, чтобы избежать дублирования
+                # Передаем message_id, чтобы _show_genre_step могла отредактировать правильное сообщение
+                try:
+                    series_handlers._show_genre_step(call, chat_id, user_id)
+                except Exception as e:
+                    logger.error(f"[RANDOM PERIOD] Error in _show_genre_step: {e}", exc_info=True)
+                    # Если не получилось, пробуем отредактировать сообщение напрямую
+                    try:
+                        bot.edit_message_text(
+                            "🎬 <b>Шаг 2/4: Выберите жанр</b>\n\nЗагрузка жанров...",
+                            chat_id=chat_id,
+                            message_id=message_id,
+                            parse_mode='HTML'
+                        )
+                    except:
+                        pass
+                logger.info(f"[RANDOM PERIOD] ✅ Handled action={action}, periods now={state.get('periods')} (user={user_id})")
+                return
+            
+            # Если это выбор/снятие периода, обновляем состояние и показываем обновленную клавиатуру
+            # toggle периода
+            if action in periods:
+                periods.remove(action)
+                logger.info(f"[RANDOM PERIOD] Period removed: {action} (user={user_id})")
+            else:
+                periods.append(action)
+                logger.info(f"[RANDOM PERIOD] Period added: {action} (user={user_id})")
+            state['periods'] = periods
             
             # Формируем обновлённую клавиатуру
             available_periods = state.get('available_periods', [])
@@ -445,12 +468,6 @@ def register_random_callbacks(bot):
                     reply_markup=markup,
                     parse_mode='HTML'
                 )
-            
-            # Переход к следующему шагу
-            if action in ["done", "skip"]:
-                state['step'] = 'genre'
-                # Вызываем функцию через модуль series_handlers
-                series_handlers._show_genre_step(call, chat_id, user_id)
             
             logger.info(f"[RANDOM PERIOD] ✅ Handled action={action}, periods now={state.get('periods')} (user={user_id})")
         
