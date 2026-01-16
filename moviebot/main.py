@@ -272,14 +272,6 @@ from moviebot.bot.callbacks.series_callbacks import register_series_callbacks
 register_series_callbacks(bot)
 logger.info("✅ series_callbacks зарегистрированы")
 
-# Добавляем глобальное логирование всех callback'ов для отладки
-@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("series_episode:"))
-def debug_episode_callback(call):
-    """Временный обработчик для отладки - логирует все series_episode callbacks"""
-    logger.info(f"[DEBUG CALLBACK] ===== ПЕРЕХВАТЧИК: callback_id={call.id}, user_id={call.from_user.id}, data={call.data}")
-    logger.info(f"[DEBUG CALLBACK] Этот обработчик должен перехватывать все series_episode callbacks")
-    # НЕ отвечаем на callback и НЕ обрабатываем - просто логируем
-
 from moviebot.bot.callbacks.payment_callbacks import register_payment_callbacks
 register_payment_callbacks(bot)
 logger.info("✅ payment_callbacks зарегистрированы")
