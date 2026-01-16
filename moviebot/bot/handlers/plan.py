@@ -1516,44 +1516,44 @@ def get_plan_day_or_date_internal(message, state):
             plan_dt = user_tz.localize(plan_dt)
             logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата 'завтра': {plan_dt}")
         elif 'сегодня' in text_lower:
-                plan_date = now.date()
-                # Используем извлеченное время, если есть, иначе стандартное
-                if extracted_time:
-                    hour, minute = extracted_time
-                elif plan_type == 'home':
-                    hour = 19 if plan_date.weekday() < 5 else 10
-                    minute = 0
-                else:
-                    hour = 9
-                    minute = 0
+            plan_date = now.date()
+            # Используем извлеченное время, если есть, иначе стандартное
+            if extracted_time:
+                hour, minute = extracted_time
+            elif plan_type == 'home':
+                hour = 19 if plan_date.weekday() < 5 else 10
+                minute = 0
+            else:
+                hour = 9
+                minute = 0
             plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=hour, minute=minute))
             plan_dt = user_tz.localize(plan_dt)
             logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата 'сегодня': {plan_dt}")
         elif 'следующая неделя' in text_lower or 'след неделя' in text_lower or 'след. неделя' in text_lower or 'на следующей неделе' in text_lower:
-                if plan_type == 'home':
-                    # Для дома - суббота следующей недели в 10:00
-                    current_wd = now.weekday()
-                    days_until_next_saturday = (5 - current_wd + 7) % 7
-                    if days_until_next_saturday == 0:
-                        days_until_next_saturday = 7
-                    else:
-                        days_until_next_saturday += 7
-                    plan_date = now.date() + timedelta(days=days_until_next_saturday)
-                    plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=10))
-                    plan_dt = user_tz.localize(plan_dt)
-                    logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата 'на следующей неделе' (дом): {plan_dt}")
+            if plan_type == 'home':
+                # Для дома - суббота следующей недели в 10:00
+                current_wd = now.weekday()
+                days_until_next_saturday = (5 - current_wd + 7) % 7
+                if days_until_next_saturday == 0:
+                    days_until_next_saturday = 7
                 else:
-                    # Для кино - четверг следующей недели
-                    current_wd = now.weekday()
-                    days_until_thursday = (3 - current_wd + 7) % 7
-                    if days_until_thursday == 0:
-                        days_until_thursday = 7
-                    else:
-                        days_until_thursday += 7
-                    plan_date = now.date() + timedelta(days=days_until_thursday)
-                    plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=9))
-                    plan_dt = user_tz.localize(plan_dt)
-                    logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата 'на следующей неделе' (кино): {plan_dt}")
+                    days_until_next_saturday += 7
+                plan_date = now.date() + timedelta(days=days_until_next_saturday)
+                plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=10))
+                plan_dt = user_tz.localize(plan_dt)
+                logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата 'на следующей неделе' (дом): {plan_dt}")
+            else:
+                # Для кино - четверг следующей недели
+                current_wd = now.weekday()
+                days_until_thursday = (3 - current_wd + 7) % 7
+                if days_until_thursday == 0:
+                    days_until_thursday = 7
+                else:
+                    days_until_thursday += 7
+                plan_date = now.date() + timedelta(days=days_until_thursday)
+                plan_dt = datetime.combine(plan_date, datetime.min.time().replace(hour=9))
+                plan_dt = user_tz.localize(plan_dt)
+                logger.info(f"[PLAN DAY/DATE INTERNAL] Установлена дата 'на следующей неделе' (кино): {plan_dt}")
         elif not plan_dt:
             # Проверка дней недели (только после проверки "завтра"/"сегодня", чтобы избежать ложных срабатываний)
             # Используем границы слов \b, чтобы "вт" не находилось внутри "завтра"
