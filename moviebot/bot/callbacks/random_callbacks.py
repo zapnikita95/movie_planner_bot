@@ -380,9 +380,6 @@ def register_random_callbacks(bot):
             chat_id = call.message.chat.id
             message_id = call.message.message_id
             
-            # Сразу отвечаем телеграму, чтобы не было "часиков"
-            bot.answer_callback_query(call.id)
-            
             # Разбираем действие
             action = call.data.split(":", 1)[1]   # "До 1980", "2010–2020", "skip", "done"
             
@@ -394,6 +391,8 @@ def register_random_callbacks(bot):
             state = user_random_state[user_id]
             periods = state.get('periods', [])  # list выбранных периодов
             
+            logger.info(f"[RANDOM PERIOD] Current periods before action: {periods}, action={action}")
+            
             # Если пользователь нажал "Продолжить" или "Пропустить", сразу переходим к жанрам
             if action in ["done", "skip"]:
                 if action == "skip":
@@ -404,22 +403,12 @@ def register_random_callbacks(bot):
                 
                 state['step'] = 'genre'
                 # Вызываем функцию через модуль series_handlers - она сама отредактирует сообщение
-                # НЕ редактируем сообщение здесь, чтобы избежать дублирования
-                # Передаем message_id, чтобы _show_genre_step могла отредактировать правильное сообщение
                 try:
                     series_handlers._show_genre_step(call, chat_id, user_id)
+                    bot.answer_callback_query(call.id)  # Отвечаем после успешного обновления
                 except Exception as e:
                     logger.error(f"[RANDOM PERIOD] Error in _show_genre_step: {e}", exc_info=True)
-                    # Если не получилось, пробуем отредактировать сообщение напрямую
-                    try:
-                        bot.edit_message_text(
-                            "🎬 <b>Шаг 2/4: Выберите жанр</b>\n\nЗагрузка жанров...",
-                            chat_id=chat_id,
-                            message_id=message_id,
-                            parse_mode='HTML'
-                        )
-                    except:
-                        pass
+                    bot.answer_callback_query(call.id, "❌ Ошибка загрузки жанров", show_alert=True)
                 logger.info(f"[RANDOM PERIOD] ✅ Handled action={action}, periods now={state.get('periods')} (user={user_id})")
                 return
             
@@ -433,12 +422,23 @@ def register_random_callbacks(bot):
                 logger.info(f"[RANDOM PERIOD] Period added: {action} (user={user_id})")
             state['periods'] = periods
             
+            logger.info(f"[RANDOM PERIOD] Periods after toggle: {periods}")
+            
             # Формируем обновлённую клавиатуру
             available_periods = state.get('available_periods', [])
+            if not available_periods:
+                # Если нет доступных периодов, используем все
+                available_periods = ["До 1980", "1980–1990", "1990–2000", "2000–2010", "2010–2020", "2020–сейчас"]
+                state['available_periods'] = available_periods
+            
+            logger.info(f"[RANDOM PERIOD] Available periods: {available_periods}")
+            
             markup = InlineKeyboardMarkup(row_width=1)
             
             for period in available_periods:
-                label = f"✓ {period}" if period in periods else period
+                is_selected = period in periods
+                label = f"✓ {period}" if is_selected else period
+                logger.info(f"[RANDOM PERIOD] Adding button: period={period}, selected={is_selected}, label={label}")
                 markup.add(InlineKeyboardButton(label, callback_data=f"rand_period:{period}"))
             
             if periods:
@@ -452,22 +452,39 @@ def register_random_callbacks(bot):
             selected_text = ", ".join(periods) if periods else "ничего"
             text = f"🎲 <b>Выберите период</b>\n\nВыбрано: {selected_text}\n(можно выбрать несколько)"
             
+            logger.info(f"[RANDOM PERIOD] Attempting to edit message: message_id={message_id}, text_length={len(text)}, periods={periods}")
+            
             try:
-                bot.edit_message_text(
+                result = bot.edit_message_text(
                     text,
                     chat_id=chat_id,
                     message_id=message_id,
                     reply_markup=markup,
                     parse_mode='HTML'
                 )
+                logger.info(f"[RANDOM PERIOD] ✅ Message edited successfully: {result}")
+                bot.answer_callback_query(call.id)  # Отвечаем ПОСЛЕ успешного обновления
             except Exception as edit_e:
-                logger.warning(f"[RANDOM PERIOD] Edit failed: {edit_e}")
-                bot.send_message(
-                    chat_id,
-                    text,
-                    reply_markup=markup,
-                    parse_mode='HTML'
-                )
+                logger.error(f"[RANDOM PERIOD] ❌ Edit failed: {edit_e}", exc_info=True)
+                try:
+                    bot.answer_callback_query(call.id, f"Ошибка: {str(edit_e)[:50]}", show_alert=True)
+                except:
+                    pass
+                # Пробуем отправить новое сообщение
+                try:
+                    bot.send_message(
+                        chat_id,
+                        text,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
+                    bot.answer_callback_query(call.id)
+                except Exception as send_e:
+                    logger.error(f"[RANDOM PERIOD] ❌ Send also failed: {send_e}", exc_info=True)
+                    try:
+                        bot.answer_callback_query(call.id, "❌ Критическая ошибка", show_alert=True)
+                    except:
+                        pass
             
             logger.info(f"[RANDOM PERIOD] ✅ Handled action={action}, periods now={state.get('periods')} (user={user_id})")
         

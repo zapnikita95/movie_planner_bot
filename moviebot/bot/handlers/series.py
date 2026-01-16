@@ -6853,6 +6853,35 @@ def _random_final(call, chat_id, user_id):
                 except:
                     pass
             
+            # Получаем список жанров из API для преобразования названий в ID
+            from moviebot.api.kinopoisk_api import get_film_filters
+            api_genres = get_film_filters()
+            genre_id_map = {}  # словарь: название -> ID
+            if api_genres:
+                for g in api_genres:
+                    genre_name = g.get('genre', '').lower()
+                    genre_id = g.get('id')
+                    if genre_name and genre_id:
+                        genre_id_map[genre_name] = genre_id
+            
+            # Преобразуем названия жанров в ID, если нужно
+            genre_ids = []
+            for genre in genres:
+                if genre is None:
+                    genre_ids.append(None)
+                else:
+                    # Проверяем, является ли это числом (ID)
+                    try:
+                        genre_id_int = int(genre)
+                        genre_ids.append(genre_id_int)
+                    except ValueError:
+                        # Это название, ищем ID
+                        genre_lower = genre.lower()
+                        if genre_lower in genre_id_map:
+                            genre_ids.append(genre_id_map[genre_lower])
+                        else:
+                            logger.warning(f"[RANDOM KINOPOISK] Жанр '{genre}' не найден в API, пропускаем")
+            
             # Формируем список запросов: для каждого периода и каждого жанра (если выбрано несколько)
             search_queries = []
             
@@ -6861,12 +6890,12 @@ def _random_final(call, chat_id, user_id):
                 periods = [None]  # Один запрос без фильтра по годам
             
             # Если жанры не выбраны, используем один запрос без фильтра по жанрам
-            if not genres:
-                genres = [None]  # Один запрос без фильтра по жанрам
+            if not genre_ids:
+                genre_ids = [None]  # Один запрос без фильтра по жанрам
             
             # Формируем все комбинации периодов и жанров
             for period in periods:
-                for genre_id in genres:
+                for genre_id in genre_ids:
                     year_from = None
                     year_to = None
                     
@@ -6907,8 +6936,8 @@ def _random_final(call, chat_id, user_id):
             
             for query in search_queries:
                 try:
-                    # Передаем genre_id напрямую (число), если он есть
-                    genre_param = int(query['genre_id']) if query['genre_id'] else None
+                    # genre_id уже число или None
+                    genre_param = query['genre_id']
                     films = search_films_by_filters(
                         genres=genre_param,
                         film_type=query['film_type_api'],  # FILM, TV_SERIES или None (для mixed)

@@ -636,8 +636,11 @@ def search_films_by_filters(genres=None, film_type=None, year_from=None, year_to
         params['type'] = film_type  # FILM или TV_SERIES
     
     if genres is not None:
-        # Если список жанров, берем первый (API не поддерживает несколько одновременно)
+        # Если список жанров, передаем все через параметр genres (можно несколько раз)
         if isinstance(genres, list):
+            # API поддерживает несколько жанров через повторение параметра genres
+            # Но requests не поддерживает это напрямую, поэтому используем первый жанр
+            # Для нескольких жанров нужно делать отдельные запросы
             params['genres'] = genres[0] if genres and genres[0] else None
         else:
             # Если это число (id жанра), используем его напрямую
