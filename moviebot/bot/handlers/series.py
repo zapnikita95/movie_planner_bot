@@ -2227,7 +2227,7 @@ def _show_period_step(call, chat_id, user_id):
                     is_series_param = 1
 
                 if is_series_param is not None:
-                    with db_lock:
+                    with db_lock:  # здесь lock оставляем — JOIN + фильтр по пользователю
                         cursor_local.execute("""
                             SELECT DISTINCT m.year
                             FROM movies m
@@ -2258,14 +2258,10 @@ def _show_period_step(call, chat_id, user_id):
                 years_from_movies = [row['year'] for row in years_rows if row['year'] is not None]
                 years.extend(years_from_movies)
             finally:
-                try:
-                    cursor_local.close()
-                except:
-                    pass
-                try:
-                    conn_local.close()
-                except:
-                    pass
+                try: cursor_local.close()
+                except: pass
+                try: conn_local.close()
+                except: pass
             
             # 2. Годы из импортированных оценок (film_id IS NULL)
             conn_local = get_db_connection()
@@ -2319,21 +2315,14 @@ def _show_period_step(call, chat_id, user_id):
                 years_from_ratings = [row['year'] for row in years_rows if row['year'] is not None]
                 years.extend(years_from_ratings)
             finally:
-                try:
-                    cursor_local.close()
-                except:
-                    pass
-                try:
-                    conn_local.close()
-                except:
-                    pass
+                try: cursor_local.close()
+                except: pass
+                try: conn_local.close()
+                except: pass
             
-            # Уникальные отсортированные годы
             years = sorted(set(y for y in years if y is not None))
-            
             logger.info(f"[RANDOM] Found {len(years)} years for my_votes mode")
             
-            # Определяем доступные периоды
             for period in all_periods:
                 if period == "До 1980" and any(y < 1980 for y in years):
                     available_periods.append(period)
@@ -2425,7 +2414,7 @@ def _show_period_step(call, chat_id, user_id):
                     available_periods.append(period)
 
         else:
-            # database mode
+            # database mode — САМЫЙ ЧАСТЫЙ СЛУЧАЙ → убираем lock полностью
             base_query = """
                 SELECT COUNT(DISTINCT m.id) AS count
                 FROM movies m
@@ -2462,22 +2451,77 @@ def _show_period_step(call, chat_id, user_id):
                 conn_local = get_db_connection()
                 cursor_local = get_db_cursor()
                 try:
-                    with db_lock:
-                        cursor_local.execute(query, tuple(params))
+                    cursor_local.execute(query, tuple(params))   # ← lock убрали
                     count_row = cursor_local.fetchone()
                     count = count_row['count'] if count_row else 0
                     
                     if count > 0:
                         available_periods.append(period)
                 finally:
-                    try:
-                        cursor_local.close()
-                    except:
-                        pass
-                    try:
-                        conn_local.close()
-                    except:
-                        pass
+                    try: cursor_local.close()
+                    except: pass
+                    try: conn_local.close()
+                    except: pass
+        
+        logger.info(f"[RANDOM CALLBACK] Available periods: {available_periods}")
+        
+        user_random_state[user_id]['available_periods'] = available_periods
+        
+        # ── остальной код без изменений ──
+        markup = InlineKeyboardMarkup(row_width=1)
+        if available_periods:
+            for period in available_periods:
+                markup.add(InlineKeyboardButton(period, callback_data=f"rand_period:{period}"))
+        markup.add(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_period:skip"))
+        markup.add(InlineKeyboardButton("⬅️ Назад к режимам", callback_data="rand_mode:back"))
+
+        if mode in ['my_votes', 'group_votes']:
+            step_text = "🎲 <b>Шаг 2/3: Выберите период</b>"
+        elif mode == 'kinopoisk':
+            step_text = "🎲 <b>Шаг 2/4: Выберите период</b>"
+        else:
+            step_text = "🎲 <b>Шаг 2/5: Выберите период</b>"
+        
+        content_type_text = ""
+        if content_type == 'films':
+            content_type_text = "\n🎬 Выбрано: Фильмы"
+        elif content_type == 'series':
+            content_type_text = "\n📺 Выбрано: Сериалы"
+        else:
+            content_type_text = "\n🎬📺 Выбрано: Смешанный режим"
+        
+        try:
+            bot.answer_callback_query(call.id)
+        except Exception as e:
+            if "query is too old" not in str(e) and "query ID is invalid" not in str(e) and "timeout expired" not in str(e):
+                logger.warning(f"[RANDOM PERIOD] Не удалось ответить на callback query: {e}")
+        
+        mode_descriptions = {
+            'database': '🎲 <b>Рандом по своей базе</b>\n\nВыбираем случайный фильм из вашей базы по заданным фильтрам.',
+            'kinopoisk': '🎬 <b>Рандом по кинопоиску</b>\n\nНайдите случайный фильм по вашим фильтрам.',
+            'my_votes': '⭐ <b>По моим оценкам (9-10)</b>\n\nПолучите рекомендацию, основанную на ваших оценках на Кинопоиске.',
+            'group_votes': '👥 <b>По оценкам в базе (9-10)</b>\n\nПолучите рекомендацию, основанную на оценках в вашей локальной базе.\n\n💡 <i>Чем больше оценок в базе, тем больше будет вариантов фильмов и жанров.</i>'
+        }
+        mode_description = mode_descriptions.get(mode, '')
+        
+        text = f"{mode_description}{content_type_text}\n\n{step_text}\n\n(можно выбрать несколько или пропустить)"
+        
+        try:
+            bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+        except Exception as e:
+            logger.error(f"[RANDOM PERIOD] Ошибка редактирования сообщения: {e}", exc_info=True)
+            try:
+                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+            except:
+                pass
+        
+        logger.info(f"[RANDOM CALLBACK] ✅ Period step shown: mode={mode}, content_type={content_type}, user_id={user_id}")
+    except Exception as e:
+        logger.error(f"[RANDOM CALLBACK] ❌ ERROR in _show_period_step: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
         
         logger.info(f"[RANDOM CALLBACK] Available periods: {available_periods}")
         
