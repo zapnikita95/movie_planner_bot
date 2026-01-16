@@ -953,6 +953,13 @@ def series_subscribe_callback(call):
         """Обработчик переключения статуса просмотра эпизода с поддержкой двойного клика для автоотметки"""
         logger.info(f"[EPISODE TOGGLE] ===== START: callback_id={call.id}, user_id={call.from_user.id}, data={call.data}")
         logger.info(f"[EPISODE TOGGLE] Обработчик вызван! bot={bot}, id(bot)={id(bot)}")
+        
+        # Сразу отвечаем на callback, чтобы убрать индикатор загрузки
+        try:
+            bot.answer_callback_query(call.id)
+        except Exception as e:
+            logger.warning(f"[EPISODE TOGGLE] Не удалось ответить на callback сразу: {e}")
+        
         try:
             # Формат: series_episode:{kp_id}:{season_num}:{ep_num}
             parts = call.data.split(":")
@@ -1207,14 +1214,7 @@ def series_subscribe_callback(call):
             
             result = show_episodes_page(kp_id, season_num, chat_id, user_id, page=current_page, message_id=message_id, message_thread_id=message_thread_id)
             
-            # Отвечаем на callback после обновления сообщения
-            try:
-                bot.answer_callback_query(call.id)
-            except Exception as e:
-                error_str = str(e)
-                if "query is too old" not in error_str and "query ID is invalid" not in error_str and "timeout expired" not in error_str:
-                    logger.warning(f"[EPISODE TOGGLE] Не удалось ответить на callback query: {e}")
-            
+            # answer_callback_query уже вызван в начале функции
             if not result:
                 logger.warning(f"[EPISODE TOGGLE] show_episodes_page вернула False, возможно ошибка обновления сообщения")
                 try:
@@ -1327,10 +1327,12 @@ def series_subscribe_callback(call):
     @bot.callback_query_handler(func=lambda call: call.data.startswith("series_season_all:"))
     def handle_season_all_toggle(call):
         """Обработчик отметки всех эпизодов сезона как просмотренных"""
+        logger.info(f"[SEASON ALL] ===== START: callback_id={call.id}, user_id={call.from_user.id}, data={call.data}")
         try:
             bot.answer_callback_query(call.id)
             parts = call.data.split(":")
             if len(parts) < 3:
+                logger.error(f"[SEASON ALL] Неверный формат callback_data: {call.data}")
                 return
             
             kp_id = parts[1]
@@ -1407,6 +1409,7 @@ def series_subscribe_callback(call):
                     current_page = state.get('page', 1)
             
             show_episodes_page(kp_id, season_num, chat_id, user_id, page=current_page, message_id=message_id, message_thread_id=message_thread_id)
+            logger.info(f"[SEASON ALL] ===== END: успешно обновлено")
         except Exception as e:
             logger.error(f"[SEASON ALL] Ошибка: {e}", exc_info=True)
             try:
@@ -1417,10 +1420,12 @@ def series_subscribe_callback(call):
     @bot.callback_query_handler(func=lambda call: call.data.startswith("episodes_page:"))
     def handle_episodes_page_navigation(call):
         """Обработчик навигации по страницам эпизодов"""
+        logger.info(f"[EPISODES PAGE] ===== START: callback_id={call.id}, user_id={call.from_user.id}, data={call.data}")
         try:
             bot.answer_callback_query(call.id)
             parts = call.data.split(":")
             if len(parts) < 4:
+                logger.error(f"[EPISODES PAGE] Неверный формат callback_data: {call.data}")
                 return
             
             kp_id = parts[1]
@@ -1434,6 +1439,7 @@ def series_subscribe_callback(call):
             message_thread_id = getattr(call.message, 'message_thread_id', None)
             
             show_episodes_page(kp_id, season_num, chat_id, user_id, page=page, message_id=message_id, message_thread_id=message_thread_id)
+            logger.info(f"[EPISODES PAGE] ===== END: успешно обновлено, page={page}")
         except Exception as e:
             logger.error(f"[EPISODES PAGE] Ошибка: {e}", exc_info=True)
             try:
