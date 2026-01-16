@@ -34,7 +34,6 @@ bot/
 config/
 database/
 services/
-utils/
 web/
 scheduler/
 check_bot_processes.sh
