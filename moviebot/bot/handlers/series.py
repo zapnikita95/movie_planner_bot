@@ -7791,7 +7791,11 @@ def _random_final(call, chat_id, user_id):
 
         existing = None
         if row:
-            existing = (row[0], row[1], row[2] if len(row) > 2 else False)
+            # row может быть dict или tuple, обрабатываем оба случая
+            film_id = row.get('id') if isinstance(row, dict) else (row[0] if row else None)
+            title = row.get('title') if isinstance(row, dict) else (row[1] if len(row) > 1 else None)
+            watched = row.get('watched') if isinstance(row, dict) else (row[2] if len(row) > 2 else False)
+            existing = (film_id, title, watched)
 
         fallback_info = {
             'title': title,
