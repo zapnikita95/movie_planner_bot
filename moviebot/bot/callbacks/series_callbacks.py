@@ -1405,6 +1405,31 @@ def handle_episode_toggle(call):
                     
                     logger.info(f"[EPISODE TOGGLE] Автоотметка: отмечено {len(auto_marked_episodes)} эпизодов (включая изначальную {ep_num})")
                     
+                    # Проверяем, все ли серии просмотрены после автоотметки
+                    # Используем функцию count_episodes_for_watch_check для точной проверки
+                    from moviebot.bot.handlers.seasons import count_episodes_for_watch_check
+                    watched_set_after = set()
+                    cursor_local.execute('''
+                        SELECT season_number, episode_number FROM series_tracking 
+                        WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                        AND watched = TRUE
+                    ''', (chat_id, film_id, user_id))
+                    for w_row in cursor_local.fetchall():
+                        watched_season = str(w_row.get('season_number') if isinstance(w_row, dict) else w_row[0])
+                        watched_ep_num = str(w_row.get('episode_number') if isinstance(w_row, dict) else w_row[1])
+                        watched_set_after.add((watched_season, watched_ep_num))
+                    
+                    # Получаем статус выхода сериала
+                    from moviebot.bot.handlers.seasons import get_series_airing_status
+                    is_airing, _ = get_series_airing_status(kp_id)
+                    
+                    total_ep, watched_ep = count_episodes_for_watch_check(seasons_data, is_airing, watched_set_after, chat_id, film_id, user_id)
+                    
+                    # Если все эпизоды просмотрены и сериал завершён - отмечаем как просмотренный
+                    if total_ep == watched_ep and total_ep > 0 and not is_airing:
+                        cursor_local.execute('UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                        logger.info(f"[EPISODE TOGGLE] ✅ Все серии просмотрены после автоотметки - сериал отмечен как просмотренный (total={total_ep}, watched={watched_ep})")
+                    
                 elif is_watched and not is_double_click:
                     # Просмотренная серия без сохраненного состояния - просто снимаем отметку
                     cursor_local.execute('''
