@@ -982,8 +982,10 @@ def series_subscribe_callback(call):
                 return
             
             auto_state = user_episode_auto_mark_state[user_id]
-            if auto_state.get('kp_id') != kp_id or auto_state.get('season_num') != season_num:
-                bot.answer_callback_query(call.id, "❌ Нет автоотметки для этого сезона", show_alert=True)
+            # Проверяем только kp_id - автоотметка может быть для разных сезонов в одном сериале
+            if str(auto_state.get('kp_id')) != str(kp_id):
+                bot.answer_callback_query(call.id, "❌ Нет автоотметки для этого сериала", show_alert=True)
+                logger.info(f"[EPISODE CANCEL AUTO] Несовпадение kp_id: сохранено={auto_state.get('kp_id')}, текущий={kp_id}")
                 return
             
             auto_marked = auto_state.get('episodes', [])
@@ -991,14 +993,17 @@ def series_subscribe_callback(call):
                 bot.answer_callback_query(call.id, "❌ Нет эпизодов для отмены", show_alert=True)
                 return
             
+            logger.info(f"[EPISODE CANCEL AUTO] Найдено {len(auto_marked)} эпизодов для отмены: {auto_marked[:10]}...")
+            
             # Получаем film_id
             from moviebot.database.db_connection import get_db_connection, get_db_cursor
             conn_local = get_db_connection()
-            cursor_local = get_db_cursor()
+            cursor_local = None
             
             try:
                 with db_lock:
-                    cursor_local.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(str(kp_id))))
+                    cursor_local = conn_local.cursor()
+                    cursor_local.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
                     row = cursor_local.fetchone()
                     if not row:
                         bot.answer_callback_query(call.id, "❌ Сериал не найден", show_alert=True)
@@ -1007,18 +1012,31 @@ def series_subscribe_callback(call):
                     film_id = row.get('id') if isinstance(row, dict) else row[0]
                     
                     # Удаляем все автоматически отмеченные эпизоды
+                    deleted_count = 0
                     for season_num_mark, ep_num_mark in auto_marked:
+                        # Приводим к строкам для надежности
+                        season_num_mark_str = str(season_num_mark)
+                        ep_num_mark_str = str(ep_num_mark)
+                        
                         cursor_local.execute('''
                             DELETE FROM series_tracking 
                             WHERE chat_id = %s AND film_id = %s AND user_id = %s 
                             AND season_number = %s AND episode_number = %s
-                        ''', (chat_id, film_id, user_id, season_num_mark, ep_num_mark))
+                        ''', (chat_id, film_id, user_id, season_num_mark_str, ep_num_mark_str))
+                        
+                        if cursor_local.rowcount > 0:
+                            deleted_count += 1
+                            logger.info(f"[EPISODE CANCEL AUTO] Удален эпизод: сезон {season_num_mark_str}, эпизод {ep_num_mark_str}")
                     
                     conn_local.commit()
-                    logger.info(f"[EPISODE CANCEL AUTO] Отменено {len(auto_marked)} эпизодов")
+                    logger.info(f"[EPISODE CANCEL AUTO] ✅ Отменено {deleted_count} из {len(auto_marked)} эпизодов")
                 
-                # Удаляем состояние автоотметки
-                del user_episode_auto_mark_state[user_id]
+                # Удаляем состояние автоотметки ТОЛЬКО для этого сериала
+                if user_id in user_episode_auto_mark_state:
+                    auto_state_check = user_episode_auto_mark_state[user_id]
+                    if str(auto_state_check.get('kp_id')) == str(kp_id):
+                        del user_episode_auto_mark_state[user_id]
+                        logger.info(f"[EPISODE CANCEL AUTO] Состояние автоотметки удалено для kp_id={kp_id}")
                 
                 # Обновляем страницу эпизодов
                 from moviebot.bot.handlers.seasons import show_episodes_page
@@ -1034,13 +1052,14 @@ def series_subscribe_callback(call):
                 
                 show_episodes_page(kp_id, season_num, chat_id, user_id, page=current_page, message_id=message_id, message_thread_id=message_thread_id)
                 
-                bot.answer_callback_query(call.id, f"✅ Отменено {len(auto_marked)} эпизодов")
+                bot.answer_callback_query(call.id, f"✅ Отменено {deleted_count} эпизодов")
                 
             finally:
-                try:
-                    cursor_local.close()
-                except:
-                    pass
+                if cursor_local:
+                    try:
+                        cursor_local.close()
+                    except:
+                        pass
                 try:
                     conn_local.close()
                 except:
