@@ -1692,12 +1692,15 @@ def search_movies(query, top_k=15):
                 from moviebot.api.kinopoisk_api import get_film_by_imdb_id
                 import time
                 
-                def check_genre_via_api(result_and_imdb, delay_index):
-                    # Добавляем задержку между запросами (200 мс на каждый запрос)
-                    if delay_index > 0:
-                        time.sleep(0.2 * delay_index)  # 200 мс * индекс запроса
+                # Последовательная проверка через API с задержками (200 мс между запросами)
+                # Это безопаснее для API, чем параллельные запросы
+                import time
+                
+                for idx, (result, imdb_id) in enumerate(results_to_check_via_api):
+                    # Добавляем задержку 200 мс между запросами (кроме первого)
+                    if idx > 0:
+                        time.sleep(0.2)  # 200 мс задержка
                     
-                    result, imdb_id = result_and_imdb
                     try:
                         film_info = get_film_by_imdb_id(imdb_id)
                         if film_info and film_info.get('genres'):
@@ -1705,37 +1708,18 @@ def search_movies(query, top_k=15):
                             film_genres_lower = [g.lower() for g in film_genres]
                             
                             if genre_ru.lower() in film_genres_lower:
+                                filtered_results.append(result)
                                 logger.info(f"[SEARCH MOVIES] Фильм {imdb_id} ({result.get('title', 'Unknown')}) ПРОШЕЛ фильтрацию через API - жанр '{genre_ru}' найден")
-                                return (result, True)
                             else:
                                 logger.info(f"[SEARCH MOVIES] Фильм {imdb_id} ({result.get('title', 'Unknown')}) ОТФИЛЬТРОВАН через API - жанр '{genre_ru}' НЕ найден (есть: {film_genres})")
-                                return (result, False)
                         else:
                             # Если не получили жанры из API - пропускаем (не фильтруем)
+                            filtered_results.append(result)
                             logger.warning(f"[SEARCH MOVIES] Фильм {imdb_id} не вернул жанры из API - пропускаем фильтрацию")
-                            return (result, True)
                     except Exception as e:
-                        logger.error(f"[SEARCH MOVIES] Ошибка проверки жанра через API для {imdb_id}: {e}")
                         # При ошибке пропускаем (не фильтруем)
-                        return (result, True)
-                
-                # Параллельная проверка через API с задержками (максимум 3 потока, чтобы не спамить API)
-                # Задержка 200 мс между запросами для избежания бана
-                with ThreadPoolExecutor(max_workers=3) as executor:
-                    # Отправляем запросы с задержками (каждый следующий запрос с задержкой)
-                    futures = []
-                    for idx, result_and_imdb in enumerate(results_to_check_via_api):
-                        future = executor.submit(check_genre_via_api, result_and_imdb, idx)
-                        futures.append(future)
-                    
-                    # Собираем результаты
-                    for future in as_completed(futures):
-                        try:
-                            result, has_genre = future.result()
-                            if has_genre:
-                                filtered_results.append(result)
-                        except Exception as e:
-                            logger.error(f"[SEARCH MOVIES] Ошибка при получении результата проверки: {e}")
+                        filtered_results.append(result)
+                        logger.error(f"[SEARCH MOVIES] Ошибка проверки жанра через API для {imdb_id}: {e}")
             
             # Остальные результаты (после топ-10) добавляем без фильтрации
             results = filtered_results + results[10:]
