@@ -1608,31 +1608,67 @@ def search_movies(query, top_k=15):
         
         results.sort(key=lambda x: x['score'], reverse=True)
         
-        # ФИЛЬТРАЦИЯ: Если жанр определен без сомнений - удаляем фильмы без этого жанра из топ-5
-        # Это делается после ранжирования, но до возврата результатов
+        # ФИЛЬТРАЦИЯ: Если жанр определен без сомнений - удаляем фильмы без этого жанра из топ-10
+        # Это делается после ранжирования, используя genres_str из processed.csv
         if primary_genre and not has_conflicting_genres and len(results) > 0:
-            # Применяем фильтрацию только к топ-5 результатам
-            top_5_results = results[:5]
-            filtered_top_5 = []
+            # Проверяем топ-10 результатов (чтобы после фильтрации осталось достаточно для топ-5)
+            top_10_results = results[:10]
+            filtered_results = []
             
-            # Получаем русское название жанра для проверки
-            genre_mapping = _get_genre_mapping()
-            genre_ru = genre_mapping.get(primary_genre)
+            # Получаем английское название жанра для проверки в genres_str
+            # genres_str содержит жанры на английском (из TMDB)
+            genre_en_for_check = primary_genre.lower()
             
-            if genre_ru:
-                for result in top_5_results:
-                    # Проверяем жанры фильма (если они есть в результате)
-                    # Жанры будут проверены позже в shazam.py при получении из API
-                    # Здесь мы только отмечаем, что нужна фильтрация
-                    filtered_top_5.append(result)
+            logger.info(f"[SEARCH MOVIES] Применяем фильтрацию по жанру '{primary_genre}' для топ-10 результатов")
+            
+            for result in top_10_results:
+                imdb_id_result = result.get('imdb_id')
+                if not imdb_id_result:
+                    continue
                 
-                logger.info(f"[SEARCH MOVIES] Будет применена фильтрация по жанру '{genre_ru}' для топ-5 результатов (удалятся фильмы без этого жанра)")
+                # Находим соответствующий ряд в movies_df по imdb_id
+                matching_row = None
+                for idx, row in movies.iterrows():
+                    row_imdb_id = str(row.get('imdb_id', '')).strip()
+                    # Нормализуем imdb_id для сравнения
+                    row_imdb_id_clean = row_imdb_id.replace('.0', '').replace('.', '').lstrip('t')
+                    if row_imdb_id_clean.isdigit():
+                        row_imdb_id_clean = f"tt{row_imdb_id_clean.zfill(7)}"
+                    else:
+                        row_imdb_id_clean = row_imdb_id
+                    
+                    if row_imdb_id_clean == imdb_id_result:
+                        matching_row = row
+                        break
+                
+                if matching_row is None:
+                    # Если не нашли в индексе - пропускаем (не фильтруем)
+                    filtered_results.append(result)
+                    logger.warning(f"[SEARCH MOVIES] Фильм {imdb_id_result} не найден в индексе для проверки жанра")
+                    continue
+                
+                # Проверяем наличие жанра в genres_str
+                genres_str = matching_row.get('genres_str', '')
+                if pd.notna(genres_str) and genres_str:
+                    genres_str_normalized = _normalize_text(str(genres_str))
+                    
+                    # Проверяем, есть ли жанр в genres_str
+                    if genre_en_for_check in genres_str_normalized:
+                        filtered_results.append(result)
+                        logger.info(f"[SEARCH MOVIES] Фильм {imdb_id_result} ({result.get('title', 'Unknown')}) ПРОШЕЛ фильтрацию - жанр '{primary_genre}' найден в genres_str")
+                    else:
+                        logger.info(f"[SEARCH MOVIES] Фильм {imdb_id_result} ({result.get('title', 'Unknown')}) ОТФИЛЬТРОВАН - жанр '{primary_genre}' НЕ найден в genres_str (есть: {genres_str[:100]})")
+                else:
+                    # Если genres_str пустой - пропускаем (не фильтруем)
+                    filtered_results.append(result)
+                    logger.warning(f"[SEARCH MOVIES] Фильм {imdb_id_result} имеет пустой genres_str - пропускаем фильтрацию")
             
-            # Остальные результаты (после топ-5) оставляем без изменений
-            results = filtered_top_5 + results[5:]
+            # Остальные результаты (после топ-10) добавляем без фильтрации
+            results = filtered_results + results[10:]
+            logger.info(f"[SEARCH MOVIES] После фильтрации по жанру '{primary_genre}': {len(filtered_results)} фильмов из топ-10 прошли проверку")
         else:
             # Если есть противоречия или жанр не определен - не фильтруем
-            results = results[:top_k]
+            logger.info(f"[SEARCH MOVIES] Фильтрация по жанру не применяется (primary_genre={primary_genre}, has_conflicting_genres={has_conflicting_genres})")
         
         # Ограничиваем результаты до top_k
         results = results[:top_k]
