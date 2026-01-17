@@ -323,12 +323,16 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
         logger.info(f"[SHOW EPISODES PAGE] Все эпизоды просмотрены: {all_watched}, страница {page}/{total_pages}")
         
         # Проверяем, есть ли состояние автоотметки для показа кнопки отмены
+        # Кнопка показывается ТОЛЬКО после второго клика (когда была выполнена автоотметка)
+        # Это значит, что в episodes должно быть больше одного эпизода (автоотметка нескольких серий)
         has_auto_mark = False
         if user_id in user_episode_auto_mark_state:
             auto_state = user_episode_auto_mark_state[user_id]
-            if auto_state.get('kp_id') == kp_id and auto_state.get('season_num') == season_num:
+            if str(auto_state.get('kp_id')) == str(kp_id):
                 auto_episodes = auto_state.get('episodes', [])
-                if auto_episodes:
+                # Проверяем, что это действительно автоотметка (больше одного эпизода)
+                # или что это список эпизодов после автоотметки (не просто last_clicked_ep)
+                if auto_episodes and len(auto_episodes) > 1:
                     has_auto_mark = True
                     markup.add(InlineKeyboardButton("❌ Отмена автоотметки", callback_data=f"series_episode_cancel_auto:{kp_id}:{season_num}"))
         
@@ -532,6 +536,33 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
 
         markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{int(kp_id)}"))
 
+    # Кнопка "Просмотренные" - всегда на каждой странице
+    has_access = has_notifications_access(chat_id, user_id)
+    if has_access:
+        # Проверяем, есть ли просмотренные сериалы
+        conn_check = get_db_connection()
+        cursor_check = get_db_cursor()
+        try:
+            with db_lock:
+                cursor_check.execute('''
+                    SELECT COUNT(*) FROM movies 
+                    WHERE chat_id = %s AND is_series = 1 AND watched = 1
+                ''', (chat_id,))
+                watched_count_row = cursor_check.fetchone()
+                watched_count = watched_count_row.get('count') if isinstance(watched_count_row, dict) else (watched_count_row[0] if watched_count_row else 0)
+            
+            if watched_count > 0:
+                markup.add(InlineKeyboardButton(f"✅ Просмотренные ({watched_count})", callback_data="watched_series_list"))
+        finally:
+            try:
+                cursor_check.close()
+            except:
+                pass
+            try:
+                conn_check.close()
+            except:
+                pass
+    
     # Пагинация
     if series_data['total_pages'] > 1:
         nav_buttons = []
@@ -636,13 +667,20 @@ def show_completed_series_list(chat_id: int, user_id: int, message_id: int = Non
 
             logger.info(f"[SHOW_COMPLETED_SERIES_LIST] {title} (kp_id={kp_id}): total_ep={total_ep}, watched_ep={watched_ep}, is_airing={is_airing}")
 
-            # Условие: все эпизоды просмотрены, сериал завершён, и есть хотя бы один эпизод
-            if total_ep == watched_ep and total_ep > 0 and not is_airing:
+            # Проверяем также поле watched в таблице movies
+            cursor_local.execute('SELECT watched FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+            movie_row = cursor_local.fetchone()
+            movie_watched = False
+            if movie_row:
+                movie_watched = bool(movie_row.get('watched') if isinstance(movie_row, dict) else movie_row[0])
+            
+            # Условие: все эпизоды просмотрены, сериал завершён, есть хотя бы один эпизод, И поле watched = 1
+            if total_ep == watched_ep and total_ep > 0 and not is_airing and movie_watched:
                 button_text = f"✅ {title}"
                 completed_series.append((kp_id, button_text))
                 logger.info(f"[SHOW_COMPLETED_SERIES_LIST] Сериал {title} добавлен в просмотренные")
             else:
-                logger.info(f"[SHOW_COMPLETED_SERIES_LIST] Сериал {title} НЕ завершён: total={total_ep}, watched={watched_ep}, airing={is_airing}")
+                logger.info(f"[SHOW_COMPLETED_SERIES_LIST] Сериал {title} НЕ завершён: total={total_ep}, watched={watched_ep}, airing={is_airing}, movie_watched={movie_watched}")
 
     finally:
         try:
@@ -790,6 +828,27 @@ def handle_seasons_kp(call):
         except:
             pass
 
+@bot.callback_query_handler(func=lambda call: call.data == "watched_series_list")
+def handle_watched_series_list(call):
+    """Обработчик кнопки 'Просмотренные сериалы'"""
+    try:
+        bot.answer_callback_query(call.id, "⏳ Загружаем просмотренные...")
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        message_id = call.message.message_id
+        message_thread_id = getattr(call.message, 'message_thread_id', None)
+        
+        show_completed_series_list(
+            chat_id=chat_id,
+            user_id=user_id,
+            message_id=message_id,
+            message_thread_id=message_thread_id,
+            bot=bot
+        )
+    except Exception as e:
+        logger.error(f"[WATCHED_SERIES_LIST] Ошибка: {e}", exc_info=True)
+        bot.answer_callback_query(call.id, "Ошибка", show_alert=True)
+
 @bot.callback_query_handler(func=lambda call: call.data == "show_completed_series")
 def handle_show_completed_series(call):
     bot.answer_callback_query(call.id, "⏳ Загружаем просмотренные...")  
@@ -852,7 +911,7 @@ def handle_seasons_command(message):
         bot=bot
     )
 
-def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: int = 10):
+def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: int = 5):
     """Возвращает страницу сериалов пользователя с пагинацией"""
     items = []
     total_count = 0
