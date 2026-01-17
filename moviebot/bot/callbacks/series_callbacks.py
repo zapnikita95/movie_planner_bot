@@ -69,6 +69,14 @@ def register_series_callbacks(bot):
             message_id = call.message.message_id
 
             logger.info(f"[SERIES TRACK] Начало: user_id={user_id}, chat_id={chat_id}, kp_id={kp_id}")
+            
+            # Очищаем состояние автоотметки при переходе к списку сезонов
+            # чтобы не мешать двойному клику при возврате к другому эпизоду
+            if user_id in user_episode_auto_mark_state:
+                auto_state = user_episode_auto_mark_state[user_id]
+                if str(auto_state.get('kp_id')) == str(kp_id):
+                    logger.info(f"[SERIES TRACK] Очищаем состояние автоотметки при переходе к списку сезонов: user_id={user_id}, kp_id={kp_id}")
+                    del user_episode_auto_mark_state[user_id]
 
             # Проверяем доступ к функциям уведомлений
             if not has_notifications_access(chat_id, user_id):
@@ -126,7 +134,8 @@ def register_series_callbacks(bot):
                                 season_num = season.get('number', '')
                                 episodes = season.get('episodes', [])
                                 for ep in episodes:
-                                    ep_num = ep.get('episodeNumber', '')
+                                    # ВАЖНО: Всегда приводим к строке для единообразия
+                                    ep_num = str(ep.get('episodeNumber', ''))
                                     # Проверяем, не отмечена ли уже эта серия
                                     cursor_local.execute('''
                                         SELECT watched FROM series_tracking 
@@ -229,7 +238,8 @@ def register_series_callbacks(bot):
                     watched_count = 0
                     with db_lock:
                         for ep in episodes:
-                            ep_num = ep.get('episodeNumber', '')
+                            # ВАЖНО: Всегда приводим к строке для единообразия
+                            ep_num = str(ep.get('episodeNumber', ''))
                             cursor_local.execute('''
                                 SELECT watched FROM series_tracking 
                                 WHERE chat_id = %s AND film_id = %s AND user_id = %s 
@@ -261,7 +271,8 @@ def register_series_callbacks(bot):
                     watched_count = 0
                     with db_lock:
                         for ep in episodes:
-                            ep_num = ep.get('episodeNumber', '')
+                            # ВАЖНО: Всегда приводим к строке для единообразия
+                            ep_num = str(ep.get('episodeNumber', ''))
                             cursor_local.execute('''
                                 SELECT watched FROM series_tracking 
                                 WHERE chat_id = %s AND film_id = %s AND user_id = %s 

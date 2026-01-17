@@ -194,7 +194,8 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
             # Сначала создаем все кнопки
             buttons_list = []
             for ep in page_episodes:
-                ep_num = ep.get('episodeNumber', '')
+                # ВАЖНО: Всегда приводим к строке для единообразия
+                ep_num = str(ep.get('episodeNumber', ''))
                 
                 with db_lock:
                     cursor_local.execute('''
@@ -241,7 +242,8 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
             # Обычное расположение: 2 колонки
             markup.row_width = 2
             for ep in page_episodes:
-                ep_num = ep.get('episodeNumber', '')
+                # ВАЖНО: Всегда приводим к строке для единообразия
+                ep_num = str(ep.get('episodeNumber', ''))
                 
                 with db_lock:
                     cursor_local.execute('''
