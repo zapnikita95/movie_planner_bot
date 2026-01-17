@@ -1609,17 +1609,19 @@ def search_movies(query, top_k=15):
         results.sort(key=lambda x: x['score'], reverse=True)
         
         # ФИЛЬТРАЦИЯ: Если жанр определен без сомнений - удаляем фильмы без этого жанра из топ-10
-        # Это делается после ранжирования, используя genres_str из processed.csv
+        # Это делается после ранжирования, используя genres из индекса, а если не найдено - через API Кинопоиска
         if primary_genre and not has_conflicting_genres and len(results) > 0:
+            # Получаем русское название жанра для проверки в API Кинопоиска
+            genre_mapping = _get_genre_mapping()
+            genre_ru = genre_mapping.get(primary_genre)
+            genre_en_for_check = primary_genre.lower()
+            
             # Проверяем топ-10 результатов (чтобы после фильтрации осталось достаточно для топ-5)
             top_10_results = results[:10]
             filtered_results = []
+            results_to_check_via_api = []  # Фильмы, которые нужно проверить через API
             
-            # Получаем английское название жанра для проверки в genres_str
-            # genres_str содержит жанры на английском (из TMDB)
-            genre_en_for_check = primary_genre.lower()
-            
-            logger.info(f"[SEARCH MOVIES] Применяем фильтрацию по жанру '{primary_genre}' для топ-10 результатов")
+            logger.info(f"[SEARCH MOVIES] Применяем фильтрацию по жанру '{primary_genre}' (ru: '{genre_ru}') для топ-10 результатов")
             
             for result in top_10_results:
                 imdb_id_result = result.get('imdb_id')
@@ -1641,27 +1643,87 @@ def search_movies(query, top_k=15):
                         matching_row = row
                         break
                 
-                if matching_row is None:
-                    # Если не нашли в индексе - пропускаем (не фильтруем)
-                    filtered_results.append(result)
-                    logger.warning(f"[SEARCH MOVIES] Фильм {imdb_id_result} не найден в индексе для проверки жанра")
-                    continue
+                has_genre = False
                 
-                # Проверяем наличие жанра в genres_str
-                genres_str = matching_row.get('genres_str', '')
-                if pd.notna(genres_str) and genres_str:
-                    genres_str_normalized = _normalize_text(str(genres_str))
-                    
-                    # Проверяем, есть ли жанр в genres_str
-                    if genre_en_for_check in genres_str_normalized:
-                        filtered_results.append(result)
-                        logger.info(f"[SEARCH MOVIES] Фильм {imdb_id_result} ({result.get('title', 'Unknown')}) ПРОШЕЛ фильтрацию - жанр '{primary_genre}' найден в genres_str")
+                if matching_row is not None:
+                    # Проверяем наличие жанра в genres (столбец называется genres, не genres_str)
+                    genres = matching_row.get('genres', '')
+                    if pd.notna(genres) and genres:
+                        # genres может быть JSON-строкой или уже распарсенным списком
+                        try:
+                            if isinstance(genres, str):
+                                genres_list = json.loads(genres)
+                            else:
+                                genres_list = genres
+                            
+                            # Извлекаем названия жанров
+                            genre_names = []
+                            if isinstance(genres_list, list):
+                                for g in genres_list:
+                                    if isinstance(g, dict) and 'name' in g:
+                                        genre_names.append(g['name'].lower())
+                                    elif isinstance(g, str):
+                                        genre_names.append(g.lower())
+                            
+                            # Проверяем наличие жанра (на английском)
+                            if genre_en_for_check in ' '.join(genre_names):
+                                has_genre = True
+                                logger.info(f"[SEARCH MOVIES] Фильм {imdb_id_result} ({result.get('title', 'Unknown')}) ПРОШЕЛ фильтрацию - жанр '{primary_genre}' найден в genres")
+                            else:
+                                logger.info(f"[SEARCH MOVIES] Фильм {imdb_id_result} ({result.get('title', 'Unknown')}) ОТФИЛЬТРОВАН - жанр '{primary_genre}' НЕ найден в genres (есть: {genre_names})")
+                        except (json.JSONDecodeError, TypeError, AttributeError):
+                            # Если не удалось распарсить - проверяем через API
+                            results_to_check_via_api.append((result, imdb_id_result))
                     else:
-                        logger.info(f"[SEARCH MOVIES] Фильм {imdb_id_result} ({result.get('title', 'Unknown')}) ОТФИЛЬТРОВАН - жанр '{primary_genre}' НЕ найден в genres_str (есть: {genres_str[:100]})")
+                        # Если genres пустой - проверяем через API
+                        results_to_check_via_api.append((result, imdb_id_result))
                 else:
-                    # Если genres_str пустой - пропускаем (не фильтруем)
+                    # Если не нашли в индексе - проверяем через API
+                    results_to_check_via_api.append((result, imdb_id_result))
+                
+                if has_genre:
                     filtered_results.append(result)
-                    logger.warning(f"[SEARCH MOVIES] Фильм {imdb_id_result} имеет пустой genres_str - пропускаем фильтрацию")
+            
+            # Если есть фильмы, которые нужно проверить через API - делаем это параллельно
+            if results_to_check_via_api and genre_ru:
+                logger.info(f"[SEARCH MOVIES] Проверяем {len(results_to_check_via_api)} фильмов через API Кинопоиска для жанра '{genre_ru}'")
+                
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+                from moviebot.api.kinopoisk_api import get_film_by_imdb_id
+                
+                def check_genre_via_api(result_and_imdb):
+                    result, imdb_id = result_and_imdb
+                    try:
+                        film_info = get_film_by_imdb_id(imdb_id)
+                        if film_info and film_info.get('genres'):
+                            film_genres = film_info.get('genres', [])
+                            film_genres_lower = [g.lower() for g in film_genres]
+                            
+                            if genre_ru.lower() in film_genres_lower:
+                                logger.info(f"[SEARCH MOVIES] Фильм {imdb_id} ({result.get('title', 'Unknown')}) ПРОШЕЛ фильтрацию через API - жанр '{genre_ru}' найден")
+                                return (result, True)
+                            else:
+                                logger.info(f"[SEARCH MOVIES] Фильм {imdb_id} ({result.get('title', 'Unknown')}) ОТФИЛЬТРОВАН через API - жанр '{genre_ru}' НЕ найден (есть: {film_genres})")
+                                return (result, False)
+                        else:
+                            # Если не получили жанры из API - пропускаем (не фильтруем)
+                            logger.warning(f"[SEARCH MOVIES] Фильм {imdb_id} не вернул жанры из API - пропускаем фильтрацию")
+                            return (result, True)
+                    except Exception as e:
+                        logger.error(f"[SEARCH MOVIES] Ошибка проверки жанра через API для {imdb_id}: {e}")
+                        # При ошибке пропускаем (не фильтруем)
+                        return (result, True)
+                
+                # Параллельная проверка через API (максимум 5 потоков для скорости)
+                with ThreadPoolExecutor(max_workers=5) as executor:
+                    future_to_result = {executor.submit(check_genre_via_api, r): r for r in results_to_check_via_api}
+                    for future in as_completed(future_to_result):
+                        try:
+                            result, has_genre = future.result()
+                            if has_genre:
+                                filtered_results.append(result)
+                        except Exception as e:
+                            logger.error(f"[SEARCH MOVIES] Ошибка при получении результата проверки: {e}")
             
             # Остальные результаты (после топ-10) добавляем без фильтрации
             results = filtered_results + results[10:]
