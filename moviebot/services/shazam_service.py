@@ -1144,21 +1144,62 @@ def _get_genre_keywords():
     }
 
 
-def _detect_genre_from_keywords(keywords, query_en_lower):
-    """Определяет жанр на основе ключевых слов и облаков смыслов"""
+def _detect_genre_from_keywords(keywords, query_en_lower, query_en_words):
+    """Определяет жанры на основе ключевых слов и облаков смыслов. Возвращает список словарей с жанром, позицией и уверенностью."""
     genre_keywords_map = _get_genre_keywords()
+    genre_mapping = _get_genre_mapping()
+    
+    # Прямые упоминания жанров в запросе (по английским названиям)
+    direct_genre_matches = {}
+    for genre_en, genre_ru in genre_mapping.items():
+        # Проверяем английское название жанра
+        if genre_en in query_en_lower:
+            position = None
+            for idx, word in enumerate(query_en_words):
+                if genre_en in word.lower():
+                    position = idx + 1  # 1-based позиция
+                    break
+            direct_genre_matches[genre_en] = {
+                'genre': genre_en,
+                'position': position or 1,
+                'confidence': 'high',  # Прямое упоминание - высокая уверенность
+                'matches': 999  # Огромное количество совпадений для прямого упоминания
+            }
+    
     detected_genres = []
     
-    # Проверяем каждое ключевое слово на принадлежность к жанрам
+    # Проверяем каждое ключевое слово на принадлежность к жанрам (облака смыслов)
     for genre, genre_words in genre_keywords_map.items():
+        # Если жанр уже найден прямым упоминанием - пропускаем (он уже с высоким приоритетом)
+        if genre in direct_genre_matches:
+            continue
+            
         matches = sum(1 for word in keywords if word in genre_words)
         # Также проверяем весь запрос на наличие характерных слов
         query_matches = sum(1 for word in genre_words if word in query_en_lower)
         total_matches = matches + query_matches
         
+        # Находим позицию первого совпадающего слова
+        position = None
+        for idx, word in enumerate(query_en_words):
+            word_lower = word.lower()
+            if any(genre_word in word_lower for genre_word in genre_words):
+                position = idx + 1  # 1-based позиция
+                break
+        
         if total_matches >= 2:  # Если найдено 2+ совпадения - жанр обнаружен
-            detected_genres.append(genre)
-            logger.info(f"[SEARCH MOVIES] Обнаружен жанр '{genre}' по ключевым словам (совпадений: {total_matches})")
+            detected_genres.append({
+                'genre': genre,
+                'position': position or len(query_en_words) // 2,  # Средняя позиция, если не нашли
+                'confidence': 'medium' if total_matches >= 3 else 'low',
+                'matches': total_matches
+            })
+            logger.info(f"[SEARCH MOVIES] Обнаружен жанр '{genre}' по ключевым словам (совпадений: {total_matches}, позиция: {position})")
+    
+    # Добавляем прямые упоминания в начало списка (они имеют высший приоритет)
+    for genre_en, genre_info in direct_genre_matches.items():
+        detected_genres.insert(0, genre_info)
+        logger.info(f"[SEARCH MOVIES] ПРЯМОЕ упоминание жанра '{genre_en}' в запросе (позиция: {genre_info['position']})")
     
     return detected_genres
 
