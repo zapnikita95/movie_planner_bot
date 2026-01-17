@@ -1432,7 +1432,8 @@ def handle_episode_toggle(call):
                         AND season_number = %s AND episode_number = %s
                     ''', (chat_id, film_id, user_id, season_num, ep_num))
                     
-                    logger.info(f"[EPISODE TOGGLE] Отметка снята с серии {season_num}:{ep_num}, сохранено для двойного клика")
+                    # ВАЖНО: НЕ очищаем состояние здесь, оно нужно для следующего клика!
+                    logger.info(f"[EPISODE TOGGLE] Отметка снята с серии {season_num}:{ep_num}, состояние сохранено для следующего клика (двойной клик)")
                     
                     # Проверяем, все ли серии просмотрены после снятия отметки
                     # Если хотя бы одна серия не просмотрена - убираем отметку с сериала
