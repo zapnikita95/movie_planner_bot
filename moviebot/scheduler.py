@@ -140,6 +140,7 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
         if plan_type == 'home' and plan_id:
             conn_plan = get_db_connection()
             cursor_plan = None
+            plan_row = None
             try:
                 with db_lock:
                     cursor_plan = conn_plan.cursor()
@@ -149,61 +150,71 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
                         WHERE id = %s AND chat_id = %s
                     ''', (plan_id, chat_id))
                     plan_row = cursor_plan.fetchone()
+            finally:
+                if cursor_plan:
+                    try:
+                        cursor_plan.close()
+                    except:
+                        pass
+                try:
+                    conn_plan.close()
+                except:
+                    pass
+            
+            if plan_row:
+                if isinstance(plan_row, dict):
+                    streaming_service = plan_row.get('streaming_service')
+                    streaming_url = plan_row.get('streaming_url')
+                    streaming_done = plan_row.get('streaming_done', False)
+                    ticket_file_id = plan_row.get('ticket_file_id')
+                else:
+                    streaming_service = plan_row[0] if plan_row else None
+                    streaming_url = plan_row[1] if len(plan_row) > 1 else None
+                    streaming_done = plan_row[2] if len(plan_row) > 2 else False
+                    ticket_file_id = plan_row[3] if len(plan_row) > 3 else None
                
-                if plan_row:
-                    if isinstance(plan_row, dict):
-                        streaming_service = plan_row.get('streaming_service')
-                        streaming_url = plan_row.get('streaming_url')
-                        streaming_done = plan_row.get('streaming_done', False)
-                        ticket_file_id = plan_row.get('ticket_file_id')
-                    else:
-                        streaming_service = plan_row[0] if plan_row else None
-                        streaming_url = plan_row[1] if len(plan_row) > 1 else None
-                        streaming_done = plan_row[2] if len(plan_row) > 2 else False
-                        ticket_file_id = plan_row[3] if len(plan_row) > 3 else None
-                   
-                    if streaming_done:
-                        logger.info(f"[PLAN NOTIFICATION] streaming_done=True для плана {plan_id}, кинотеатры не показываем")
-                    elif streaming_service and streaming_url:
-                        # Показываем выбранный кинотеатр с кнопкой для перехода
-                        text += f"\n\n📺 <b>Выбранный онлайн-кинотеатр:</b> {streaming_service}"
-                        if not markup:
-                            markup = InlineKeyboardMarkup(row_width=1)
-                        markup.add(InlineKeyboardButton(streaming_service, url=streaming_url))
-                        
-                        # Добавляем кнопку "Перейти к описанию", если есть kp_id
-                        conn_kp = get_db_connection()
-                        cursor_kp = None
-                        kp_id = None
+                if streaming_done:
+                    logger.info(f"[PLAN NOTIFICATION] streaming_done=True для плана {plan_id}, кинотеатры не показываем")
+                elif streaming_service and streaming_url:
+                    # Показываем выбранный кинотеатр с кнопкой для перехода
+                    text += f"\n\n📺 <b>Выбранный онлайн-кинотеатр:</b> {streaming_service}"
+                    if not markup:
+                        markup = InlineKeyboardMarkup(row_width=1)
+                    markup.add(InlineKeyboardButton(streaming_service, url=streaming_url))
+                    
+                    # Добавляем кнопку "Перейти к описанию", если есть kp_id
+                    conn_kp = get_db_connection()
+                    cursor_kp = None
+                    kp_id = None
+                    try:
+                        with db_lock:
+                            cursor_kp = conn_kp.cursor()
+                            cursor_kp.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                            movie_row = cursor_kp.fetchone()
+                            if movie_row:
+                                kp_id = movie_row.get('kp_id') if isinstance(movie_row, dict) else movie_row[0]
+                    finally:
+                        if cursor_kp:
+                            try:
+                                cursor_kp.close()
+                            except:
+                                pass
                         try:
-                            with db_lock:
-                                cursor_kp = conn_kp.cursor()
-                                cursor_kp.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-                                movie_row = cursor_kp.fetchone()
-                                if movie_row:
-                                    kp_id = movie_row.get('kp_id') if isinstance(movie_row, dict) else movie_row[0]
-                        finally:
-                            if cursor_kp:
-                                try:
-                                    cursor_kp.close()
-                                except:
-                                    pass
-                            try:
-                                conn_kp.close()
-                            except:
-                                pass
-                        
-                        if kp_id:
-                            try:
-                                kp_id_int = int(kp_id)
-                                markup.add(InlineKeyboardButton("◀️ Перейти к описанию", callback_data=f"back_to_film:{kp_id_int}"))
-                            except:
-                                pass
-                        
-                        logger.info(f"[PLAN NOTIFICATION] Показываем выбранный кинотеатр {streaming_service} для плана {plan_id}")
-                    else:
-                        # Если кинотеатр не выбран, не показываем кнопки (пользователь может выбрать позже через сообщение планирования)
-                        logger.info(f"[PLAN NOTIFICATION] Кинотеатр не выбран для плана {plan_id}")
+                            conn_kp.close()
+                        except:
+                            pass
+                    
+                    if kp_id:
+                        try:
+                            kp_id_int = int(kp_id)
+                            markup.add(InlineKeyboardButton("◀️ Перейти к описанию", callback_data=f"back_to_film:{kp_id_int}"))
+                        except:
+                            pass
+                    
+                    logger.info(f"[PLAN NOTIFICATION] Показываем выбранный кинотеатр {streaming_service} для плана {plan_id}")
+                else:
+                    # Если кинотеатр не выбран, не показываем кнопки (пользователь может выбрать позже через сообщение планирования)
+                    logger.info(f"[PLAN NOTIFICATION] Кинотеатр не выбран для плана {plan_id}")
        
         # Новый блок для планов "в кино"
         elif plan_type == 'cinema' and plan_id:
@@ -230,17 +241,17 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
                     conn_cinema.close()
                 except:
                     pass
-               
-                if not markup:
-                    markup = InlineKeyboardMarkup()
-               
-                if not ticket_file_id or str(ticket_file_id).strip() == '' or ticket_file_id == 'null':
-                    markup.add(InlineKeyboardButton("📸 Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
-                    text += "\n\n🎟 Не забудьте добавить фото билетов!"
-                    logger.info(f"[PLAN NOTIFICATION] Кнопка 'Добавить билеты' для плана {plan_id}")
-                else:
-                    markup.add(InlineKeyboardButton("🎟 Показать билеты", callback_data=f"show_ticket:{plan_id}"))
-                    logger.info(f"[PLAN NOTIFICATION] Кнопка 'Показать билеты' для плана {plan_id}")
+            
+            if not markup:
+                markup = InlineKeyboardMarkup()
+           
+            if not ticket_file_id or str(ticket_file_id).strip() == '' or ticket_file_id == 'null':
+                markup.add(InlineKeyboardButton("📸 Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
+                text += "\n\n🎟 Не забудьте добавить фото билетов!"
+                logger.info(f"[PLAN NOTIFICATION] Кнопка 'Добавить билеты' для плана {plan_id}")
+            else:
+                markup.add(InlineKeyboardButton("🎟 Показать билеты", callback_data=f"show_ticket:{plan_id}"))
+                logger.info(f"[PLAN NOTIFICATION] Кнопка 'Показать билеты' для плана {plan_id}")
 
         # Кнопка подписки в конце
         if not has_access and user_id:
