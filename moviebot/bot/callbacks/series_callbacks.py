@@ -1416,13 +1416,15 @@ def handle_episode_toggle(call):
                     # ПЕРВЫЙ КЛИК на просмотренный эпизод: сохраняем его для возможного двойного клика
                     # Создаем запись в user_episode_auto_mark_state с этим эпизодом
                     # При следующем клике на этот же эпизод (который будет уже непросмотрен) запустится автоотметка
+                    # ВАЖНО: Сохраняем состояние ДО коммита, чтобы оно было доступно при следующем клике
                     user_episode_auto_mark_state[user_id] = {
-                        'kp_id': kp_id,
-                        'season_num': season_num,
-                        'episodes': [(season_num, ep_num)],  # Сохраняем только этот эпизод для проверки двойного клика
-                        'last_clicked_ep': (season_num, ep_num)
+                        'kp_id': str(kp_id),  # Приводим к строке для надежности
+                        'season_num': str(season_num),  # Приводим к строке для надежности
+                        'episodes': [(str(season_num), str(ep_num))],  # Сохраняем только этот эпизод для проверки двойного клика
+                        'last_clicked_ep': (str(season_num), str(ep_num))  # Приводим к строкам для надежности
                     }
-                    logger.info(f"[EPISODE TOGGLE] Сохранено состояние для двойного клика: user_id={user_id}, state={user_episode_auto_mark_state[user_id]}")
+                    logger.info(f"[EPISODE TOGGLE] ✅ Сохранено состояние для двойного клика: user_id={user_id}, state={user_episode_auto_mark_state[user_id]}")
+                    logger.info(f"[EPISODE TOGGLE] Проверка сохранения: user_episode_auto_mark_state.keys()={list(user_episode_auto_mark_state.keys())}")
                     
                     # Снимаем отметку с эпизода
                     cursor_local.execute('''
@@ -1566,11 +1568,18 @@ def handle_episode_toggle(call):
                             DO UPDATE SET watched = TRUE
                         ''', (chat_id, film_id, user_id, season_num, ep_num))
                         
-                        # Очищаем состояние автоотметки, так как это новая отметка
+                        # Очищаем состояние автоотметки ТОЛЬКО если это НЕ тот же эпизод, для которого сохранено состояние
+                        # (чтобы не очистить состояние перед двойным кликом)
                         if user_id in user_episode_auto_mark_state:
                             auto_state = user_episode_auto_mark_state[user_id]
-                            if auto_state.get('kp_id') == kp_id and auto_state.get('season_num') == season_num:
-                                del user_episode_auto_mark_state[user_id]
+                            if str(auto_state.get('kp_id')) == str(kp_id) and str(auto_state.get('season_num')) == str(season_num):
+                                last_clicked = auto_state.get('last_clicked_ep')
+                                # Очищаем состояние только если это НЕ тот же эпизод, для которого сохранено состояние
+                                if not (last_clicked and str(last_clicked[0]) == str(season_num) and str(last_clicked[1]) == str(ep_num)):
+                                    logger.info(f"[EPISODE TOGGLE] Очищаем состояние автоотметки (клик на другой эпизод)")
+                                    del user_episode_auto_mark_state[user_id]
+                                else:
+                                    logger.info(f"[EPISODE TOGGLE] НЕ очищаем состояние (это тот же эпизод, ожидаем двойной клик)")
                 
                 conn_local.commit()
                 if cursor_local:
