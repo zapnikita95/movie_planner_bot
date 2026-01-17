@@ -1331,15 +1331,16 @@ def handle_episode_toggle(call):
                 auto_marked_episodes = []
                 
                 # Проверяем, был ли это двойной клик на уже просмотренную серию
-                # Двойной клик = есть уже автоотметка для этого сезона И этот эпизод в ней есть
+                # Двойной клик = клик на просмотренную серию, для которой уже сохранено состояние (после первого клика)
                 is_double_click = False
                 if is_watched and user_id in user_episode_auto_mark_state:
                     auto_state = user_episode_auto_mark_state[user_id]
-                    if auto_state.get('kp_id') == kp_id and auto_state.get('season_num') == season_num:
-                        # Проверяем, был ли этот эпизод уже отмечен в автоотметке
-                        auto_marked_list = auto_state.get('episodes', [])
-                        if (season_num, ep_num) in auto_marked_list:
+                    if str(auto_state.get('kp_id')) == str(kp_id) and str(auto_state.get('season_num')) == str(season_num):
+                        last_clicked = auto_state.get('last_clicked_ep')
+                        # Если last_clicked совпадает с текущим эпизодом - это двойной клик!
+                        if last_clicked and str(last_clicked[0]) == str(season_num) and str(last_clicked[1]) == str(ep_num):
                             is_double_click = True
+                            logger.info(f"[EPISODE TOGGLE] ✅✅✅ ДВОЙНОЙ КЛИК на просмотренную серию! Запускаем автоотметку! ✅✅✅")
                 
                 if is_watched and is_double_click:
                     # ДВОЙНОЙ КЛИК: эпизод уже просмотрен И уже был отмечен в автоотметке - запускаем автоотметку
@@ -1424,20 +1425,7 @@ def handle_episode_toggle(call):
                     logger.info(f"[EPISODE TOGGLE] Автоотметка: отмечено {len(auto_marked_episodes)} эпизодов (включая изначальную {ep_num})")
                     
                 elif is_watched and not is_double_click:
-                    # ПЕРВЫЙ КЛИК на просмотренный эпизод: сохраняем его для возможного двойного клика
-                    # Создаем запись в user_episode_auto_mark_state с этим эпизодом
-                    # При следующем клике на этот же эпизод (который будет уже непросмотрен) запустится автоотметка
-                    # ВАЖНО: Сохраняем состояние ДО коммита, чтобы оно было доступно при следующем клике
-                    user_episode_auto_mark_state[user_id] = {
-                        'kp_id': str(kp_id),  # Приводим к строке для надежности
-                        'season_num': str(season_num),  # Приводим к строке для надежности
-                        'episodes': [(str(season_num), str(ep_num))],  # Сохраняем только этот эпизод для проверки двойного клика
-                        'last_clicked_ep': (str(season_num), str(ep_num))  # Приводим к строкам для надежности
-                    }
-                    logger.info(f"[EPISODE TOGGLE] ✅ Сохранено состояние для двойного клика: user_id={user_id}, state={user_episode_auto_mark_state[user_id]}")
-                    logger.info(f"[EPISODE TOGGLE] Проверка сохранения: user_episode_auto_mark_state.keys()={list(user_episode_auto_mark_state.keys())}")
-                    
-                    # Снимаем отметку с эпизода
+                    # Просмотренная серия без сохраненного состояния - просто снимаем отметку
                     cursor_local.execute('''
                         UPDATE series_tracking 
                         SET watched = FALSE
@@ -1445,8 +1433,13 @@ def handle_episode_toggle(call):
                         AND season_number = %s AND episode_number = %s
                     ''', (chat_id, film_id, user_id, season_num, ep_num))
                     
-                    # ВАЖНО: НЕ очищаем состояние здесь, оно нужно для следующего клика!
-                    logger.info(f"[EPISODE TOGGLE] Отметка снята с серии {season_num}:{ep_num}, состояние сохранено для следующего клика (двойной клик)")
+                    # Очищаем состояние, если оно было для другого эпизода
+                    if user_id in user_episode_auto_mark_state:
+                        auto_state = user_episode_auto_mark_state[user_id]
+                        if str(auto_state.get('kp_id')) != str(kp_id) or str(auto_state.get('season_num')) != str(season_num):
+                            del user_episode_auto_mark_state[user_id]
+                    
+                    logger.info(f"[EPISODE TOGGLE] Отметка снята с серии {season_num}:{ep_num}")
                     
                     # Проверяем, все ли серии просмотрены после снятия отметки
                     # Если хотя бы одна серия не просмотрена - убираем отметку с сериала
@@ -1463,138 +1456,49 @@ def handle_episode_toggle(call):
                         cursor_local.execute('UPDATE movies SET watched = 0 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
                         logger.info(f"[EPISODE TOGGLE] Убрана отметка с сериала (есть непросмотренные серии)")
                 else:
-                    # Эпизод не просмотрен - проверяем, был ли это двойной клик
-                    logger.info(f"[EPISODE TOGGLE] ===== БЛОК: эпизод НЕ просмотрен, проверяем двойной клик =====")
-                    is_double_click_on_unwatched = False
-                    auto_marked_episodes = []
+                    # Эпизод НЕ просмотрен - это ПЕРВЫЙ клик: отмечаем как просмотренную и сохраняем состояние
+                    logger.info(f"[EPISODE TOGGLE] ===== ПЕРВЫЙ КЛИК: эпизод НЕ просмотрен, отмечаем и сохраняем состояние =====")
                     
-                    logger.info(f"[EPISODE TOGGLE] Проверка состояния: user_id={user_id}, user_episode_auto_mark_state.keys()={list(user_episode_auto_mark_state.keys())}")
+                    # Отмечаем эпизод как просмотренный
+                    cursor_local.execute('''
+                        INSERT INTO series_tracking (chat_id, film_id, user_id, season_number, episode_number, watched)
+                        VALUES (%s, %s, %s, %s, %s, TRUE)
+                        ON CONFLICT (chat_id, film_id, user_id, season_number, episode_number) 
+                        DO UPDATE SET watched = TRUE
+                    ''', (chat_id, film_id, user_id, season_num, ep_num))
                     
-                    if user_id in user_episode_auto_mark_state:
-                        auto_state = user_episode_auto_mark_state[user_id]
-                        logger.info(f"[EPISODE TOGGLE] Найдено состояние: auto_state={auto_state}")
-                        logger.info(f"[EPISODE TOGGLE] Сравнение: auto_state.kp_id={auto_state.get('kp_id')} (type={type(auto_state.get('kp_id'))}) vs kp_id={kp_id} (type={type(kp_id)})")
-                        logger.info(f"[EPISODE TOGGLE] Сравнение: auto_state.season_num={auto_state.get('season_num')} (type={type(auto_state.get('season_num'))}) vs season_num={season_num} (type={type(season_num)})")
-                        
-                        if str(auto_state.get('kp_id')) == str(kp_id) and str(auto_state.get('season_num')) == str(season_num):
-                            last_clicked = auto_state.get('last_clicked_ep')
-                            logger.info(f"[EPISODE TOGGLE] last_clicked={last_clicked} (type={type(last_clicked)}), current=({season_num}, {ep_num})")
-                            if last_clicked:
-                                logger.info(f"[EPISODE TOGGLE] Сравнение last_clicked: last_clicked[0]={last_clicked[0]} (type={type(last_clicked[0])}) vs season_num={season_num} (type={type(season_num)})")
-                                logger.info(f"[EPISODE TOGGLE] Сравнение last_clicked: last_clicked[1]={last_clicked[1]} (type={type(last_clicked[1])}) vs ep_num={ep_num} (type={type(ep_num)})")
-                                if str(last_clicked[0]) == str(season_num) and str(last_clicked[1]) == str(ep_num):
-                                    # Это двойной клик! Запускаем автоотметку
-                                    is_double_click_on_unwatched = True
-                                    logger.info(f"[EPISODE TOGGLE] ✅✅✅ ДВОЙНОЙ КЛИК ОБНАРУЖЕН! Запускаем автоотметку! ✅✅✅")
-                                else:
-                                    logger.info(f"[EPISODE TOGGLE] ❌ last_clicked не совпадает с текущим эпизодом")
-                            else:
-                                logger.info(f"[EPISODE TOGGLE] ❌ last_clicked отсутствует в состоянии")
-                        else:
-                            logger.info(f"[EPISODE TOGGLE] ❌ kp_id или season_num не совпадают")
-                    else:
-                        logger.info(f"[EPISODE TOGGLE] ❌ user_id={user_id} не найден в user_episode_auto_mark_state")
+                    # Сохраняем состояние для возможного двойного клика (второй клик на эту же просмотренную серию)
+                    user_episode_auto_mark_state[user_id] = {
+                        'kp_id': str(kp_id),  # Приводим к строке для надежности
+                        'season_num': str(season_num),  # Приводим к строке для надежности
+                        'episodes': [(str(season_num), str(ep_num))],  # Сохраняем только этот эпизод для проверки двойного клика
+                        'last_clicked_ep': (str(season_num), str(ep_num))  # Приводим к строкам для надежности
+                    }
+                    logger.info(f"[EPISODE TOGGLE] ✅ Серия {season_num}:{ep_num} отмечена как просмотренная, состояние сохранено для двойного клика: {user_episode_auto_mark_state[user_id]}")
                     
-                    if is_double_click_on_unwatched:
-                        # ДВОЙНОЙ КЛИК на непросмотренную серию (которую только что сняли): запускаем автоотметку
-                        ep_num_int = int(ep_num) if ep_num.isdigit() else 0
-                        season_num_int = int(season_num) if str(season_num).isdigit() else 0
-                        
-                        # ВАЖНО: Получаем все просмотренные эпизоды ДО начала отметки новых (во всех сезонах)
-                        cursor_local.execute('''
-                            SELECT season_number, episode_number FROM series_tracking 
-                            WHERE chat_id = %s AND film_id = %s AND user_id = %s 
-                            AND watched = TRUE
-                        ''', (chat_id, film_id, user_id))
-                        watched_episodes_set_before = set()
-                        for w_row in cursor_local.fetchall():
-                            watched_season = w_row.get('season_number') if isinstance(w_row, dict) else w_row[0]
-                            watched_ep_num = w_row.get('episode_number') if isinstance(w_row, dict) else w_row[1]
-                            watched_season_int = int(watched_season) if str(watched_season).isdigit() else 0
-                            watched_ep_num_int = int(watched_ep_num) if str(watched_ep_num).isdigit() else 0
-                            watched_episodes_set_before.add((watched_season_int, watched_ep_num_int))
-                        
-                        # Получаем ВСЕ сезоны сериала и сортируем их
-                        all_seasons_sorted = sorted(seasons_data, key=lambda s: int(s.get('number', 0)) if str(s.get('number', '')).isdigit() else 0)
-                        
-                        # Проходим по всем сезонам до текущего (включительно)
-                        for current_season in all_seasons_sorted:
-                            current_season_num = current_season.get('number', '')
-                            current_season_num_int = int(current_season_num) if str(current_season_num).isdigit() else 0
-                            
-                            # Если это сезон раньше текущего - отмечаем все непросмотренные эпизоды этого сезона
-                            if current_season_num_int < season_num_int:
-                                current_episodes = current_season.get('episodes', [])
-                                current_episodes_sorted = sorted(current_episodes, key=lambda e: int(e.get('episodeNumber', 0)) if str(e.get('episodeNumber', '')).isdigit() else 0)
-                                
-                                for ep in current_episodes_sorted:
-                                    ep_current_num = int(ep.get('episodeNumber', 0)) if str(ep.get('episodeNumber', '')).isdigit() else 0
-                                    if (current_season_num_int, ep_current_num) not in watched_episodes_set_before:
-                                        # Отмечаем эпизод
-                                        cursor_local.execute('''
-                                            INSERT INTO series_tracking (chat_id, film_id, user_id, season_number, episode_number, watched)
-                                            VALUES (%s, %s, %s, %s, %s, TRUE)
-                                            ON CONFLICT (chat_id, film_id, user_id, season_number, episode_number) 
-                                            DO UPDATE SET watched = TRUE
-                                        ''', (chat_id, film_id, user_id, str(current_season_num), str(ep_current_num)))
-                                        auto_marked_episodes.append((str(current_season_num), str(ep_current_num)))
-                            
-                            # Если это текущий сезон - отмечаем все непросмотренные до выбранной серии включительно
-                            elif current_season_num_int == season_num_int:
-                                current_episodes = current_season.get('episodes', [])
-                                current_episodes_sorted = sorted(current_episodes, key=lambda e: int(e.get('episodeNumber', 0)) if str(e.get('episodeNumber', '')).isdigit() else 0)
-                                
-                                for ep in current_episodes_sorted:
-                                    ep_current_num = int(ep.get('episodeNumber', 0)) if str(ep.get('episodeNumber', '')).isdigit() else 0
-                                    if ep_current_num <= ep_num_int and (current_season_num_int, ep_current_num) not in watched_episodes_set_before:
-                                        # Отмечаем эпизод
-                                        cursor_local.execute('''
-                                            INSERT INTO series_tracking (chat_id, film_id, user_id, season_number, episode_number, watched)
-                                            VALUES (%s, %s, %s, %s, %s, TRUE)
-                                            ON CONFLICT (chat_id, film_id, user_id, season_number, episode_number) 
-                                            DO UPDATE SET watched = TRUE
-                                        ''', (chat_id, film_id, user_id, str(current_season_num), str(ep_current_num)))
-                                        auto_marked_episodes.append((str(current_season_num), str(ep_current_num)))
-                            
-                            else:
-                                break
-                        
-                        # Добавляем выбранную серию в список
-                        auto_marked_episodes.append((season_num, ep_num))
-                        
-                        # Сохраняем список автоматически отмеченных эпизодов для возможной отмены
-                        user_episode_auto_mark_state[user_id] = {
-                            'kp_id': kp_id,
-                            'season_num': season_num,
-                            'episodes': auto_marked_episodes
-                        }
-                        
-                        logger.info(f"[EPISODE TOGGLE] Автоотметка (двойной клик на непросмотренную): отмечено {len(auto_marked_episodes)} эпизодов")
-                    else:
-                        # Обычный клик на непросмотренную серию - просто отмечаем
-                        cursor_local.execute('''
-                            INSERT INTO series_tracking (chat_id, film_id, user_id, season_number, episode_number, watched)
-                            VALUES (%s, %s, %s, %s, %s, TRUE)
-                            ON CONFLICT (chat_id, film_id, user_id, season_number, episode_number) 
-                            DO UPDATE SET watched = TRUE
-                        ''', (chat_id, film_id, user_id, season_num, ep_num))
-                        
-                        # Очищаем состояние автоотметки ТОЛЬКО если это НЕ тот же эпизод, для которого сохранено состояние
-                        # (чтобы не очистить состояние перед двойным кликом)
-                        if user_id in user_episode_auto_mark_state:
-                            auto_state = user_episode_auto_mark_state[user_id]
-                            if str(auto_state.get('kp_id')) == str(kp_id) and str(auto_state.get('season_num')) == str(season_num):
-                                last_clicked = auto_state.get('last_clicked_ep')
-                                # Очищаем состояние только если это НЕ тот же эпизод, для которого сохранено состояние
-                                if not (last_clicked and str(last_clicked[0]) == str(season_num) and str(last_clicked[1]) == str(ep_num)):
-                                    logger.info(f"[EPISODE TOGGLE] Очищаем состояние автоотметки (клик на другой эпизод)")
-                                    del user_episode_auto_mark_state[user_id]
-                                else:
-                                    logger.info(f"[EPISODE TOGGLE] НЕ очищаем состояние (это тот же эпизод, ожидаем двойной клик)")
+                    # Проверяем, все ли серии просмотрены после отметки
+                    cursor_local.execute('''
+                        SELECT COUNT(*) FROM series_tracking 
+                        WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                        AND watched = FALSE
+                    ''', (chat_id, film_id, user_id))
+                    unwatched_count_row = cursor_local.fetchone()
+                    unwatched_count = unwatched_count_row.get('count') if isinstance(unwatched_count_row, dict) else (unwatched_count_row[0] if unwatched_count_row else 0)
+                    
+                    if unwatched_count == 0:
+                        # Все серии просмотрены - отмечаем сериал
+                        cursor_local.execute('UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                        logger.info(f"[EPISODE TOGGLE] Все серии просмотрены - сериал отмечен как просмотренный")
                 
                 conn_local.commit()
                 if cursor_local:
                     cursor_local.close()
+                
+                # Проверяем состояние после коммита
+                if user_id in user_episode_auto_mark_state:
+                    logger.info(f"[EPISODE TOGGLE] Состояние после коммита: user_id={user_id}, state={user_episode_auto_mark_state[user_id]}")
+                else:
+                    logger.info(f"[EPISODE TOGGLE] Состояние после коммита: user_id={user_id}, state=None (очищено)")
         except Exception as db_e:
             logger.error(f"[EPISODE TOGGLE] Ошибка работы с БД: {db_e}", exc_info=True)
             try:
