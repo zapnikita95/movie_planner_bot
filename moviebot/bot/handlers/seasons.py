@@ -997,31 +997,37 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
                     'all_watched': all_watched,
                 })
             
-            # Сортировка по приоритету:
-            # 1. 🟢 +🔔 +⏳ (is_ongoing=True, has_subscription=True, watched_count=0)
-            # 2. 🟢 +🔕 +⏳ (is_ongoing=True, has_subscription=False, watched_count=0)
-            # 3. 🟢 +🔔 (is_ongoing=True, has_subscription=True, watched_count>0)
-            # 4. 🔴 +🔔 +⏳ (is_ongoing=False, has_subscription=True, watched_count=0)
-            # 5. 🔴 +🔕 +⏳ (is_ongoing=False, has_subscription=False, watched_count=0)
-            # 6. Остальные (🔴 +🔕 или другие комбинации)
+            # Сортировка по приоритету (начатые сериалы выше):
+            # 1. Начатые (watched_count > 0) + выходят (is_ongoing=True) + подписаны (has_subscription=True)
+            # 2. Начатые (watched_count > 0) + выходят (is_ongoing=True) + не подписаны
+            # 3. Начатые (watched_count > 0) + не выходят (is_ongoing=False) + подписаны
+            # 4. Начатые (watched_count > 0) + не выходят (is_ongoing=False) + не подписаны
+            # 5. Не начатые (watched_count = 0) + выходят (is_ongoing=True) + подписаны
+            # 6. Не начатые (watched_count = 0) + выходят (is_ongoing=True) + не подписаны
+            # 7. Не начатые (watched_count = 0) + не выходят (is_ongoing=False) + подписаны
+            # 8. Не начатые (watched_count = 0) + не выходят (is_ongoing=False) + не подписаны
             def get_sort_priority(item):
                 is_ongoing = item['is_ongoing'] or False
                 has_subscription = item['has_subscription'] or False
                 watched_count = item['watched_count'] or 0
-                is_watching = watched_count == 0  # ⏳ если watched_count=0
+                is_started = watched_count > 0  # Начатый = watched_count > 0
                 
-                if is_ongoing and has_subscription and is_watching:
-                    return 1  # 🟢 +🔔 +⏳
-                elif is_ongoing and not has_subscription and is_watching:
-                    return 2  # 🟢 +🔕 +⏳
-                elif is_ongoing and has_subscription and not is_watching:
-                    return 3  # 🟢 +🔔
-                elif not is_ongoing and has_subscription and is_watching:
-                    return 4  # 🔴 +🔔 +⏳
-                elif not is_ongoing and not has_subscription and is_watching:
-                    return 5  # 🔴 +🔕 +⏳
+                if is_started and is_ongoing and has_subscription:
+                    return 1  # Начатый + выходит + подписан
+                elif is_started and is_ongoing and not has_subscription:
+                    return 2  # Начатый + выходит + не подписан
+                elif is_started and not is_ongoing and has_subscription:
+                    return 3  # Начатый + не выходит + подписан
+                elif is_started and not is_ongoing and not has_subscription:
+                    return 4  # Начатый + не выходит + не подписан
+                elif not is_started and is_ongoing and has_subscription:
+                    return 5  # Не начатый + выходит + подписан
+                elif not is_started and is_ongoing and not has_subscription:
+                    return 6  # Не начатый + выходит + не подписан
+                elif not is_started and not is_ongoing and has_subscription:
+                    return 7  # Не начатый + не выходит + подписан
                 else:
-                    return 6  # Остальные
+                    return 8  # Не начатый + не выходит + не подписан
             
             # Разделяем на непросмотренные и просмотренные
             unwatched_items = [item for item in items if not item.get('all_watched', False)]
