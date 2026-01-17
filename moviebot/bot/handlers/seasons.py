@@ -769,26 +769,20 @@ def show_completed_series_list(chat_id: int, user_id: int, message_id: int = Non
             'reply_markup': markup,
             'parse_mode': 'HTML'
         }
-        if message_thread_id is not None:
-            common_kwargs['message_thread_id'] = message_thread_id
 
         if message_id:
-            common_kwargs['message_id'] = message_id
-            bot.edit_message_text(**common_kwargs)
+            # edit_message_text не поддерживает message_thread_id
+            edit_kwargs = common_kwargs.copy()
+            edit_kwargs['message_id'] = message_id
+            edit_kwargs.pop('message_thread_id', None)
+            bot.edit_message_text(**edit_kwargs)
         else:
+            # send_message поддерживает message_thread_id
+            if message_thread_id is not None:
+                common_kwargs['message_thread_id'] = message_thread_id
             bot.send_message(**common_kwargs)
     except Exception as e:
         logger.error(f"[SHOW_COMPLETED_SERIES_LIST] Ошибка отправки/редактирования: {e}", exc_info=True)
-        # Fallback без thread_id
-        try:
-            fallback_kwargs = common_kwargs.copy()
-            fallback_kwargs.pop('message_thread_id', None)
-            if message_id:
-                bot.edit_message_text(**fallback_kwargs)
-            else:
-                bot.send_message(**fallback_kwargs)
-        except Exception as e2:
-            logger.error(f"[SHOW_COMPLETED_SERIES_LIST] Полная ошибка отправки: {e2}")
             
 @bot.callback_query_handler(func=lambda call: call.data.startswith("seasons_kp:"))
 def handle_seasons_kp(call):
