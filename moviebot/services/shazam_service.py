@@ -813,10 +813,14 @@ def build_tmdb_index():
     df = df[df['imdb_id'].str.len() > 0]
     logger.info(f"После финальной очистки imdb_id: {len(df)} фильмов")
     
-    # Сохраняем has_overview, actors_str, director_str, genres_str, overview и vote_count для приоритизации и keyword-матчинга при поиске
+    # Сохраняем has_overview, actors_str, director_str, genres_str, genres, overview и vote_count для приоритизации и keyword-матчинга при поиске
     # overview сохраняем отдельно для keyword-матчинга (самый сильный буст)
     # vote_count нужен для буста по популярности
+    # genres (оригинальный JSON) нужен для проверки жанров при фильтрации
     columns_to_save = ['imdb_id', 'title', 'year', 'description', 'has_overview', 'actors_str', 'director_str', 'genres_str', 'overview']
+    # Добавляем genres (оригинальный JSON) для проверки жанров при фильтрации
+    if 'genres' in df.columns:
+        columns_to_save.append('genres')
     if 'vote_count' in df.columns:
         columns_to_save.append('vote_count')
     processed = df[columns_to_save].copy()
