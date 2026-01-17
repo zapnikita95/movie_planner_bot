@@ -1055,35 +1055,46 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
                     'all_watched': all_watched,
                 })
             
-            # Сортировка по приоритету (ВЫХОДЯЩИЕ сериалы ВСЕГДА в начале):
-            # Сначала ВСЕ выходящие (is_ongoing=True), потом ВСЕ не выходящие (is_ongoing=False)
-            # Внутри каждой группы: начатые выше не начатых, подписанные выше не подписанных
+            # Сортировка по приоритету согласно новым требованиям:
+            # 1) Начатые выходящие с подпиской
+            # 2) Начатые не выходящие с подпиской
+            # 3) Выходящие с подпиской, но не начатые
+            # 4) Выходящие, не начатые
+            # 5) Не выходящие, не начатые
             def get_sort_priority(item):
                 is_ongoing = item['is_ongoing'] or False
                 has_subscription = item['has_subscription'] or False
                 watched_count = item['watched_count'] or 0
                 is_started = watched_count > 0  # Начатый = watched_count > 0
                 
-                # ВЫХОДЯЩИЕ сериалы - приоритет 1-4
-                if is_ongoing:
-                    if is_started and has_subscription:
-                        return 1  # Выходит + начатый + подписан
-                    elif is_started and not has_subscription:
-                        return 2  # Выходит + начатый + не подписан
-                    elif not is_started and has_subscription:
-                        return 3  # Выходит + не начатый + подписан
-                    else:
-                        return 4  # Выходит + не начатый + не подписан
-                # НЕ ВЫХОДЯЩИЕ сериалы - приоритет 5-8
+                # 1) Начатые выходящие с подпиской
+                if is_started and is_ongoing and has_subscription:
+                    return 1
+                # 2) Начатые не выходящие с подпиской
+                elif is_started and not is_ongoing and has_subscription:
+                    return 2
+                # 3) Выходящие с подпиской, но не начатые
+                elif not is_started and is_ongoing and has_subscription:
+                    return 3
+                # 4) Выходящие, не начатые
+                elif not is_started and is_ongoing and not has_subscription:
+                    return 4
+                # 5) Не выходящие, не начатые
+                elif not is_started and not is_ongoing and not has_subscription:
+                    return 5
+                # Остальные комбинации (для полноты):
+                # Начатые выходящие без подписки
+                elif is_started and is_ongoing and not has_subscription:
+                    return 6
+                # Начатые не выходящие без подписки
+                elif is_started and not is_ongoing and not has_subscription:
+                    return 7
+                # Не выходящие с подпиской, но не начатые
+                elif not is_started and not is_ongoing and has_subscription:
+                    return 8
+                # На всякий случай - все остальное
                 else:
-                    if is_started and has_subscription:
-                        return 5  # Не выходит + начатый + подписан
-                    elif is_started and not has_subscription:
-                        return 6  # Не выходит + начатый + не подписан
-                    elif not is_started and has_subscription:
-                        return 7  # Не выходит + не начатый + подписан
-                    else:
-                        return 8  # Не выходит + не начатый + не подписан
+                    return 9
             
             # Разделяем на непросмотренные и просмотренные
             unwatched_items = [item for item in items if not item.get('all_watched', False)]
