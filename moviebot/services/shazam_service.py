@@ -1684,14 +1684,19 @@ def search_movies(query, top_k=15):
                 if has_genre:
                     filtered_results.append(result)
             
-            # Если есть фильмы, которые нужно проверить через API - делаем это параллельно
+            # Если есть фильмы, которые нужно проверить через API - делаем это параллельно с задержками
             if results_to_check_via_api and genre_ru:
                 logger.info(f"[SEARCH MOVIES] Проверяем {len(results_to_check_via_api)} фильмов через API Кинопоиска для жанра '{genre_ru}'")
                 
                 from concurrent.futures import ThreadPoolExecutor, as_completed
                 from moviebot.api.kinopoisk_api import get_film_by_imdb_id
+                import time
                 
-                def check_genre_via_api(result_and_imdb):
+                def check_genre_via_api(result_and_imdb, delay_index):
+                    # Добавляем задержку между запросами (200 мс на каждый запрос)
+                    if delay_index > 0:
+                        time.sleep(0.2 * delay_index)  # 200 мс * индекс запроса
+                    
                     result, imdb_id = result_and_imdb
                     try:
                         film_info = get_film_by_imdb_id(imdb_id)
@@ -1714,10 +1719,17 @@ def search_movies(query, top_k=15):
                         # При ошибке пропускаем (не фильтруем)
                         return (result, True)
                 
-                # Параллельная проверка через API (максимум 5 потоков для скорости)
-                with ThreadPoolExecutor(max_workers=5) as executor:
-                    future_to_result = {executor.submit(check_genre_via_api, r): r for r in results_to_check_via_api}
-                    for future in as_completed(future_to_result):
+                # Параллельная проверка через API с задержками (максимум 3 потока, чтобы не спамить API)
+                # Задержка 200 мс между запросами для избежания бана
+                with ThreadPoolExecutor(max_workers=3) as executor:
+                    # Отправляем запросы с задержками (каждый следующий запрос с задержкой)
+                    futures = []
+                    for idx, result_and_imdb in enumerate(results_to_check_via_api):
+                        future = executor.submit(check_genre_via_api, result_and_imdb, idx)
+                        futures.append(future)
+                    
+                    # Собираем результаты
+                    for future in as_completed(futures):
                         try:
                             result, has_genre = future.result()
                             if has_genre:
