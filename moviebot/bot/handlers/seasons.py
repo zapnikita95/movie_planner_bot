@@ -1044,9 +1044,9 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
             unwatched_offset = (page - 1) * page_size
             unwatched_page_items = unwatched_items[unwatched_offset:unwatched_offset + page_size]
             
-            # Объединяем: непросмотренные (постранично) + все просмотренные (всегда внизу)
-            items = unwatched_page_items + watched_items
-            total_count = unwatched_count + len(watched_items)
+            # Просмотренные сериалы НЕ показываются в общем списке - только в разделе "Просмотренные"
+            items = unwatched_page_items
+            total_count = unwatched_count
             total_pages = unwatched_total_pages
 
     except psycopg2.InterfaceError as e:

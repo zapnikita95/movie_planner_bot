@@ -120,39 +120,9 @@ def register_series_callbacks(bot):
                     if watched_row:
                         is_series_watched = bool(watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
                 
-                # Если сериал отмечен как просмотренный, но не все серии отмечены - отмечаем все серии
-                if is_series_watched:
-                    # Получаем сезоны из API
-                    seasons_data = get_seasons_data(kp_id)
-                    if seasons_data:
-                        # Получаем все сезоны и эпизоды
-                        all_seasons_sorted = sorted(seasons_data, key=lambda s: int(s.get('number', 0)) if str(s.get('number', '')).isdigit() else 0)
-                        
-                        # Отмечаем все серии как просмотренные
-                        with db_lock:
-                            for season in all_seasons_sorted:
-                                season_num = season.get('number', '')
-                                episodes = season.get('episodes', [])
-                                for ep in episodes:
-                                    # ВАЖНО: Всегда приводим к строке для единообразия
-                                    ep_num = str(ep.get('episodeNumber', ''))
-                                    # Проверяем, не отмечена ли уже эта серия
-                                    cursor_local.execute('''
-                                        SELECT watched FROM series_tracking 
-                                        WHERE chat_id = %s AND film_id = %s AND user_id = %s 
-                                        AND season_number = %s AND episode_number = %s
-                                    ''', (chat_id, film_id, user_id, season_num, ep_num))
-                                    existing = cursor_local.fetchone()
-                                    if not existing or not (existing.get('watched') if isinstance(existing, dict) else existing[0]):
-                                        # Отмечаем серию как просмотренную
-                                        cursor_local.execute('''
-                                            INSERT INTO series_tracking (chat_id, film_id, user_id, season_number, episode_number, watched)
-                                            VALUES (%s, %s, %s, %s, %s, TRUE)
-                                            ON CONFLICT (chat_id, film_id, user_id, season_number, episode_number) 
-                                            DO UPDATE SET watched = TRUE
-                                        ''', (chat_id, film_id, user_id, season_num, ep_num))
-                            conn_local.commit()
-                            logger.info(f"[SERIES TRACK] Все серии отмечены как просмотренные для film_id={film_id}, user_id={user_id}")
+                # НЕ отмечаем автоматически все серии, если сериал отмечен как просмотренный
+                # Пользователь должен сам отмечать серии вручную или через автоотметку
+                # Это предотвращает автоматическую отметку всех серий при случайной установке watched = 1
             finally:
                 try:
                     cursor_local.close()
@@ -287,13 +257,9 @@ def register_series_callbacks(bot):
                         break
                 
                 # Если все сезоны просмотрены, отмечаем сериал как просмотренный в БД
-                if all_seasons_watched:
-                    with db_lock:
-                        try:
-                            cursor_local.execute("UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s", (film_id, chat_id))
-                            conn_local.commit()
-                        except Exception as update_e:
-                            logger.error(f"[SERIES TRACK] Ошибка обновления watched: {update_e}", exc_info=True)
+                # НЕ отмечаем сериал как полностью просмотренный автоматически
+                # Пользователь может самостоятельно отметить сериал как просмотренный
+                # Это нужно чтобы сериалы не исчезали из общего списка при автоотметке всех серий
                             try:
                                 conn_local.rollback()
                             except:
@@ -1504,10 +1470,9 @@ def handle_episode_toggle(call):
                     unwatched_count_row = cursor_local.fetchone()
                     unwatched_count = unwatched_count_row.get('count') if isinstance(unwatched_count_row, dict) else (unwatched_count_row[0] if unwatched_count_row else 0)
                     
-                    if unwatched_count == 0:
-                        # Все серии просмотрены - отмечаем сериал
-                        cursor_local.execute('UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-                        logger.info(f"[EPISODE TOGGLE] Все серии просмотрены - сериал отмечен как просмотренный")
+                    # НЕ отмечаем сериал как полностью просмотренный автоматически
+                    # Пользователь может самостоятельно отметить сериал как просмотренный
+                    # Это нужно чтобы сериалы не исчезали из общего списка при автоотметке всех серий
                 
                 conn_local.commit()
                 if cursor_local:
@@ -1811,9 +1776,9 @@ def rate_film_callback(call):
                 else:
                     raise
         else:
+            # Фильм уже в базе, убираем текст про добавление
             text_new = (
-                f"💬 Чтобы оценить *{escaped_title}*, ответьте на это сообщение числом от 1 до 10.\n\n"
-                f"Фильм/сериал будет добавлен в базу при оценке."
+                f"💬 Чтобы оценить *{escaped_title}*, ответьте на это сообщение числом от 1 до 10."
             )
 
             try:

@@ -344,15 +344,23 @@ def check_plan_datetime_reply(message):
             is_prompt = "Введите новую дату и время" in reply_text
         else:
             is_prompt = "Когда планируете смотреть" in reply_text
-        is_error = "Не понял дату/время" in reply_text
+        # Проверяем все возможные варианты сообщений об ошибках
+        is_error = (
+            "Не понял дату/время" in reply_text or
+            "Не удалось распознать дату/время" in reply_text or
+            "Неверная дата" in reply_text or
+            "попробуйте еще раз" in reply_text.lower() or
+            "попробуй ещё раз" in reply_text.lower()
+        )
         if not (is_prompt or is_error):
             return False
-        if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
+        # Если это реплай на промпт - проверяем message_id, если на ошибку - принимаем всегда
+        if is_prompt and prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
             return False
     else:
         # В личке: принимаем реплай на промпт/ошибку или следующее сообщение (если состояние активно)
         if message.reply_to_message:
-            # Если это реплай, проверяем, что это ответ на правильный промпт
+            # Если это реплай, проверяем, что это ответ на правильный промпт или на ошибку
             if message.reply_to_message.from_user and message.reply_to_message.from_user.id == BOT_ID:
                 reply_text = message.reply_to_message.text or ""
                 # Для редактирования промпт другой
@@ -360,12 +368,21 @@ def check_plan_datetime_reply(message):
                     is_prompt = "Введите новую дату и время" in reply_text
                 else:
                     is_prompt = "Когда планируете смотреть" in reply_text
-                is_error = "Не понял дату/время" in reply_text
+                # Проверяем все возможные варианты сообщений об ошибках
+                is_error = (
+                    "Не понял дату/время" in reply_text or
+                    "Не удалось распознать дату/время" in reply_text or
+                    "Неверная дата" in reply_text or
+                    "попробуйте еще раз" in reply_text.lower() or
+                    "попробуй ещё раз" in reply_text.lower()
+                )
                 if not (is_prompt or is_error):
                     return False
-                prompt_message_id = state.get('prompt_message_id')
-                if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
-                    return False
+                # Если это реплай на промпт - проверяем message_id, если на ошибку - принимаем всегда
+                if is_prompt:
+                    prompt_message_id = state.get('prompt_message_id')
+                    if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
+                        return False
         # Если не реплай, но состояние активно - принимаем как следующее сообщение
     
     return True
@@ -1485,16 +1502,11 @@ def handle_rate_list_reply(message):
             handle_rating_internal(message, rating)
             logger.info(f"[HANDLE RATE LIST REPLY] handle_rating_internal завершен")
             
-            # Удаляем rating_messages только после успешной обработки
-            if reply_msg_id and reply_msg_id in rating_messages:
-                del rating_messages[reply_msg_id]
-                logger.info(f"[HANDLE RATE LIST REPLY] Очищено rating_messages для reply_msg_id={reply_msg_id}")
+            # НЕ удаляем rating_messages, чтобы другие пользователи тоже могли отвечать на это сообщение
+            # Это позволяет нескольким пользователям оценить один и тот же фильм
         except Exception as rating_e:
             logger.error(f"[HANDLE RATE LIST REPLY] ❌ Ошибка в handle_rating_internal: {rating_e}", exc_info=True)
-            # Удаляем rating_messages даже при ошибке, чтобы не блокировать повторные попытки
-            if reply_msg_id and reply_msg_id in rating_messages:
-                del rating_messages[reply_msg_id]
-                logger.info(f"[HANDLE RATE LIST REPLY] Очищено rating_messages после ошибки для reply_msg_id={reply_msg_id}")
+            # НЕ удаляем rating_messages, чтобы пользователь мог повторить попытку
         
         return
     

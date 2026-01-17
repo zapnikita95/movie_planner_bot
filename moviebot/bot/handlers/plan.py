@@ -2372,8 +2372,11 @@ def handle_edit_plan_datetime_internal(message, state):
         
         user_tz = get_user_timezone_or_default(user_id)
         
-        # Парсим новую дату/время
+        # Парсим новую дату/время - сначала пробуем parse_session_time, потом parse_plan_date_text
         session_dt = parse_session_time(text, user_tz)
+        if not session_dt:
+            # Если parse_session_time не сработал, пробуем parse_plan_date_text (для "завтра", "сегодня", дней недели и т.д.)
+            session_dt = parse_plan_date_text(text, user_id)
         
         if session_dt:
             # Обновляем план
