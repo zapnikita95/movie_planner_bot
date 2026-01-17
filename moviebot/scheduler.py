@@ -70,9 +70,9 @@ def hourly_stats():
 def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=None, user_id=None):
     """Отправляет уведомление о запланированном просмотре"""
     # Используем локальные соединение и курсор
-    from moviebot.database.db_connection import get_db_connection, get_db_cursor
+    from moviebot.database.db_connection import get_db_connection, db_lock
     conn_local = get_db_connection()
-    cursor_local = get_db_cursor()
+    cursor_local = None
     
     try:
         plan_type_text = "дома" if plan_type == 'home' else "в кино"
@@ -85,32 +85,46 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
         is_series = False
         last_episode_info = None
         if user_id and film_id:
-            with db_lock:
-                cursor_local.execute('SELECT is_series FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-                movie_row = cursor_local.fetchone()
-                if movie_row:
-                    is_series = bool(movie_row.get('is_series') if isinstance(movie_row, dict) else movie_row[0])
-                   
-                    if is_series:
-                        cursor_local.execute('''
-                            SELECT season_number, episode_number
-                            FROM series_tracking
-                            WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-                            ORDER BY season_number DESC, episode_number DESC
-                            LIMIT 1
-                        ''', (chat_id, film_id, user_id))
-                        last_episode_row = cursor_local.fetchone()
-                        if last_episode_row:
-                            if isinstance(last_episode_row, dict):
-                                last_episode_info = {
-                                    'season': last_episode_row.get('season_number'),
-                                    'episode': last_episode_row.get('episode_number')
-                                }
-                            else:
-                                last_episode_info = {
-                                    'season': last_episode_row[0],
-                                    'episode': last_episode_row[1]
-                                }
+            conn_series = get_db_connection()
+            cursor_series = None
+            try:
+                with db_lock:
+                    cursor_series = conn_series.cursor()
+                    cursor_series.execute('SELECT is_series FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                    movie_row = cursor_series.fetchone()
+                    if movie_row:
+                        is_series = bool(movie_row.get('is_series') if isinstance(movie_row, dict) else movie_row[0])
+                       
+                        if is_series:
+                            cursor_series.execute('''
+                                SELECT season_number, episode_number
+                                FROM series_tracking
+                                WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                                ORDER BY season_number DESC, episode_number DESC
+                                LIMIT 1
+                            ''', (chat_id, film_id, user_id))
+                            last_episode_row = cursor_series.fetchone()
+                            if last_episode_row:
+                                if isinstance(last_episode_row, dict):
+                                    last_episode_info = {
+                                        'season': last_episode_row.get('season_number'),
+                                        'episode': last_episode_row.get('episode_number')
+                                    }
+                                else:
+                                    last_episode_info = {
+                                        'season': last_episode_row[0],
+                                        'episode': last_episode_row[1]
+                                    }
+            finally:
+                if cursor_series:
+                    try:
+                        cursor_series.close()
+                    except:
+                        pass
+                try:
+                    conn_series.close()
+                except:
+                    pass
        
         if is_series and last_episode_info:
             text += f"\n\n📺 <b>Последняя просмотренная серия:</b> Сезон {last_episode_info['season']}, Серия {last_episode_info['episode']}"
@@ -124,13 +138,17 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
        
         # Для планов "дома" — существующий код с онлайн-кинотеатрами
         if plan_type == 'home' and plan_id:
-            with db_lock:
-                cursor_local.execute('''
-                    SELECT streaming_service, streaming_url, streaming_done, ticket_file_id
-                    FROM plans
-                    WHERE id = %s AND chat_id = %s
-                ''', (plan_id, chat_id))
-                plan_row = cursor_local.fetchone()
+            conn_plan = get_db_connection()
+            cursor_plan = None
+            try:
+                with db_lock:
+                    cursor_plan = conn_plan.cursor()
+                    cursor_plan.execute('''
+                        SELECT streaming_service, streaming_url, streaming_done, ticket_file_id
+                        FROM plans
+                        WHERE id = %s AND chat_id = %s
+                    ''', (plan_id, chat_id))
+                    plan_row = cursor_plan.fetchone()
                
                 if plan_row:
                     if isinstance(plan_row, dict):
@@ -154,12 +172,26 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
                         markup.add(InlineKeyboardButton(streaming_service, url=streaming_url))
                         
                         # Добавляем кнопку "Перейти к описанию", если есть kp_id
-                        with db_lock:
-                            cursor_local.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-                            movie_row = cursor_local.fetchone()
-                            kp_id = None
-                            if movie_row:
-                                kp_id = movie_row.get('kp_id') if isinstance(movie_row, dict) else movie_row[0]
+                        conn_kp = get_db_connection()
+                        cursor_kp = None
+                        kp_id = None
+                        try:
+                            with db_lock:
+                                cursor_kp = conn_kp.cursor()
+                                cursor_kp.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                                movie_row = cursor_kp.fetchone()
+                                if movie_row:
+                                    kp_id = movie_row.get('kp_id') if isinstance(movie_row, dict) else movie_row[0]
+                        finally:
+                            if cursor_kp:
+                                try:
+                                    cursor_kp.close()
+                                except:
+                                    pass
+                            try:
+                                conn_kp.close()
+                            except:
+                                pass
                         
                         if kp_id:
                             try:
@@ -175,15 +207,29 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
        
         # Новый блок для планов "в кино"
         elif plan_type == 'cinema' and plan_id:
-            with db_lock:
-                cursor_local.execute('SELECT ticket_file_id FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
-                row = cursor_local.fetchone()
-                ticket_file_id = None
-                if row:
-                    if isinstance(row, dict):
-                        ticket_file_id = row.get('ticket_file_id')
-                    else:
-                        ticket_file_id = row[0]
+            conn_cinema = get_db_connection()
+            cursor_cinema = None
+            try:
+                with db_lock:
+                    cursor_cinema = conn_cinema.cursor()
+                    cursor_cinema.execute('SELECT ticket_file_id FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+                    row = cursor_cinema.fetchone()
+                    ticket_file_id = None
+                    if row:
+                        if isinstance(row, dict):
+                            ticket_file_id = row.get('ticket_file_id')
+                        else:
+                            ticket_file_id = row[0]
+            finally:
+                if cursor_cinema:
+                    try:
+                        cursor_cinema.close()
+                    except:
+                        pass
+                try:
+                    conn_cinema.close()
+                except:
+                    pass
                
                 if not markup:
                     markup = InlineKeyboardMarkup()
@@ -218,30 +264,31 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
        
         logger.info(f"[PLAN NOTIFICATION] Уведомление отправлено для фильма {title} в чат {chat_id}, message_id={msg.message_id}, plan_id={plan_id}")
        
-        # КРИТИЧЕСКИ ВАЖНО: Обновляем флаг notification_sent СРАЗУ после отправки, используя существующее соединение
+        # КРИТИЧЕСКИ ВАЖНО: Обновляем флаг notification_sent СРАЗУ после отправки
         if plan_id:
+            conn_update = get_db_connection()
+            cursor_update = None
             try:
                 with db_lock:
-                    cursor_local.execute('UPDATE plans SET notification_sent = TRUE WHERE id = %s', (plan_id,))
-                    conn_local.commit()
+                    cursor_update = conn_update.cursor()
+                    cursor_update.execute('UPDATE plans SET notification_sent = TRUE WHERE id = %s', (plan_id,))
+                    conn_update.commit()
                 logger.info(f"[PLAN NOTIFICATION] План {plan_id} отмечен как уведомление отправлено")
             except Exception as e:
                 logger.error(f"[PLAN NOTIFICATION] Не удалось отметить план {plan_id} как отправленный: {e}", exc_info=True)
+            finally:
+                if cursor_update:
+                    try:
+                        cursor_update.close()
+                    except:
+                        pass
+                try:
+                    conn_update.close()
+                except:
+                    pass
 
     except Exception as e:
         logger.error(f"[PLAN NOTIFICATION] Ошибка отправки уведомления: {e}", exc_info=True)
-    finally:
-        # Закрываем локальные соединения
-        if 'cursor_local' in locals():
-            try:
-                cursor_local.close()
-            except:
-                pass
-        if 'conn_local' in locals():
-            try:
-                conn_local.close()
-            except:
-                pass
 
 def send_ticket_notification(chat_id, plan_id):
     """Отправляет напоминание с билетами за 10 минут до сеанса"""

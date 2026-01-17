@@ -139,6 +139,24 @@ def register_series_callbacks(bot):
                 bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о сезонах", show_alert=True)
                 return
 
+            # Проверяем, есть ли вообще сезоны с эпизодами
+            has_episodes = False
+            for season in seasons_data:
+                episodes = season.get('episodes', [])
+                if episodes and len(episodes) > 0:
+                    has_episodes = True
+                    break
+            
+            if not has_episodes:
+                # Нет серий - показываем сообщение
+                bot.answer_callback_query(
+                    call.id, 
+                    "🤷🏼‍♂️ По этому сериалу пока не вышли серии, их можно будет отметить позже",
+                    show_alert=True
+                )
+                logger.info(f"[SERIES TRACK] Сериал {title} (kp_id={kp_id}) не имеет серий - показываем сообщение")
+                return
+
             # Показываем первую страницу сезонов через вспомогательную функцию
             show_seasons_page(chat_id, user_id, kp_id, film_id, title, seasons_data, page=1, message_id=message_id, call=call)
         except Exception as e:
@@ -154,30 +172,56 @@ def register_series_callbacks(bot):
             message_thread_id = getattr(call.message, 'message_thread_id', None) if call else None
             
             # Фильтруем только вышедшие сезоны
+            # Сезон считается вышедшим, если первая серия сезона уже вышла (releaseDate <= now)
             now = datetime.now()
             released_seasons = []
             for season in seasons_data:
                 season_num = season.get('number', '')
                 episodes = season.get('episodes', [])
                 
-                season_released = True
-                if episodes:
-                    for ep in episodes:
-                        release_str = ep.get('releaseDate', '')
-                        if release_str and release_str != '—':
-                            try:
-                                release_date = None
-                                for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
-                                    try:
-                                        release_date = datetime.strptime(release_str.split('T')[0], fmt)
-                                        break
-                                    except:
-                                        continue
-                                if release_date and release_date > now:
-                                    season_released = False
-                                    break
-                            except:
-                                pass
+                if not episodes or len(episodes) == 0:
+                    # Сезон без эпизодов - не показываем
+                    continue
+                
+                # Проверяем первую серию сезона (самую раннюю по номеру)
+                first_episode = None
+                for ep in episodes:
+                    ep_num = ep.get('episodeNumber', 0)
+                    if first_episode is None:
+                        first_episode = ep
+                    else:
+                        first_ep_num = first_episode.get('episodeNumber', 0)
+                        if ep_num < first_ep_num:
+                            first_episode = ep
+                
+                if not first_episode:
+                    # Нет первой серии - не показываем сезон
+                    continue
+                
+                # Проверяем дату выхода первой серии
+                release_str = first_episode.get('releaseDate', '')
+                season_released = False
+                
+                if not release_str or release_str == '—' or release_str == '':
+                    # Нет даты выхода - не показываем сезон
+                    continue
+                
+                try:
+                    release_date = None
+                    for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
+                        try:
+                            release_date = datetime.strptime(release_str.split('T')[0], fmt)
+                            break
+                        except:
+                            continue
+                    
+                    if release_date and release_date <= now:
+                        # Первая серия уже вышла - показываем сезон
+                        season_released = True
+                    # Если release_date > now или release_date is None - не показываем
+                except:
+                    # Ошибка парсинга даты - не показываем сезон
+                    pass
                 
                 if season_released:
                     released_seasons.append(season)

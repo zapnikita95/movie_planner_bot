@@ -660,10 +660,11 @@ def show_completed_series_list(chat_id: int, user_id: int, message_id: int = Non
     has_access = has_notifications_access(chat_id, user_id)
     
     conn_local = get_db_connection()
-    cursor_local = get_db_cursor()
+    cursor_local = None
     
     try:
         with db_lock:
+            cursor_local = conn_local.cursor()
             cursor_local.execute('SELECT id, title, kp_id FROM movies WHERE chat_id = %s AND is_series = 1 ORDER BY title', (chat_id,))
             all_series = cursor_local.fetchall()
         
@@ -677,29 +678,58 @@ def show_completed_series_list(chat_id: int, user_id: int, message_id: int = Non
             is_airing, _ = get_series_airing_status(kp_id)
             seasons_data = get_seasons_data(kp_id)
 
-            # Собираем ВСЕ отмеченные серии пользователя
+            # Собираем ВСЕ отмеченные серии пользователя - используем локальный курсор
             watched_set = set()
-            with db_lock:
-                cursor_local.execute('''
-                    SELECT season_number, episode_number FROM series_tracking 
-                    WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-                ''', (chat_id, film_id, user_id))
-                for w_row in cursor_local.fetchall():
-                    s_num = str(w_row.get('season_number', ''))
-                    e_num = str(w_row.get('episode_number', ''))
-                    watched_set.add((s_num, e_num))
+            conn_watch = get_db_connection()
+            cursor_watch = None
+            try:
+                with db_lock:
+                    cursor_watch = conn_watch.cursor()
+                    cursor_watch.execute('''
+                        SELECT season_number, episode_number FROM series_tracking 
+                        WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                    ''', (chat_id, film_id, user_id))
+                    for w_row in cursor_watch.fetchall():
+                        s_num = str(w_row.get('season_number') if isinstance(w_row, dict) else w_row[0])
+                        e_num = str(w_row.get('episode_number') if isinstance(w_row, dict) else w_row[1])
+                        watched_set.add((s_num, e_num))
+            finally:
+                if cursor_watch:
+                    try:
+                        cursor_watch.close()
+                    except:
+                        pass
+                try:
+                    conn_watch.close()
+                except:
+                    pass
 
             # Считаем ВСЕ эпизоды сериала и сколько просмотрено
             total_ep, watched_ep = count_episodes_for_watch_check(seasons_data, is_airing, watched_set, chat_id, film_id, user_id)
 
             logger.info(f"[SHOW_COMPLETED_SERIES_LIST] {title} (kp_id={kp_id}): total_ep={total_ep}, watched_ep={watched_ep}, is_airing={is_airing}")
 
-            # Проверяем также поле watched в таблице movies
-            cursor_local.execute('SELECT watched FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-            movie_row = cursor_local.fetchone()
+            # Проверяем также поле watched в таблице movies - используем локальный курсор
+            conn_check = get_db_connection()
+            cursor_check = None
             movie_watched = False
-            if movie_row:
-                movie_watched = bool(movie_row.get('watched') if isinstance(movie_row, dict) else movie_row[0])
+            try:
+                with db_lock:
+                    cursor_check = conn_check.cursor()
+                    cursor_check.execute('SELECT watched FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                    movie_row = cursor_check.fetchone()
+                    if movie_row:
+                        movie_watched = bool(movie_row.get('watched') if isinstance(movie_row, dict) else movie_row[0])
+            finally:
+                if cursor_check:
+                    try:
+                        cursor_check.close()
+                    except:
+                        pass
+                try:
+                    conn_check.close()
+                except:
+                    pass
             
             # Условие: все эпизоды просмотрены, сериал завершён, есть хотя бы один эпизод, И поле watched = 1
             if total_ep == watched_ep and total_ep > 0 and not is_airing and movie_watched:
@@ -710,10 +740,11 @@ def show_completed_series_list(chat_id: int, user_id: int, message_id: int = Non
                 logger.info(f"[SHOW_COMPLETED_SERIES_LIST] Сериал {title} НЕ завершён: total={total_ep}, watched={watched_ep}, airing={is_airing}, movie_watched={movie_watched}")
 
     finally:
-        try:
-            cursor_local.close()
-        except:
-            pass
+        if cursor_local:
+            try:
+                cursor_local.close()
+            except:
+                pass
         try:
             conn_local.close()
         except:
@@ -1024,37 +1055,35 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
                     'all_watched': all_watched,
                 })
             
-            # Сортировка по приоритету (начатые сериалы выше):
-            # 1. Начатые (watched_count > 0) + выходят (is_ongoing=True) + подписаны (has_subscription=True)
-            # 2. Начатые (watched_count > 0) + выходят (is_ongoing=True) + не подписаны
-            # 3. Начатые (watched_count > 0) + не выходят (is_ongoing=False) + подписаны
-            # 4. Начатые (watched_count > 0) + не выходят (is_ongoing=False) + не подписаны
-            # 5. Не начатые (watched_count = 0) + выходят (is_ongoing=True) + подписаны
-            # 6. Не начатые (watched_count = 0) + выходят (is_ongoing=True) + не подписаны
-            # 7. Не начатые (watched_count = 0) + не выходят (is_ongoing=False) + подписаны
-            # 8. Не начатые (watched_count = 0) + не выходят (is_ongoing=False) + не подписаны
+            # Сортировка по приоритету (ВЫХОДЯЩИЕ сериалы ВСЕГДА в начале):
+            # Сначала ВСЕ выходящие (is_ongoing=True), потом ВСЕ не выходящие (is_ongoing=False)
+            # Внутри каждой группы: начатые выше не начатых, подписанные выше не подписанных
             def get_sort_priority(item):
                 is_ongoing = item['is_ongoing'] or False
                 has_subscription = item['has_subscription'] or False
                 watched_count = item['watched_count'] or 0
                 is_started = watched_count > 0  # Начатый = watched_count > 0
                 
-                if is_started and is_ongoing and has_subscription:
-                    return 1  # Начатый + выходит + подписан
-                elif is_started and is_ongoing and not has_subscription:
-                    return 2  # Начатый + выходит + не подписан
-                elif is_started and not is_ongoing and has_subscription:
-                    return 3  # Начатый + не выходит + подписан
-                elif is_started and not is_ongoing and not has_subscription:
-                    return 4  # Начатый + не выходит + не подписан
-                elif not is_started and is_ongoing and has_subscription:
-                    return 5  # Не начатый + выходит + подписан
-                elif not is_started and is_ongoing and not has_subscription:
-                    return 6  # Не начатый + выходит + не подписан
-                elif not is_started and not is_ongoing and has_subscription:
-                    return 7  # Не начатый + не выходит + подписан
+                # ВЫХОДЯЩИЕ сериалы - приоритет 1-4
+                if is_ongoing:
+                    if is_started and has_subscription:
+                        return 1  # Выходит + начатый + подписан
+                    elif is_started and not has_subscription:
+                        return 2  # Выходит + начатый + не подписан
+                    elif not is_started and has_subscription:
+                        return 3  # Выходит + не начатый + подписан
+                    else:
+                        return 4  # Выходит + не начатый + не подписан
+                # НЕ ВЫХОДЯЩИЕ сериалы - приоритет 5-8
                 else:
-                    return 8  # Не начатый + не выходит + не подписан
+                    if is_started and has_subscription:
+                        return 5  # Не выходит + начатый + подписан
+                    elif is_started and not has_subscription:
+                        return 6  # Не выходит + начатый + не подписан
+                    elif not is_started and has_subscription:
+                        return 7  # Не выходит + не начатый + подписан
+                    else:
+                        return 8  # Не выходит + не начатый + не подписан
             
             # Разделяем на непросмотренные и просмотренные
             unwatched_items = [item for item in items if not item.get('all_watched', False)]
