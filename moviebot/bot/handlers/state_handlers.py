@@ -304,7 +304,9 @@ def handle_retry_prompt_callback(call):
 def handle_cancel_action_callback(call):
     """Обработчик кнопки 'Отмена' - очищает состояние пользователя"""
     try:
+        bot.answer_callback_query(call.id)
         user_id = call.from_user.id
+        chat_id = call.message.chat.id
         
         # Очищаем все состояния
         from moviebot.states import (
@@ -312,31 +314,50 @@ def handle_cancel_action_callback(call):
             user_edit_state, user_settings_state, user_plan_state,
             user_clean_state, user_promo_state, user_promo_admin_state,
             user_cancel_subscription_state, user_refund_state,
-            user_unsubscribe_state, user_add_admin_state, user_view_film_state
+            user_unsubscribe_state, user_add_admin_state, user_view_film_state,
+            user_private_handler_state
         )
+        
+        # Проверяем, в каком состоянии пользователь, чтобы вернуться в правильное место
+        is_clean_state = user_id in user_clean_state
         
         states_to_clear = [
             user_ticket_state, user_search_state, user_import_state,
             user_edit_state, user_settings_state, user_plan_state,
             user_clean_state, user_promo_state, user_promo_admin_state,
             user_cancel_subscription_state, user_refund_state,
-            user_unsubscribe_state, user_add_admin_state, user_view_film_state
+            user_unsubscribe_state, user_add_admin_state, user_view_film_state,
+            user_private_handler_state
         ]
         
         for state_dict in states_to_clear:
             if user_id in state_dict:
                 del state_dict[user_id]
         
-        bot.answer_callback_query(call.id, "✅ Действие отменено")
-        bot.edit_message_text(
-            "❌ Действие отменено",
-            call.message.chat.id,
-            call.message.message_id
-        )
+        # Удаляем сообщение об ошибке
+        try:
+            bot.delete_message(chat_id, call.message.message_id)
+        except:
+            pass
+        
+        # Если это было состояние clean, возвращаемся в меню clean
+        if is_clean_state:
+            from moviebot.bot.handlers.settings.clean import clean_command
+            class FakeMessage:
+                def __init__(self, call):
+                    self.from_user = call.from_user
+                    self.chat = call.message.chat
+                    self.text = '/clean'
+                    self.message_id = call.message.message_id
+            fake_msg = FakeMessage(call)
+            clean_command(fake_msg)
+        else:
+            # Отправляем сообщение об отмене
+            bot.send_message(chat_id, "❌ Действие отменено.")
     except Exception as e:
         logger.error(f"[CANCEL ACTION] Ошибка: {e}", exc_info=True)
         try:
-            bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
         except:
             pass
 
