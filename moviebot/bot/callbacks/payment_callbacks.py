@@ -7384,22 +7384,22 @@ def register_payment_callbacks(bot_instance):
                     
                     # Отправляем сообщение с запросом промокода
                     # Используем короткий callback_data, так как данные уже сохранены в user_promo_state
-                    text = "Введите промокод в ответном сообщении:"
+                    text = "Введите промокод в ответном сообщении:\n\n<i>⚠️ Проведите пальцем влево по этому сообщению, или зажмите и удерживайте это сообщение, и далее выберите \"Ответить\", чтобы промокод применился</i>"
                     markup = InlineKeyboardMarkup()
                     # Используем короткий callback_data (лимит Telegram - 64 байта)
                     callback_data_back = "payment:back_from_promo"
                     if len(callback_data_back.encode('utf-8')) > 64:
                         logger.error(f"[PROMO] ❌ callback_data слишком длинный: {len(callback_data_back)} байт")
                         # Отправляем без кнопки, если callback_data слишком длинный
-                        msg = bot_instance.send_message(chat_id, text)
+                        msg = bot_instance.send_message(chat_id, text, parse_mode='HTML')
                     else:
                         markup.add(InlineKeyboardButton("◀️ Назад", callback_data=callback_data_back))
                         try:
-                            msg = bot_instance.send_message(chat_id, text, reply_markup=markup)
+                            msg = bot_instance.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
                         except Exception as send_e:
                             logger.error(f"[PROMO] Ошибка отправки сообщения с кнопкой: {send_e}", exc_info=True)
                             # Пробуем отправить без кнопки
-                            msg = bot_instance.send_message(chat_id, text)
+                            msg = bot_instance.send_message(chat_id, text, parse_mode='HTML')
                     logger.info(f"[PROMO] Запрос промокода: user_id={user_id}, payment_id={payment_id}")
                     
                 except Exception as e:
