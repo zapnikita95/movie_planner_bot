@@ -1212,6 +1212,95 @@ def _detect_genre_from_keywords(keywords, query_en_lower, query_en_words):
     
     return detected_genres
 
+def _remove_wish_phrases(query):
+    """Удаляет мусорные фразы о желании посмотреть фильм из запроса"""
+    import re
+    
+    # Список фраз, которые нужно удалить (на русском и английском)
+    wish_phrases = [
+        # Русские фразы
+        r'хочу посмотреть',
+        r'я хочу посмотреть',
+        r'хочу посмотреть фильм',
+        r'я бы хотел посмотреть',
+        r'я бы хотела посмотреть',
+        r'хочу посмотреть кино',
+        r'хочется посмотреть',
+        r'хочется посмотреть фильм',
+        r'хочется посмотреть кино',
+        r'посоветуй фильм',
+        r'посоветуй мне фильм',
+        r'найди мне фильм',
+        r'найди фильм',
+        r'ищу фильм',
+        r'ищу фильм про',
+        r'дай мне фильм',
+        r'давай посмотрим',
+        r'давайте посмотрим',
+        r'давай посмотрим фильм',
+        r'давайте посмотрим фильм',
+        r'хочу найти',
+        r'хочу найти фильм',
+        r'покажи фильм',
+        r'покажи мне фильм',
+        r'можешь найти',
+        r'можешь найти фильм',
+        r'можешь посоветовать',
+        r'можешь посоветовать фильм',
+        r'мне нужен фильм',
+        r'нужен фильм',
+        r'мне нужен',
+        r'хочется глянуть',
+        r'хочется глянуть фильм',
+        r'посмотреть бы',
+        r'посмотреть бы фильм',
+        r'хочу глянуть',
+        r'хочу глянуть фильм',
+        
+        # Английские фразы (на случай если уже переведено)
+        r'i want to watch',
+        r'i would like to watch',
+        r'want to watch',
+        r'would like to watch',
+        r'i want to see',
+        r'i would like to see',
+        r'want to see',
+        r'would like to see',
+        r'recommend a movie',
+        r'recommend me a movie',
+        r'find me a movie',
+        r'find a movie',
+        r'i am looking for',
+        r'i\'m looking for',
+        r'looking for a movie',
+        r'looking for',
+        r'show me a movie',
+        r'show a movie',
+        r'can you find',
+        r'can you find a movie',
+        r'can you recommend',
+        r'can you recommend a movie',
+        r'i need a movie',
+        r'need a movie',
+        r'i need',
+        r'let\'s watch',
+        r'let us watch',
+        r'let\'s watch a movie',
+        r'let us watch a movie',
+    ]
+    
+    cleaned_query = query
+    for phrase in wish_phrases:
+        # Удаляем фразу с пробелами до и после (регистронезависимо)
+        pattern = re.compile(r'\b' + phrase + r'\b', re.IGNORECASE)
+        cleaned_query = pattern.sub('', cleaned_query)
+    
+    # Убираем лишние пробелы
+    cleaned_query = re.sub(r'\s+', ' ', cleaned_query).strip()
+    
+    return cleaned_query
+
+
 def _extract_keywords(query_en):
     """Извлекает ключевые слова из запроса, убирая стоп-слова"""
     # Стоп-слова на английском (игнорируем при keyword-матчинге)
@@ -1238,6 +1327,17 @@ def _extract_keywords(query_en):
 def search_movies(query, top_k=15):
     try:
         logger.info(f"[SEARCH MOVIES] Начало поиска для запроса: '{query}' (FUZZINESS_LEVEL={FUZZINESS_LEVEL})")
+        
+        # Удаляем мусорные фразы о желании посмотреть фильм
+        query_cleaned = _remove_wish_phrases(query)
+        if query_cleaned != query:
+            logger.info(f"[SEARCH MOVIES] Очищено от мусорных фраз: '{query}' → '{query_cleaned}'")
+            query = query_cleaned
+        
+        # Если после очистки запрос пустой, возвращаем пустой список
+        if not query or not query.strip():
+            logger.warning(f"[SEARCH MOVIES] После очистки запрос пустой, возвращаем пустой список")
+            return []
         
         logger.info(f"[SEARCH MOVIES] Шаг 1: Перевод запроса...")
         query_en = translate_to_english(query)
