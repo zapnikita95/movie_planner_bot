@@ -1556,11 +1556,21 @@ def search_movies(query, top_k=15):
             
             logger.info(f"[SEARCH MOVIES] Найдено фильмов: режиссёр+все актёры={len(movies_with_director_and_all_actors)}, режиссёр+отдельные актёры={len(movies_with_director_and_some_actors)}, все актёры без режиссёра={len(movies_with_all_actors_no_director)}, отдельные актёры без режиссёра={len(movies_with_some_actors_no_director)}")
             
-            # Объединяем в правильном порядке приоритетов
-            all_movie_indices = (movies_with_director_and_all_actors + 
-                                movies_with_director_and_some_actors + 
-                                movies_with_all_actors_no_director + 
-                                movies_with_some_actors_no_director)
+            # ОПТИМИЗАЦИЯ: Ограничиваем количество фильмов для переранжирования
+            # Переранжируем только топ-N фильмов, чтобы не генерировать эмбеддинги для всех (это очень медленно)
+            MAX_FILMS_FOR_RERANKING = 50  # Максимум фильмов для переранжирования (оптимизация производительности)
+            
+            # Объединяем в правильном порядке приоритетов (все приоритеты до лимита)
+            all_movie_indices_full = (movies_with_director_and_all_actors + 
+                                     movies_with_director_and_some_actors + 
+                                     movies_with_all_actors_no_director + 
+                                     movies_with_some_actors_no_director)
+            
+            if len(all_movie_indices_full) > MAX_FILMS_FOR_RERANKING:
+                all_movie_indices = all_movie_indices_full[:MAX_FILMS_FOR_RERANKING]
+                logger.info(f"[SEARCH MOVIES] Ограничено количество фильмов для переранжирования: {len(all_movie_indices)} из {len(all_movie_indices_full)}")
+            else:
+                all_movie_indices = all_movie_indices_full
             
             if all_movie_indices:
                 # Ранжируем найденные фильмы по семантическому сходству с запросом
@@ -1660,8 +1670,19 @@ def search_movies(query, top_k=15):
             
             logger.info(f"[SEARCH MOVIES] Найдено фильмов с отдельными актёрами: {len(movies_with_some_actors)}")
             
-            # Объединяем результаты: сначала фильмы со всеми актёрами, потом с отдельными
-            all_movie_indices = movies_with_all_actors + movies_with_some_actors
+            # ОПТИМИЗАЦИЯ: Ограничиваем количество фильмов для переранжирования
+            # Переранжируем только топ-N фильмов, чтобы не генерировать эмбеддинги для всех (это очень медленно)
+            # Берём все фильмы со всеми актёрами + ограниченное количество с отдельными актёрами
+            MAX_FILMS_FOR_RERANKING = 50  # Максимум фильмов для переранжирования (оптимизация производительности)
+            
+            if len(movies_with_some_actors) > MAX_FILMS_FOR_RERANKING - len(movies_with_all_actors):
+                # Ограничиваем количество фильмов с отдельными актёрами
+                movies_with_some_actors_limited = movies_with_some_actors[:MAX_FILMS_FOR_RERANKING - len(movies_with_all_actors)]
+                logger.info(f"[SEARCH MOVIES] Ограничено количество фильмов для переранжирования: {len(movies_with_all_actors)} со всеми актёрами + {len(movies_with_some_actors_limited)} с отдельными (всего {len(movies_with_all_actors) + len(movies_with_some_actors_limited)} из {len(movies_with_all_actors) + len(movies_with_some_actors)})")
+                all_movie_indices = movies_with_all_actors + movies_with_some_actors_limited
+            else:
+                # Объединяем все результаты: сначала фильмы со всеми актёрами, потом с отдельными
+                all_movie_indices = movies_with_all_actors + movies_with_some_actors
             
             if all_movie_indices:
                 # Ранжируем найденные фильмы по семантическому сходству с запросом
@@ -1735,6 +1756,13 @@ def search_movies(query, top_k=15):
                 logger.info(f"[SEARCH MOVIES] Найдено ВСЕГО фильмов с {'актёром' if is_actor else 'режиссёром'} '{actor_name_for_search}': {len(actor_movie_indices)}")
                 
                 if actor_movie_indices:
+                    # ОПТИМИЗАЦИЯ: Ограничиваем количество фильмов для переранжирования
+                    MAX_FILMS_FOR_RERANKING_SINGLE = 50  # Максимум фильмов для переранжирования для одного актёра
+                    
+                    if len(actor_movie_indices) > MAX_FILMS_FOR_RERANKING_SINGLE:
+                        actor_movie_indices = actor_movie_indices[:MAX_FILMS_FOR_RERANKING_SINGLE]
+                        logger.info(f"[SEARCH MOVIES] Ограничено количество фильмов для переранжирования: {len(actor_movie_indices)} из {len(actor_movie_indices) + (len(actor_movie_indices) - MAX_FILMS_FOR_RERANKING_SINGLE)}")
+                    
                     actor_movie_descriptions = []
                     valid_indices = []
                     
