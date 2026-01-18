@@ -1776,6 +1776,31 @@ def main_text_handler(message):
         # Админские состояния обрабатываются через handle_admin в state_handlers.py
     )
     
+    # ОСОБЫЙ СЛУЧАЙ: Если это "ДА, УДАЛИТЬ" для clean команды, пропускаем - обработает handle_clean_reply
+    text_upper = text.strip().upper() if text else ""
+    normalized_clean_text = text_upper.replace(' ', '').replace(',', '').replace('.', '').upper()
+    if normalized_clean_text == 'ДАУДАЛИТЬ':
+        # Проверяем, есть ли активное голосование или состояние для clean
+        from moviebot.bot.handlers.settings.clean import clean_chat_text_votes
+        from moviebot.states import user_private_handler_state
+        
+        # Для личных чатов проверяем user_private_handler_state
+        if is_private:
+            if user_id in user_private_handler_state:
+                state = user_private_handler_state[user_id]
+                handler_name = state.get('handler')
+                if handler_name in ['clean_chat', 'clean_user', 'clean_imported_ratings']:
+                    logger.info(f"[MAIN TEXT HANDLER] Пропускаем 'ДА, УДАЛИТЬ' для clean handler (личный чат)")
+                    return
+        
+        # Для групп проверяем clean_chat_text_votes и user_clean_state
+        if user_id in user_clean_state or any(
+            vote_state['chat_id'] == chat_id and user_id in vote_state['active_members']
+            for vote_state in clean_chat_text_votes.values()
+        ):
+            logger.info(f"[MAIN TEXT HANDLER] Пропускаем 'ДА, УДАЛИТЬ' для clean handler (группа)")
+            return
+    
     # Пропускаем ответные сообщения об импорте - у них есть отдельный handler
     if message.reply_to_message:
         reply_text = message.reply_to_message.text or ""
