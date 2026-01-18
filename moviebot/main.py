@@ -148,6 +148,7 @@ from moviebot.scheduler import (
     check_weekend_schedule,
     check_premiere_reminder,
     check_and_send_random_events,
+    check_unwatched_films_notification,
     choose_random_participant,  # Оставлено для обратной совместимости
     start_dice_game  # Оставлено для обратной совместимости
 )
@@ -175,6 +176,8 @@ scheduler.add_job(check_weekend_schedule, 'cron', day_of_week='fri', hour=19, mi
 scheduler.add_job(check_premiere_reminder, 'cron', day_of_week='thu', hour=19, minute=0, timezone=PLANS_TZ, id='check_premiere_reminder')
 # ПРИОРИТЕТ 3: Случайные события - пт/сб/вс (проверяется внутри функции)
 scheduler.add_job(check_and_send_random_events, 'cron', day_of_week='fri-sun', hour=20, minute=0, timezone=PLANS_TZ, id='check_and_send_random_events')
+# ПРИОРИТЕТ 4: Уведомление о непросмотренных фильмах - воскресенье и вторник (проверяется внутри функции)
+scheduler.add_job(check_unwatched_films_notification, 'cron', day_of_week='tue,sun', hour=15, minute=0, timezone=PLANS_TZ, id='check_unwatched_films_notification')
 
 # Регистрация ВСЕХ хэндлеров
 logger.info("=" * 80)

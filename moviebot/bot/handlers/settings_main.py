@@ -1053,7 +1053,7 @@ def handle_reminder_callback(call):
             return
         
         reminder_action = action_parts[1]  # "disable" или "enable"
-        reminder_type = action_parts[2]  # "weekend_films", "cinema_premieres", "random_events"
+        reminder_type = action_parts[2]  # "weekend_films", "cinema_premieres", "random_events", "unwatched_films"
         
         logger.info(f"[REMINDER CALLBACK] action={reminder_action}, type={reminder_type}, chat_id={chat_id}, user_id={user_id}")
         
@@ -1070,6 +1070,10 @@ def handle_reminder_callback(call):
             setting_key = 'random_events_enabled'
             new_value = 'true' if reminder_action == 'enable' else 'false'
             success_text = "Случайные события включены" if reminder_action == 'enable' else "Случайные события отменены"
+        elif reminder_type == "unwatched_films":
+            setting_key = 'reminder_unwatched_films_disabled'
+            new_value = 'true' if reminder_action == 'disable' else 'false'
+            success_text = "Уведомления о непросмотренных фильмах отменены" if reminder_action == 'disable' else "Уведомления о непросмотренных фильмах включены"
         else:
             bot.answer_callback_query(call.id, "Неизвестный тип напоминания", show_alert=True)
             return
@@ -1090,7 +1094,7 @@ def handle_reminder_callback(call):
             
             # Обновляем меню регулярных напоминаний
             with db_lock:
-                cursor_local_rem2.execute("SELECT key, value FROM settings WHERE chat_id = %s AND key IN ('reminder_weekend_films_disabled', 'reminder_cinema_premieres_disabled', 'random_events_enabled')", (chat_id,))
+                cursor_local_rem2.execute("SELECT key, value FROM settings WHERE chat_id = %s AND key IN ('reminder_weekend_films_disabled', 'reminder_cinema_premieres_disabled', 'random_events_enabled', 'reminder_unwatched_films_disabled')", (chat_id,))
                 reminder_rows = cursor_local_rem2.fetchall()
         finally:
             try:

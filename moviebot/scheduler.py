@@ -877,6 +877,8 @@ def clean_home_plans():
 
                 weekend_rows = cursor_local.fetchall()
 
+                # Группируем по чатам для отправки одного сообщения на чат
+                weekend_plans_by_chat = {}
                 for row in weekend_rows:
                     plan_id = row.get('id') if isinstance(row, dict) else row[0]
                     film_id = row.get('film_id') if isinstance(row, dict) else row[1]
@@ -884,17 +886,48 @@ def clean_home_plans():
                     title = row.get('title') if isinstance(row, dict) else row[3]
                     link = row.get('link') if isinstance(row, dict) else row[4]
                     
-                    cursor_local.execute('DELETE FROM plans WHERE id = %s', (plan_id,))
-                    deleted_count += 1
+                    if chat_id not in weekend_plans_by_chat:
+                        weekend_plans_by_chat[chat_id] = []
+                    weekend_plans_by_chat[chat_id].append({
+                        'plan_id': plan_id,
+                        'film_id': film_id,
+                        'title': title,
+                        'link': link
+                    })
+                
+                # Удаляем планы и отправляем сообщения
+                for chat_id, plans in weekend_plans_by_chat.items():
+                    # Удаляем все планы для этого чата
+                    for plan_info in plans:
+                        cursor_local.execute('DELETE FROM plans WHERE id = %s', (plan_info['plan_id'],))
+                        deleted_count += 1
                     
-                    if bot:
+                    # Отправляем одно сообщение на чат с кнопками для всех фильмов
+                    if bot and plans:
                         try:
-                            message_text = f"📅 План на фильм <b>{title}</b> удалён (выходные прошли)."
-                            if link:
-                                message_text += f"\n\n{link}"
-                            bot.send_message(chat_id, message_text, parse_mode='HTML')
-                        except:
-                            pass
+                            from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+                            
+                            if len(plans) == 1:
+                                message_text = f"📅 План на фильм <b>{plans[0]['title']}</b> удалён (выходные прошли)."
+                            else:
+                                message_text = f"📅 Удалены планы на {len(plans)} фильмов (выходные прошли):"
+                            
+                            markup = InlineKeyboardMarkup(row_width=1)
+                            for plan_info in plans:
+                                if plan_info.get('link'):
+                                    button_text = f"🎬 {plan_info['title']}"
+                                    if len(button_text) > 64:
+                                        button_text = button_text[:61] + "..."
+                                    markup.add(InlineKeyboardButton(button_text, url=plan_info['link']))
+                            
+                            # Отправляем сообщение с кнопками, если они есть
+                            if markup.keyboard:  # Проверяем, что есть кнопки
+                                bot.send_message(chat_id, message_text, parse_mode='HTML', reply_markup=markup)
+                            else:
+                                # Если кнопок нет (нет ссылок), отправляем без кнопок
+                                bot.send_message(chat_id, message_text, parse_mode='HTML')
+                        except Exception as e:
+                            logger.error(f"[CLEAN HOME PLANS] Ошибка отправки сообщения для выходных: {e}", exc_info=True)
                 
                 logger.info(f"Очищены планы дома на выходные: {len(weekend_rows)} планов")
             
@@ -907,28 +940,69 @@ def clean_home_plans():
 
             rows = cursor_local.fetchall()
 
+            # Группируем планы по чатам и проверяем оценки
+            plans_by_chat = {}
             for row in rows:
-                # RealDictCursor возвращает словари, но поддерживает доступ по индексу
                 plan_id = row.get('id') if isinstance(row, dict) else row[0]
                 film_id = row.get('film_id') if isinstance(row, dict) else row[1]
                 chat_id = row.get('chat_id') if isinstance(row, dict) else row[2]
 
                 # Проверяем, есть ли оценки по фильму
                 cursor_local.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
-
                 count_row = cursor_local.fetchone()
-
                 count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
 
                 if count == 0:
-                    cursor_local.execute('DELETE FROM plans WHERE id = %s', (plan_id,))
+                    # Получаем информацию о фильме для кнопки
+                    cursor_local.execute('SELECT title, link FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                    movie_row = cursor_local.fetchone()
+                    
+                    if movie_row:
+                        title = movie_row.get('title') if isinstance(movie_row, dict) else movie_row[0]
+                        link = movie_row.get('link') if isinstance(movie_row, dict) else movie_row[1]
+                        
+                        if chat_id not in plans_by_chat:
+                            plans_by_chat[chat_id] = []
+                        plans_by_chat[chat_id].append({
+                            'plan_id': plan_id,
+                            'film_id': film_id,
+                            'title': title,
+                            'link': link
+                        })
+
+            # Удаляем планы и отправляем сообщения
+            for chat_id, plans in plans_by_chat.items():
+                # Удаляем все планы для этого чата
+                for plan_info in plans:
+                    cursor_local.execute('DELETE FROM plans WHERE id = %s', (plan_info['plan_id'],))
                     deleted_count += 1
 
-                    if bot:
-                        try:
-                            bot.send_message(chat_id, f"📅 План на фильм удалён (нет оценок за вчера).")
-                        except:
-                            pass
+                # Отправляем одно сообщение на чат с кнопками для всех фильмов
+                if bot and plans:
+                    try:
+                        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+                        
+                        if len(plans) == 1:
+                            message_text = f"📅 План на фильм удалён (нет оценок за вчера)."
+                        else:
+                            message_text = f"📅 Удалены планы на {len(plans)} фильмов (нет оценок за вчера):"
+                        
+                        markup = InlineKeyboardMarkup(row_width=1)
+                        for plan_info in plans:
+                            if plan_info.get('link'):
+                                button_text = f"🎬 {plan_info['title']}"
+                                if len(button_text) > 64:
+                                    button_text = button_text[:61] + "..."
+                                markup.add(InlineKeyboardButton(button_text, url=plan_info['link']))
+                        
+                        # Отправляем сообщение с кнопками, если они есть
+                        if markup.keyboard:  # Проверяем, что есть кнопки
+                            bot.send_message(chat_id, message_text, parse_mode='HTML', reply_markup=markup)
+                        else:
+                            # Если кнопок нет (нет ссылок), отправляем без кнопок
+                            bot.send_message(chat_id, message_text, parse_mode='HTML')
+                    except Exception as e:
+                        logger.error(f"[CLEAN HOME PLANS] Ошибка отправки сообщения: {e}", exc_info=True)
 
             conn_local.commit()
 
@@ -2905,6 +2979,213 @@ def start_dice_game():
     """УСТАРЕВШАЯ ФУНКЦИЯ: Используйте check_and_send_random_events вместо этого.
     Оставлена для обратной совместимости, но теперь просто вызывает новую функцию."""
     check_and_send_random_events()
+
+
+def check_unwatched_films_notification():
+    """Проверяет и отправляет уведомления о непросмотренных фильмах пользователям с более чем 5 фильмами.
+    ПРИОРИТЕТ 4 (ниже остальных): Выполняется только в воскресенье или вторник, после 14:00 по местному времени.
+    Примерно раз в 10 дней, не более 1 сообщения в день."""
+    from moviebot.database.db_connection import get_db_connection, get_db_cursor
+    
+    if not bot:
+        return
+    
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    
+    try:
+        now_utc = datetime.now(PLANS_TZ)
+        current_weekday = now_utc.weekday()
+        
+        # Проверяем только в воскресенье (6) или вторник (1)
+        if current_weekday not in [1, 6]:  # 1=вторник, 6=воскресенье
+            return
+        
+        # Получаем всех уникальных пользователей из таблицы movies
+        # Используем chat_id = user_id для личных чатов, либо user_id из stats для групповых
+        with db_lock:
+            # Получаем пользователей из личных чатов (chat_id = user_id)
+            cursor_local.execute("""
+                SELECT DISTINCT chat_id as user_id, chat_id as chat_id
+                FROM movies
+                WHERE chat_id > 0
+            """)
+            personal_users = cursor_local.fetchall()
+            
+            # Получаем пользователей из групповых чатов
+            cursor_local.execute("""
+                SELECT DISTINCT user_id, chat_id
+                FROM stats
+                WHERE user_id IS NOT NULL AND chat_id < 0
+            """)
+            group_users = cursor_local.fetchall()
+        
+        all_users = []
+        for row in personal_users:
+            if isinstance(row, dict):
+                all_users.append((row.get('user_id'), row.get('chat_id')))
+            else:
+                all_users.append((row[0], row[0]))
+        
+        for row in group_users:
+            if isinstance(row, dict):
+                all_users.append((row.get('user_id'), row.get('chat_id')))
+            else:
+                all_users.append((row[0], row[1]))
+        
+        # Убираем дубликаты
+        all_users = list(set(all_users))
+        
+        for user_id, chat_id in all_users:
+            try:
+                # Проверяем, что это валидный пользователь
+                if not user_id or not chat_id:
+                    continue
+                
+                # Проверяем часовой пояс пользователя
+                user_tz = get_user_timezone_or_default(user_id)
+                now_user = now_utc.astimezone(user_tz)
+                
+                # Проверяем, что время во второй половине дня (после 14:00)
+                if now_user.hour < 14:
+                    continue
+                
+                # Проверяем, не слишком поздно (до 22:00, чтобы не мешать спать)
+                if now_user.hour >= 22:
+                    continue
+                
+                # Проверяем, не отключены ли уведомления о непросмотренных фильмах
+                with db_lock:
+                    cursor_local.execute("""
+                        SELECT value FROM settings 
+                        WHERE chat_id = %s AND key = 'reminder_unwatched_films_disabled'
+                    """, (chat_id,))
+                    reminder_disabled_row = cursor_local.fetchone()
+                if reminder_disabled_row:
+                    is_disabled = reminder_disabled_row.get('value') if isinstance(reminder_disabled_row, dict) else reminder_disabled_row[0]
+                    if is_disabled == 'true':
+                        continue
+                
+                # Проверяем, не было ли сегодня других уведомлений
+                today = now_utc.date()
+                with db_lock:
+                    cursor_local.execute("""
+                        SELECT id FROM event_notifications 
+                        WHERE chat_id = %s 
+                        AND sent_date = %s
+                    """, (chat_id, today))
+                    today_notifications = cursor_local.fetchone()
+                
+                if today_notifications:
+                    continue
+                
+                # Проверяем, когда последний раз отправлялось это уведомление
+                with db_lock:
+                    cursor_local.execute("""
+                        SELECT value FROM settings 
+                        WHERE chat_id = %s AND key = 'last_unwatched_films_notification_date'
+                    """, (chat_id,))
+                    last_date_row = cursor_local.fetchone()
+                
+                should_send = True
+                if last_date_row:
+                    last_date_str = last_date_row.get('value') if isinstance(last_date_row, dict) else last_date_row[0]
+                    try:
+                        last_date = datetime.strptime(last_date_str, '%Y-%m-%d').date()
+                        days_since = (today - last_date).days
+                        # Отправляем примерно раз в 10 дней (8-12 дней - случайный интервал)
+                        if days_since < 8:
+                            should_send = False
+                        elif days_since > 12:
+                            should_send = True
+                        else:
+                            # В интервале 8-12 дней отправляем с вероятностью 1/5 (20%)
+                            import random
+                            should_send = random.random() < 0.2
+                    except:
+                        pass
+                
+                if not should_send:
+                    continue
+                
+                # Проверяем количество непросмотренных фильмов (watched = FALSE)
+                # Работает и для личных чатов, и для групповых
+                unwatched_count = 0
+                conn_count = get_db_connection()
+                cursor_count = None
+                try:
+                    with db_lock:
+                        cursor_count = conn_count.cursor()
+                        cursor_count.execute("""
+                            SELECT COUNT(*) FROM movies
+                            WHERE chat_id = %s AND watched = FALSE
+                        """, (chat_id,))
+                        count_row = cursor_count.fetchone()
+                    unwatched_count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
+                finally:
+                    if cursor_count:
+                        try:
+                            cursor_count.close()
+                        except:
+                            pass
+                    try:
+                        conn_count.close()
+                    except:
+                        pass
+                
+                # Отправляем только если более 5 непросмотренных фильмов
+                if unwatched_count <= 5:
+                    continue
+                
+                # Отправляем уведомление
+                try:
+                    text = "👋🏻 Привет!\n\n"
+                    text += "У вас есть несколько фильмов, которые вы пока не посмотрели. Может, пора выбрать один из них?"
+                    
+                    # Создаем кнопки: рандом по базе и отключение уведомлений
+                    welcome_markup = InlineKeyboardMarkup(row_width=1)
+                    welcome_markup.add(InlineKeyboardButton("🎲 Рандом по базе", callback_data="rand_mode:database"))
+                    welcome_markup.add(InlineKeyboardButton("❌ Отключить такие уведомления", callback_data="reminder:disable:unwatched_films"))
+                    
+                    bot.send_message(
+                        chat_id,
+                        text,
+                        reply_markup=welcome_markup,
+                        parse_mode='HTML'
+                    )
+                    
+                    # Отмечаем событие
+                    mark_event_sent(chat_id, 'unwatched_films_notification')
+                    
+                    # Сохраняем дату последнего уведомления
+                    with db_lock:
+                        cursor_local.execute('''
+                            INSERT INTO settings (chat_id, key, value)
+                            VALUES (%s, 'last_unwatched_films_notification_date', %s)
+                            ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+                        ''', (chat_id, today.isoformat()))
+                        conn_local.commit()
+                    
+                    logger.info(f"[UNWATCHED FILMS] Отправлено уведомление пользователю {user_id} в чат {chat_id} (непросмотренных: {unwatched_count})")
+                except Exception as e:
+                    logger.error(f"[UNWATCHED FILMS] Ошибка отправки уведомления пользователю {user_id}: {e}", exc_info=True)
+            
+            except Exception as e:
+                logger.error(f"[UNWATCHED FILMS] Ошибка обработки пользователя {user_id}: {e}", exc_info=True)
+                continue
+    
+    except Exception as e:
+        logger.error(f"[UNWATCHED FILMS] Ошибка в check_unwatched_films_notification: {e}", exc_info=True)
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
+
 
 def update_series_status_cache():
     """Фоновая задача: обновляет статусы сериалов раз в день"""
