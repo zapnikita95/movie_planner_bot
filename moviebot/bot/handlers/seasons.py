@@ -408,27 +408,72 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
         # Создаем кнопки как в примере
         markup = InlineKeyboardMarkup(row_width=1)
         
-        # Проверяем, есть ли просмотренные сериалы - показываем кнопку даже если список пуст
+        # Проверяем, есть ли просмотренные сериалы - используем ту же логику, что и в основном списке
         has_access = has_notifications_access(chat_id, user_id)
         if has_access:
+            # Проверяем реально просмотренные сериалы (по эпизодам)
+            watched_count = 0
             conn_check = get_db_connection()
-            cursor_check = get_db_cursor()
+            cursor_check = None
             try:
                 with db_lock:
-                    cursor_check.execute('''
-                        SELECT COUNT(*) FROM movies 
-                        WHERE chat_id = %s AND is_series = 1 AND watched = 1
-                    ''', (chat_id,))
-                    watched_count_row = cursor_check.fetchone()
-                    watched_count = watched_count_row.get('count') if isinstance(watched_count_row, dict) else (watched_count_row[0] if watched_count_row else 0)
+                    cursor_check = conn_check.cursor()
+                    cursor_check.execute('SELECT id, kp_id FROM movies WHERE chat_id = %s AND is_series = 1', (chat_id,))
+                    all_series_rows = cursor_check.fetchall()
+                
+                # Для каждого сериала проверяем, просмотрен ли он полностью
+                for row in all_series_rows:
+                    film_id_check = row.get('id') if isinstance(row, dict) else row[0]
+                    kp_id_check = row.get('kp_id') if isinstance(row, dict) else row[1]
+                    
+                    is_airing_check, _ = get_series_airing_status(kp_id_check)
+                    if is_airing_check:
+                        continue
+                    
+                    seasons_data_check = get_seasons_data(kp_id_check)
+                    if not seasons_data_check:
+                        continue
+                    
+                    watched_set_check = set()
+                    conn_watch_check = get_db_connection()
+                    cursor_watch_check = None
+                    try:
+                        with db_lock:
+                            cursor_watch_check = conn_watch_check.cursor()
+                            cursor_watch_check.execute('''
+                                SELECT season_number, episode_number FROM series_tracking 
+                                WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                            ''', (chat_id, film_id_check, user_id))
+                            for w_row in cursor_watch_check.fetchall():
+                                s_num = str(w_row.get('season_number') if isinstance(w_row, dict) else w_row[0])
+                                e_num = str(w_row.get('episode_number') if isinstance(w_row, dict) else w_row[1])
+                                watched_set_check.add((s_num, e_num))
+                    finally:
+                        if cursor_watch_check:
+                            try:
+                                cursor_watch_check.close()
+                            except:
+                                pass
+                        try:
+                            conn_watch_check.close()
+                        except:
+                            pass
+                    
+                    total_ep_check, watched_ep_check = count_episodes_for_watch_check(
+                        seasons_data_check, False, watched_set_check, chat_id, film_id_check, user_id
+                    )
+                    
+                    if total_ep_check == watched_ep_check and total_ep_check > 0:
+                        watched_count += 1
                 
                 if watched_count > 0:
                     markup.add(InlineKeyboardButton(f"✅ Просмотренные ({watched_count})", callback_data="watched_series_list"))
             finally:
-                try:
-                    cursor_check.close()
-                except:
-                    pass
+                if cursor_check:
+                    try:
+                        cursor_check.close()
+                    except:
+                        pass
                 try:
                     conn_check.close()
                 except:
@@ -563,28 +608,78 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
 
         markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{int(kp_id)}"))
 
-    # Кнопка "Просмотренные" - всегда на каждой странице
+    # Кнопка "Просмотренные" - показываем только если есть реально просмотренные сериалы
     has_access = has_notifications_access(chat_id, user_id)
     if has_access:
-        # Проверяем, есть ли просмотренные сериалы
+        # Проверяем реально просмотренные сериалы (по эпизодам, а не по полю watched)
+        # Используем ту же логику, что и в show_completed_series_list
+        watched_count = 0
         conn_check = get_db_connection()
-        cursor_check = get_db_cursor()
+        cursor_check = None
         try:
             with db_lock:
-                cursor_check.execute('''
-                    SELECT COUNT(*) FROM movies 
-                    WHERE chat_id = %s AND is_series = 1 AND watched = 1
-                ''', (chat_id,))
-                watched_count_row = cursor_check.fetchone()
-                watched_count = watched_count_row.get('count') if isinstance(watched_count_row, dict) else (watched_count_row[0] if watched_count_row else 0)
+                cursor_check = conn_check.cursor()
+                # Получаем все сериалы пользователя
+                cursor_check.execute('SELECT id, kp_id FROM movies WHERE chat_id = %s AND is_series = 1', (chat_id,))
+                all_series_rows = cursor_check.fetchall()
+            
+            # Для каждого сериала проверяем, просмотрен ли он полностью
+            for row in all_series_rows:
+                film_id_check = row.get('id') if isinstance(row, dict) else row[0]
+                kp_id_check = row.get('kp_id') if isinstance(row, dict) else row[1]
+                
+                # Получаем статус выхода сериала
+                is_airing_check, _ = get_series_airing_status(kp_id_check)
+                if is_airing_check:
+                    continue  # Выпускающиеся сериалы не могут быть полностью просмотрены
+                
+                seasons_data_check = get_seasons_data(kp_id_check)
+                if not seasons_data_check:
+                    continue
+                
+                # Собираем просмотренные эпизоды
+                watched_set_check = set()
+                conn_watch_check = get_db_connection()
+                cursor_watch_check = None
+                try:
+                    with db_lock:
+                        cursor_watch_check = conn_watch_check.cursor()
+                        cursor_watch_check.execute('''
+                            SELECT season_number, episode_number FROM series_tracking 
+                            WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                        ''', (chat_id, film_id_check, user_id))
+                        for w_row in cursor_watch_check.fetchall():
+                            s_num = str(w_row.get('season_number') if isinstance(w_row, dict) else w_row[0])
+                            e_num = str(w_row.get('episode_number') if isinstance(w_row, dict) else w_row[1])
+                            watched_set_check.add((s_num, e_num))
+                finally:
+                    if cursor_watch_check:
+                        try:
+                            cursor_watch_check.close()
+                        except:
+                            pass
+                    try:
+                        conn_watch_check.close()
+                    except:
+                        pass
+                
+                # Считаем эпизоды
+                total_ep_check, watched_ep_check = count_episodes_for_watch_check(
+                    seasons_data_check, False, watched_set_check, chat_id, film_id_check, user_id
+                )
+                
+                # Если все эпизоды просмотрены - увеличиваем счетчик
+                if total_ep_check == watched_ep_check and total_ep_check > 0:
+                    watched_count += 1
             
             if watched_count > 0:
                 markup.add(InlineKeyboardButton(f"✅ Просмотренные ({watched_count})", callback_data="watched_series_list"))
         finally:
-            try:
-                cursor_check.close()
-            except:
-                pass
+            if cursor_check:
+                try:
+                    cursor_check.close()
+                except:
+                    pass
             try:
                 conn_check.close()
             except:
@@ -731,11 +826,12 @@ def show_completed_series_list(chat_id: int, user_id: int, message_id: int = Non
                 except:
                     pass
             
-            # Условие: все эпизоды просмотрены, сериал завершён, есть хотя бы один эпизод, И поле watched = 1
-            if total_ep == watched_ep and total_ep > 0 and not is_airing and movie_watched:
+            # Условие: все эпизоды просмотрены, сериал завершён, есть хотя бы один эпизод
+            # НЕ требуем movie_watched, так как оно может быть не обновлено
+            if total_ep == watched_ep and total_ep > 0 and not is_airing:
                 button_text = f"✅ {title}"
                 completed_series.append((kp_id, button_text))
-                logger.info(f"[SHOW_COMPLETED_SERIES_LIST] Сериал {title} добавлен в просмотренные")
+                logger.info(f"[SHOW_COMPLETED_SERIES_LIST] Сериал {title} добавлен в просмотренные: total={total_ep}, watched={watched_ep}")
             else:
                 logger.info(f"[SHOW_COMPLETED_SERIES_LIST] Сериал {title} НЕ завершён: total={total_ep}, watched={watched_ep}, airing={is_airing}, movie_watched={movie_watched}")
 
@@ -775,7 +871,14 @@ def show_completed_series_list(chat_id: int, user_id: int, message_id: int = Non
             edit_kwargs = common_kwargs.copy()
             edit_kwargs['message_id'] = message_id
             edit_kwargs.pop('message_thread_id', None)
-            bot.edit_message_text(**edit_kwargs)
+            try:
+                bot.edit_message_text(**edit_kwargs)
+            except Exception as edit_e:
+                # Обрабатываем ошибку "message is not modified" - это нормально
+                if "message is not modified" in str(edit_e).lower():
+                    logger.debug(f"[SHOW_COMPLETED_SERIES_LIST] Сообщение не изменилось (это нормально)")
+                else:
+                    raise
         else:
             # send_message поддерживает message_thread_id
             if message_thread_id is not None:
