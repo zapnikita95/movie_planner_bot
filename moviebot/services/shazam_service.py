@@ -1246,12 +1246,13 @@ def search_movies(query, top_k=15):
         # Загружаем топ-списки актёров и режиссёров
         top_actors_set, top_directors_set = load_top_actors_and_directors()
         
-        # Пытаемся извлечь имя актёра/режиссёра из запроса
+        # НОВАЯ ЛОГИКА: Пытаемся извлечь ВСЕ имена актёров из запроса (2+ актёра)
         # Проверяем все возможные комбинации слов (2-4 слова)
-        mentioned_actor_en = None
+        mentioned_actors_en = []  # Список всех найденных актёров
         
         # Сначала пытаемся найти в топ-списках (если они не пустые)
         if top_actors_set or top_directors_set:
+            found_names = set()  # Используем set для исключения дубликатов
             for word_count in range(2, min(5, len(query_en_words) + 1)):
                 for i in range(len(query_en_words) - word_count + 1):
                     potential_name = ' '.join(query_en_words[i:i+word_count])
@@ -1259,25 +1260,28 @@ def search_movies(query, top_k=15):
                     
                     # Проверяем в топ-актёрах (приоритет №1)
                     if top_actors_set and potential_name_normalized in top_actors_set:
-                        mentioned_actor_en = potential_name_normalized
-                        logger.info(f"[SEARCH MOVIES] Найдено имя актёра в топ-500: '{mentioned_actor_en}' ({word_count} слова)")
-                        break
+                        if potential_name_normalized not in found_names:
+                            found_names.add(potential_name_normalized)
+                            mentioned_actors_en.append(('actor', potential_name_normalized))
+                            logger.info(f"[SEARCH MOVIES] Найдено имя актёра в топ-500: '{potential_name_normalized}' ({word_count} слова)")
                     
-                    # Проверяем в топ-режиссёрах (приоритет №2, только если актёра не нашли)
-                    if not mentioned_actor_en and top_directors_set and potential_name_normalized in top_directors_set:
-                        mentioned_actor_en = potential_name_normalized
-                        logger.info(f"[SEARCH MOVIES] Найдено имя режиссёра в топ-100: '{mentioned_actor_en}' ({word_count} слова)")
-                        break
-                
-                if mentioned_actor_en:
-                    break
+                    # Проверяем в топ-режиссёрах (приоритет №2, только если не актёр)
+                    elif top_directors_set and potential_name_normalized in top_directors_set:
+                        # Режиссёры добавляем только если это не актёр (проверяем, не найден ли как актёр)
+                        if potential_name_normalized not in found_names:
+                            found_names.add(potential_name_normalized)
+                            mentioned_actors_en.append(('director', potential_name_normalized))
+                            logger.info(f"[SEARCH MOVIES] Найдено имя режиссёра в топ-100: '{potential_name_normalized}' ({word_count} слова)")
         
         # Если не нашли в топ-списках, НЕ предполагаем что это актёр
         # Топ-список актёров - это единственный источник истины для определения актёров
-        if not mentioned_actor_en:
-            logger.info(f"[SEARCH MOVIES] Имя актёра/режиссёра не найдено в топ-списках - не предполагаем что это актёр")
+        if not mentioned_actors_en:
+            logger.info(f"[SEARCH MOVIES] Имена актёров/режиссёров не найдены в топ-списках - не предполагаем что это актёры")
         
-        logger.info(f"[SEARCH MOVIES] Упомянут актёр/режиссёр? {bool(mentioned_actor_en)}, имя (en): {mentioned_actor_en}")
+        logger.info(f"[SEARCH MOVIES] Упомянуты актёры/режиссёры? {len(mentioned_actors_en) > 0}, найдено: {[name for _, name in mentioned_actors_en]}")
+        
+        # Для обратной совместимости сохраняем первый найденный актёр
+        mentioned_actor_en = mentioned_actors_en[0][1] if mentioned_actors_en and mentioned_actors_en[0][0] == 'actor' else None
         
         # Определяем жанры на основе ключевых слов и облаков смыслов
         query_en_words = query_en_lower.split()
@@ -1340,17 +1344,107 @@ def search_movies(query, top_k=15):
         search_k = int(top_k * fuzziness_multiplier)
         logger.info(f"[SEARCH MOVIES] FUZZINESS_LEVEL={FUZZINESS_LEVEL}, multiplier={fuzziness_multiplier:.2f}, search_k={search_k}")
         
-        # Если актёр/режиссёр упомянут — сначала находим ВСЕ его фильмы во всей базе
-        # Затем ранжируем их по контексту запроса
+        # НОВАЯ ЛОГИКА: Если найдено 2+ актёра — сначала находим фильмы со ВСЕМИ актёрами, затем с отдельными
+        # Если найден 1 актёр — ищем все его фильмы
+        # Если актёры не найдены — обычный поиск
         candidate_indices = []
         candidate_distances = []
-        actor_movie_indices = []  # Индексы всех фильмов с актёром (для последующего ранжирования)
+        movies_with_all_actors = []  # Индексы фильмов со ВСЕМИ указанными актёрами (максимальный приоритет)
+        movies_with_some_actors = []  # Индексы фильмов с отдельными актёрами (ниже приоритет)
         
-        if mentioned_actor_en:
-            # Нормализуем имя для поиска (убираем пунктуацию, приводим к нижнему регистру)
-            actor_name_for_search = _normalize_text(mentioned_actor_en)
+        # Фильтруем только актёров (режиссёры обрабатываются отдельно в старой логике для обратной совместимости)
+        mentioned_actors_only = [name for role, name in mentioned_actors_en if role == 'actor']
+        
+        if len(mentioned_actors_only) >= 2:
+            # НОВАЯ ЛОГИКА: 2+ актёра — ищем фильмы со ВСЕМИ актёрами, затем с отдельными
+            logger.info(f"[SEARCH MOVIES] Найдено {len(mentioned_actors_only)} актёров: {mentioned_actors_only}")
+            logger.info(f"[SEARCH MOVIES] Сначала ищем фильмы со ВСЕМИ указанными актёрами (максимальный приоритет)...")
             
-            # Проверяем, является ли имя актёром или режиссёром из топ-списков
+            # Нормализуем все имена для поиска
+            actors_normalized = [_normalize_text(name) for name in mentioned_actors_only]
+            
+            # Ищем фильмы со ВСЕМИ актёрами (высший приоритет)
+            for idx in range(len(movies)):
+                row = movies.iloc[idx]
+                if 'actors_str' in row.index:
+                    actors_str = row.get('actors_str', '')
+                    if pd.notna(actors_str):
+                        actors_str_normalized = _normalize_text(str(actors_str))
+                        # Проверяем, есть ли ВСЕ актёры в списке
+                        all_found = all(actor_name in actors_str_normalized for actor_name in actors_normalized)
+                        if all_found:
+                            movies_with_all_actors.append(idx)
+            
+            logger.info(f"[SEARCH MOVIES] Найдено фильмов со ВСЕМИ указанными актёрами: {len(movies_with_all_actors)}")
+            
+            # Затем ищем фильмы с отдельными актёрами (ниже приоритет)
+            logger.info(f"[SEARCH MOVIES] Теперь ищем фильмы с отдельными актёрами...")
+            for idx in range(len(movies)):
+                if idx in movies_with_all_actors:
+                    continue  # Пропускаем фильмы, которые уже найдены
+                
+                row = movies.iloc[idx]
+                if 'actors_str' in row.index:
+                    actors_str = row.get('actors_str', '')
+                    if pd.notna(actors_str):
+                        actors_str_normalized = _normalize_text(str(actors_str))
+                        # Проверяем, есть ли хотя бы один актёр
+                        any_found = any(actor_name in actors_str_normalized for actor_name in actors_normalized)
+                        if any_found:
+                            movies_with_some_actors.append(idx)
+            
+            logger.info(f"[SEARCH MOVIES] Найдено фильмов с отдельными актёрами: {len(movies_with_some_actors)}")
+            
+            # Объединяем результаты: сначала фильмы со всеми актёрами, потом с отдельными
+            all_movie_indices = movies_with_all_actors + movies_with_some_actors
+            
+            if all_movie_indices:
+                # Ранжируем найденные фильмы по семантическому сходству с запросом
+                all_movie_descriptions = []
+                valid_indices = []
+                
+                for idx in all_movie_indices:
+                    row = movies.iloc[idx]
+                    description = row.get('description', '')
+                    if pd.notna(description) and description:
+                        all_movie_descriptions.append(description)
+                        valid_indices.append(idx)
+                
+                if all_movie_descriptions:
+                    logger.info(f"[SEARCH MOVIES] Генерируем эмбеддинги для {len(all_movie_descriptions)} фильмов с актёрами...")
+                    all_movie_embeddings = model.encode(all_movie_descriptions, convert_to_numpy=True, normalize_embeddings=False, batch_size=int(os.getenv('EMBEDDINGS_BATCH_SIZE', '64')))
+                    
+                    # Вычисляем расстояния до запроса
+                    query_emb_flat = query_emb[0]
+                    distances = []
+                    for emb in all_movie_embeddings:
+                        dot_product = np.dot(query_emb_flat, emb)
+                        norm_query = np.linalg.norm(query_emb_flat)
+                        norm_emb = np.linalg.norm(emb)
+                        if norm_query > 0 and norm_emb > 0:
+                            cosine_sim = dot_product / (norm_query * norm_emb)
+                            distance = 1.0 - cosine_sim
+                        else:
+                            distance = 1.0
+                        distances.append(distance)
+                    
+                    # Сортируем по расстоянию (ближайшие первыми)
+                    sorted_pairs = sorted(zip(valid_indices, distances), key=lambda x: x[1])
+                    candidate_indices = [idx for idx, _ in sorted_pairs]
+                    candidate_distances = [dist for _, dist in sorted_pairs]
+                    
+                    logger.info(f"[SEARCH MOVIES] Отранжировано {len(candidate_indices)} фильмов с актёрами по семантическому сходству")
+                else:
+                    logger.warning(f"[SEARCH MOVIES] Не найдено описаний для фильмов с актёрами")
+                    candidate_indices = all_movie_indices
+                    candidate_distances = [0.0] * len(all_movie_indices)
+            else:
+                logger.warning(f"[SEARCH MOVIES] Не найдено фильмов с указанными актёрами")
+                mentioned_actor_en = None
+        
+        elif mentioned_actor_en:
+            # СТАРАЯ ЛОГИКА: 1 актёр — обратная совместимость
+            actor_name_for_search = _normalize_text(mentioned_actor_en)
             is_actor = top_actors_set and actor_name_for_search in top_actors_set
             is_director = top_directors_set and actor_name_for_search in top_directors_set
             
@@ -1358,19 +1452,16 @@ def search_movies(query, top_k=15):
                 logger.warning(f"[SEARCH MOVIES] Имя '{actor_name_for_search}' не найдено в топ-списках, но mentioned_actor_en не None - пропускаем фильтрацию по актёру")
                 mentioned_actor_en = None
             else:
-                # НОВАЯ ЛОГИКА: Ищем ВСЕ фильмы с этим актёром/режиссёром во всей базе
                 logger.info(f"[SEARCH MOVIES] Поиск ВСЕХ фильмов с {'актёром' if is_actor else 'режиссёром'} '{actor_name_for_search}' во всей базе...")
                 
+                actor_movie_indices = []
                 for idx in range(len(movies)):
                     row = movies.iloc[idx]
                     
-                    # ПРИОРИТЕТ №1: Актёры
                     if is_actor and 'actors_str' in row.index:
                         actors_str = row.get('actors_str', '')
                         if pd.notna(actors_str) and actor_name_for_search in _normalize_text(actors_str):
                             actor_movie_indices.append(idx)
-                    
-                    # ПРИОРИТЕТ №2: Режиссёры (только если не актёр)
                     elif is_director and not is_actor and 'director_str' in row.index:
                         director_str = row.get('director_str', '')
                         if pd.notna(director_str) and actor_name_for_search in _normalize_text(director_str):
@@ -1379,8 +1470,6 @@ def search_movies(query, top_k=15):
                 logger.info(f"[SEARCH MOVIES] Найдено ВСЕГО фильмов с {'актёром' if is_actor else 'режиссёром'} '{actor_name_for_search}': {len(actor_movie_indices)}")
                 
                 if actor_movie_indices:
-                    # Теперь ранжируем найденные фильмы по семантическому сходству с запросом
-                    # Создаём эмбеддинги для всех найденных фильмов
                     actor_movie_descriptions = []
                     valid_indices = []
                     
@@ -1395,11 +1484,9 @@ def search_movies(query, top_k=15):
                         logger.info(f"[SEARCH MOVIES] Генерируем эмбеддинги для {len(actor_movie_descriptions)} фильмов с актёром...")
                         actor_movie_embeddings = model.encode(actor_movie_descriptions, convert_to_numpy=True, normalize_embeddings=False, batch_size=int(os.getenv('EMBEDDINGS_BATCH_SIZE', '64')))
                         
-                        # Вычисляем расстояния до запроса
                         query_emb_flat = query_emb[0]
                         distances = []
                         for emb in actor_movie_embeddings:
-                            # Косинусное расстояние (1 - cosine similarity)
                             dot_product = np.dot(query_emb_flat, emb)
                             norm_query = np.linalg.norm(query_emb_flat)
                             norm_emb = np.linalg.norm(emb)
@@ -1410,7 +1497,6 @@ def search_movies(query, top_k=15):
                                 distance = 1.0
                             distances.append(distance)
                         
-                        # Сортируем по расстоянию (ближайшие первыми)
                         sorted_pairs = sorted(zip(valid_indices, distances), key=lambda x: x[1])
                         candidate_indices = [idx for idx, _ in sorted_pairs]
                         candidate_distances = [dist for _, dist in sorted_pairs]
@@ -1418,7 +1504,6 @@ def search_movies(query, top_k=15):
                         logger.info(f"[SEARCH MOVIES] Отранжировано {len(candidate_indices)} фильмов с актёром по семантическому сходству")
                     else:
                         logger.warning(f"[SEARCH MOVIES] Не найдено описаний для фильмов с актёром")
-                        # Fallback: используем все найденные индексы с нулевыми расстояниями
                         candidate_indices = actor_movie_indices
                         candidate_distances = [0.0] * len(actor_movie_indices)
                 else:
@@ -1457,15 +1542,37 @@ def search_movies(query, top_k=15):
             has_overview = row.get('has_overview', False) if 'has_overview' in row.index else False
             overview_boost = 30 if has_overview else 0  # бонус за наличие overview
             
-            # ПРИОРИТЕТ №1: Буст за полное имя актёра/режиссёра - САМЫЙ СИЛЬНЫЙ
-            # Буст зависит от позиции актёра в списке:
-            # - 1-й актёр = +1000 (колоссальный буст)
-            # - 2-5 актёры = +600 (большой буст)
-            # - 6+ актёры = +400 (обычный буст)
+            # ПРИОРИТЕТ №1: Буст за актёров/режиссёров - САМЫЙ СИЛЬНЫЙ
+            # НОВАЯ ЛОГИКА: Если 2+ актёра — фильмы со ВСЕМИ актёрами получают максимальный буст
+            # Фильмы с отдельными актёрами получают меньший буст
             actor_boost = 0
             director_boost = 0
-            if mentioned_actor_en:
-                # Нормализуем имя для поиска
+            mentioned_actors_only = [name for role, name in mentioned_actors_en if role == 'actor']
+            
+            if len(mentioned_actors_only) >= 2:
+                # НОВАЯ ЛОГИКА: 2+ актёра — проверяем, есть ли ВСЕ актёры или отдельные
+                actors_str = row.get('actors_str', '')
+                if 'actors_str' in row.index and pd.notna(actors_str):
+                    actors_normalized = _normalize_text(str(actors_str))
+                    actors_names_normalized = [_normalize_text(name) for name in mentioned_actors_only]
+                    
+                    # Проверяем, есть ли ВСЕ актёры (максимальный буст)
+                    all_actors_found = all(actor_name in actors_normalized for actor_name in actors_names_normalized)
+                    if all_actors_found:
+                        # МАКСИМАЛЬНЫЙ БУСТ для фильмов со ВСЕМИ актёрами
+                        actor_boost = 2000  # Самый высокий приоритет
+                        logger.info(f"[SEARCH MOVIES] ВСЕ актёры {mentioned_actors_only} найдены → +{actor_boost} для {imdb_id_clean}")
+                    else:
+                        # Меньший буст для фильмов с отдельными актёрами
+                        # Считаем, сколько актёров найдено
+                        found_count = sum(1 for actor_name in actors_names_normalized if actor_name in actors_normalized)
+                        if found_count > 0:
+                            # Буст пропорционален количеству найденных актёров, но меньше чем для всех
+                            actor_boost = 300 * found_count  # Например, 1 актёр = +300, 2 актёра = +600 (но меньше +2000)
+                            logger.info(f"[SEARCH MOVIES] Найдено {found_count} из {len(mentioned_actors_only)} актёров → +{actor_boost} для {imdb_id_clean}")
+            
+            elif mentioned_actor_en:
+                # СТАРАЯ ЛОГИКА: 1 актёр — обратная совместимость
                 actor_name_for_search = _normalize_text(mentioned_actor_en)
                 actors_str = row.get('actors_str', '')
                 director_str = row.get('director_str', '')
@@ -1692,13 +1799,11 @@ def search_movies(query, top_k=15):
             if results_to_check_via_api and genre_ru:
                 logger.info(f"[SEARCH MOVIES] Проверяем {len(results_to_check_via_api)} фильмов через API Кинопоиска для жанра '{genre_ru}'")
                 
-                from concurrent.futures import ThreadPoolExecutor, as_completed
                 from moviebot.api.kinopoisk_api import get_film_by_imdb_id
                 import time
                 
                 # Последовательная проверка через API с задержками (200 мс между запросами)
                 # Это безопаснее для API, чем параллельные запросы
-                import time
                 
                 for idx, (result, imdb_id) in enumerate(results_to_check_via_api):
                     # Добавляем задержку 200 мс между запросами (кроме первого)
