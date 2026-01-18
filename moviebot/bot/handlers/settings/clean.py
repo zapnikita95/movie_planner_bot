@@ -743,7 +743,7 @@ def clean_vote_callback(call):
         
         # Проверяем, что пользователь голосует за себя
         if user_id != expected_member_id:
-            bot.answer_callback_query(call.id, "❌ Это не ваша кнопка", show_alert=True)
+            bot.answer_callback_query(call.id, "Можно нажать только на своё имя для подтверждения", show_alert=True)
             return
         
         # Проверяем, есть ли голосование для этого сообщения
@@ -797,14 +797,16 @@ def clean_vote_callback(call):
             
             # Создаем FakeMessage для handle_clean_confirm_internal
             class FakeMessage:
-                def __init__(self, chat_id, user_id):
+                def __init__(self, chat_id, user_id, message_id):
                     self.chat = type('obj', (object,), {'id': chat_id})()
                     class User:
                         def __init__(self, user_id):
                             self.id = user_id
                     self.from_user = User(user_id)
+                    self.message_id = message_id
             
-            fake_msg = FakeMessage(chat_id, user_id)
+            # Используем message_id из сообщения о голосовании для reply_to
+            fake_msg = FakeMessage(chat_id, user_id, call.message.message_id)
             
             # Устанавливаем target в зависимости от action
             target = 'chat' if action == 'chat' else 'unwatched_movies'
