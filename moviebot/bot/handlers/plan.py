@@ -170,7 +170,12 @@ def process_plan(bot, user_id, chat_id, link, plan_type, day_or_date, message_da
             logger.warning(f"[PROCESS_PLAN] Не удалось показать выбор часового пояса: {tz_e}")
 
     # Формируем сообщение об успехе
-    date_str = plan_dt.strftime('%d.%m %H:%M')
+    # ВАЖНО: Убеждаемся, что plan_dt в часовом поясе пользователя перед форматированием
+    if plan_dt.tzinfo is None:
+        plan_dt_local = user_tz.localize(plan_dt)
+    else:
+        plan_dt_local = plan_dt.astimezone(user_tz)
+    date_str = plan_dt_local.strftime('%d.%m %H:%M')
     type_text = "дома" if plan_type == 'home' else "в кино"
     
     # Проверяем доступ к билетам для кнопки "Добавить билеты" (только для планов в кино)
