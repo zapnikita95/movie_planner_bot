@@ -917,7 +917,11 @@ def show_film_info_with_buttons(
             else:
                 # Проверяем доступ — функция требует user_id
                 has_access = has_notifications_access(chat_id, user_id)
-                logger.info(f"[SHOW FILM INFO] Доступ к уведомлениям: has_access={has_access}, chat_id={chat_id}, user_id={user_id}")
+                logger.info(f"[SHOW FILM INFO] Проверка подписки для сериала: kp_id={kp_id}, chat_id={chat_id}, user_id={user_id}, has_notifications_access={has_access}")
+                if has_access:
+                    logger.info(f"[SHOW FILM INFO] ✅ Кнопки сериала РАЗБЛОКИРОВАНЫ (есть подписка Уведомления или пакетная)")
+                else:
+                    logger.info(f"[SHOW FILM INFO] 🔒 Кнопки сериала ЗАБЛОКИРОВАНЫ (нет подписки Уведомления или пакетной)")
             
             # Отметка серий
             if has_access:

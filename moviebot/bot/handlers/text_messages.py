@@ -1709,8 +1709,9 @@ def save_movie_message(message):
             logger.info(f"[SAVE MESSAGE] Найдено ссылок на фильмы: {len(links)}, chat_id={chat_id}")
             
             added_count = 0
+            user_id = message.from_user.id
             for link in links:
-                if add_and_announce(link, chat_id):
+                if add_and_announce(link, chat_id, user_id=user_id):
                     added_count += 1
                     logger.info(f"[SAVE MESSAGE] Фильм обработан: {link}")
             
