@@ -425,36 +425,51 @@ def handle_rating_internal(message, rating):
 
     # Основная часть — оценка
     if film_id:
-        conn = get_db_connection()
-        cur = get_db_cursor()
+        conn_local = get_db_connection()
+        cursor_local = None
         try:
             with db_lock:
-                cur.execute('SELECT watched FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-                watched_row = cur.fetchone()
+                cursor_local = conn_local.cursor()
+                cursor_local.execute('SELECT watched FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                watched_row = cursor_local.fetchone()
                 is_watched_before = bool(watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0]) if watched_row else False
 
-                cur.execute('''
+                cursor_local.execute('''
                     INSERT INTO ratings (chat_id, film_id, user_id, rating, is_imported)
                     VALUES (%s, %s, %s, %s, FALSE)
                     ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = EXCLUDED.rating, is_imported = FALSE
                 ''', (chat_id, film_id, user_id, rating))
-                conn.commit()
+                conn_local.commit()
 
-                cur.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, film_id))
-                avg_row = cur.fetchone()
+                cursor_local.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, film_id))
+                avg_row = cursor_local.fetchone()
                 avg = avg_row.get('avg') if isinstance(avg_row, dict) else (avg_row[0] if avg_row else None)
 
-                cur.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-                kp_row = cur.fetchone()
+                cursor_local.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                kp_row = cursor_local.fetchone()
                 kp_id = str(kp_row.get('kp_id') if isinstance(kp_row, dict) else (kp_row[0] if kp_row else None))
 
             avg_str = f"{avg:.1f}" if avg else "—"
 
             if not is_watched_before:
-                with db_lock:
-                    cur.execute('UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-                    conn.commit()
-                logger.info(f"[RATE] Отмечен просмотренным")
+                conn_watch = get_db_connection()
+                cursor_watch = None
+                try:
+                    with db_lock:
+                        cursor_watch = conn_watch.cursor()
+                        cursor_watch.execute('UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                        conn_watch.commit()
+                    logger.info(f"[RATE] Отмечен просмотренным")
+                finally:
+                    if cursor_watch:
+                        try:
+                            cursor_watch.close()
+                        except:
+                            pass
+                    try:
+                        conn_watch.close()
+                    except:
+                        pass
 
             # Сообщение пользователю
             if not is_watched_before:
@@ -483,24 +498,38 @@ def handle_rating_internal(message, rating):
                         existing = None
                         link = None
                         info = None
-                        with db_lock:
-                            cur.execute('''
-                                SELECT id, title, watched, link, year, genres, description, director, actors, is_series
-                                FROM movies WHERE id = %s AND chat_id = %s
-                            ''', (film_id, chat_id))
-                            row = cur.fetchone()
-                            if row:
-                                existing = (row.get('id'), row.get('title'), row.get('watched'))
-                                info = {
-                                    'title': row.get('title'),
-                                    'year': row.get('year'),
-                                    'genres': row.get('genres'),
-                                    'description': row.get('description'),
-                                    'director': row.get('director'),
-                                    'actors': row.get('actors'),
-                                    'is_series': bool(row.get('is_series', 0))
-                                }
-                                link = row.get('link') or f"https://www.kinopoisk.ru/film/{kp_id}/"
+                        conn_info = get_db_connection()
+                        cursor_info = None
+                        try:
+                            with db_lock:
+                                cursor_info = conn_info.cursor()
+                                cursor_info.execute('''
+                                    SELECT id, title, watched, link, year, genres, description, director, actors, is_series
+                                    FROM movies WHERE id = %s AND chat_id = %s
+                                ''', (film_id, chat_id))
+                                row = cursor_info.fetchone()
+                                if row:
+                                    existing = (row.get('id'), row.get('title'), row.get('watched'))
+                                    info = {
+                                        'title': row.get('title'),
+                                        'year': row.get('year'),
+                                        'genres': row.get('genres'),
+                                        'description': row.get('description'),
+                                        'director': row.get('director'),
+                                        'actors': row.get('actors'),
+                                        'is_series': bool(row.get('is_series', 0))
+                                    }
+                                    link = row.get('link') or f"https://www.kinopoisk.ru/film/{kp_id}/"
+                        finally:
+                            if cursor_info:
+                                try:
+                                    cursor_info.close()
+                                except:
+                                    pass
+                            try:
+                                conn_info.close()
+                            except:
+                                pass
 
                         if info and existing:
                             show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing, message_id=film_message_id)
@@ -522,16 +551,32 @@ def handle_rating_internal(message, rating):
                             avg_rating = None
                             active_count = 0
                             rated_count = 0
-                            with db_lock:
-                                cur.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, film_id))
-                                avg_row = cur.fetchone()
-                                avg_rating = avg_row.get('avg') if avg_row else None
+                            conn_rec = get_db_connection()
+                            cursor_rec = None
+                            try:
+                                with db_lock:
+                                    cursor_rec = conn_rec.cursor()
+                                    cursor_rec.execute('SELECT AVG(rating) FROM ratings WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, film_id))
+                                    avg_row = cursor_rec.fetchone()
+                                    avg_rating = avg_row.get('avg') if avg_row else None
 
-                                cur.execute('SELECT COUNT(DISTINCT user_id) FROM stats WHERE chat_id = %s AND user_id IS NOT NULL', (chat_id,))
-                                active_count = cur.fetchone().get('count', 0)
+                                    cursor_rec.execute('SELECT COUNT(DISTINCT user_id) FROM stats WHERE chat_id = %s AND user_id IS NOT NULL', (chat_id,))
+                                    active_count_row = cursor_rec.fetchone()
+                                    active_count = active_count_row.get('count', 0) if isinstance(active_count_row, dict) else (active_count_row[0] if active_count_row else 0)
 
-                                cur.execute('SELECT COUNT(DISTINCT user_id) FROM ratings WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, film_id))
-                                rated_count = cur.fetchone().get('count', 0)
+                                    cursor_rec.execute('SELECT COUNT(DISTINCT user_id) FROM ratings WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)', (chat_id, film_id))
+                                    rated_count_row = cursor_rec.fetchone()
+                                    rated_count = rated_count_row.get('count', 0) if isinstance(rated_count_row, dict) else (rated_count_row[0] if rated_count_row else 0)
+                            finally:
+                                if cursor_rec:
+                                    try:
+                                        cursor_rec.close()
+                                    except:
+                                        pass
+                                try:
+                                    conn_rec.close()
+                                except:
+                                    pass
 
                             if avg_rating and avg_rating > 8.5 and active_count > 0:
                                 percentage = rated_count / active_count
@@ -569,17 +614,18 @@ def handle_rating_internal(message, rating):
         except Exception as e:
             logger.error(f"[RATE] Критическая ошибка: {e}", exc_info=True)
             try:
-                conn.rollback()
+                conn_local.rollback()
             except:
                 pass
             bot.reply_to(message, "❌ Ошибка при сохранении оценки.")
         finally:
+            if cursor_local:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
             try:
-                cur.close()
-            except:
-                pass
-            try:
-                conn.close()
+                conn_local.close()
             except:
                 pass
     else:
