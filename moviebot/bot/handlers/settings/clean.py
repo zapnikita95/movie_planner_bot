@@ -187,8 +187,9 @@ def clean_action_choice(call):
                 logger.error(f"Ошибка при инициировании голосования: {e}", exc_info=True)
                 bot.edit_message_text("Ошибка при инициировании голосования.", call.message.chat.id, call.message.message_id)
         else:
-            # В личном чате можно сразу удалить
+            # В личном чате можно сразу удалить - используем кнопку
             markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("✅ Да, удалить", callback_data="clean_confirm:chat"))
             markup.add(InlineKeyboardButton("◀️ Назад к настройкам", callback_data="settings:back"))
             bot.edit_message_text(
                 "⚠️ <b>Обнуление базы данных чата</b>\n\n"
@@ -198,23 +199,17 @@ def clean_action_choice(call):
                 "• Все планы и расписание\n"
                 "• Все билеты\n"
                 "• Все настройки\n\n"
-                "Это действие необратимо!\n\n"
-                "Отправьте 'ДА, УДАЛИТЬ' для подтверждения.",
+                "Это действие необратимо!",
                 call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML'
             )
             user_clean_state[user_id]['confirm_needed'] = True
             user_clean_state[user_id]['target'] = 'chat'
             user_clean_state[user_id]['prompt_message_id'] = call.message.message_id
-            
-            # Устанавливаем user_private_handler_state для личных чатов
-            user_private_handler_state[user_id] = {
-                'handler': 'clean_chat',
-                'prompt_message_id': call.message.message_id
-            }
     
     elif action == 'user_db':
         # Обнуление базы пользователя - удаляет только данные конкретного пользователя в этом чате
         markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("✅ Да, удалить", callback_data="clean_confirm:user"))
         markup.add(InlineKeyboardButton("◀️ Назад к настройкам", callback_data="settings:back"))
         bot.edit_message_text(
             "⚠️ <b>Обнуление базы данных пользователя</b>\n\n"
@@ -224,20 +219,12 @@ def clean_action_choice(call):
             "• Все ваши билеты\n"
             "• Вашу статистику\n"
             "• Ваши настройки (включая часовой пояс)\n\n"
-            "<i>Фильмы и данные других пользователей останутся без изменений.</i>\n\n"
-            "Отправьте 'ДА, УДАЛИТЬ' для подтверждения.",
+            "<i>Фильмы и данные других пользователей останутся без изменений.</i>",
             call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML'
         )
         user_clean_state[user_id]['confirm_needed'] = True
         user_clean_state[user_id]['target'] = 'user'
         user_clean_state[user_id]['prompt_message_id'] = call.message.message_id
-        
-        # Устанавливаем user_private_handler_state для личных чатов
-        if call.message.chat.type == 'private':
-            user_private_handler_state[user_id] = {
-                'handler': 'clean_user',
-                'prompt_message_id': call.message.message_id
-            }
     
     elif action == 'unwatched_movies':
         # Удаление непросмотренных фильмов - требует голосования в группах
@@ -347,16 +334,16 @@ def clean_action_choice(call):
                 logger.error(f"Ошибка при инициировании голосования: {e}", exc_info=True)
                 bot.edit_message_text("Ошибка при инициировании голосования.", call.message.chat.id, call.message.message_id)
         else:
-            # В личном чате можно сразу удалить
+            # В личном чате можно сразу удалить - используем кнопку
             markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("✅ Да, удалить", callback_data="clean_confirm:unwatched_movies"))
             markup.add(InlineKeyboardButton("◀️ Назад к настройкам", callback_data="settings:back"))
             bot.edit_message_text(
                 "⚠️ <b>Удаление непросмотренных фильмов</b>\n\n"
                 "Это удалит все фильмы, которые:\n"
                 "• Не находятся в расписании\n"
                 "• У которых нет билетов\n"
-                "• Которые не участвуют ни в каких активностях\n\n"
-                "Отправьте 'ДА, УДАЛИТЬ' для подтверждения.",
+                "• Которые не участвуют ни в каких активностях",
                 call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML'
             )
             user_clean_state[user_id]['confirm_needed'] = True
@@ -366,6 +353,7 @@ def clean_action_choice(call):
     elif action == 'imported_ratings':
         # Удаление импортированных оценок пользователя
         markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("✅ Да, удалить", callback_data="clean_confirm:imported_ratings"))
         markup.add(InlineKeyboardButton("◀️ Назад к настройкам", callback_data="settings:back"))
         try:
             sent_msg = bot.edit_message_text(
@@ -373,8 +361,7 @@ def clean_action_choice(call):
                 "Это удалит <b>только ваши импортированные оценки</b>:\n"
                 "• Все оценки с пометкой is_imported = TRUE\n"
                 "• Ваши обычные оценки останутся без изменений\n"
-                "• Данные других пользователей останутся без изменений\n\n"
-                "Отправьте 'ДА, УДАЛИТЬ' для подтверждения.",
+                "• Данные других пользователей останутся без изменений",
                 call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode='HTML'
             )
             prompt_message_id = call.message.message_id
@@ -386,13 +373,6 @@ def clean_action_choice(call):
         user_clean_state[user_id]['target'] = 'imported_ratings'
         user_clean_state[user_id]['prompt_message_id'] = prompt_message_id
         logger.info(f"[CLEAN] Сохранено состояние для imported_ratings: user_id={user_id}, prompt_message_id={prompt_message_id}")
-        
-        # Устанавливаем user_private_handler_state для личных чатов
-        if call.message.chat.type == 'private':
-            user_private_handler_state[user_id] = {
-                'handler': 'clean_imported_ratings',
-                'prompt_message_id': prompt_message_id
-            }
     
     elif action == 'cancel':
         bot.edit_message_text("❌ Операция отменена.", call.message.chat.id, call.message.message_id)
@@ -696,6 +676,52 @@ def handle_clean_reply(message):
         except:
             pass
 
+
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("clean_confirm:"))
+def clean_confirm_callback(call):
+    """Обработчик кнопки 'Да, удалить' для одиночных действий (не требующих голосования)"""
+    try:
+        bot.answer_callback_query(call.id)
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        # Парсим target из callback_data: clean_confirm:target
+        parts = call.data.split(":")
+        if len(parts) < 2:
+            bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+            return
+        
+        target = parts[1]  # 'chat', 'user', 'unwatched_movies', 'imported_ratings'
+        
+        # Устанавливаем состояние
+        user_clean_state[user_id] = {
+            'target': target,
+            'confirm_needed': True,
+            'prompt_message_id': call.message.message_id
+        }
+        
+        # Создаем FakeMessage для handle_clean_confirm_internal
+        class FakeMessage:
+            def __init__(self, chat_id, user_id):
+                self.chat = type('obj', (object,), {'id': chat_id})()
+                class User:
+                    def __init__(self, user_id):
+                        self.id = user_id
+                self.from_user = User(user_id)
+        
+        fake_msg = FakeMessage(chat_id, user_id)
+        
+        # Вызываем handle_clean_confirm_internal
+        from moviebot.bot.handlers.series import handle_clean_confirm_internal
+        handle_clean_confirm_internal(fake_msg)
+        
+        logger.info(f"[CLEAN CONFIRM] ✅ Подтверждено удаление для target={target}, user_id={user_id}")
+    except Exception as e:
+        logger.error(f"[CLEAN CONFIRM] ❌ Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
 
 @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("clean_vote:"))
 def clean_vote_callback(call):
