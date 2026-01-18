@@ -390,6 +390,8 @@ def clean_back_callback(call):
         # Очищаем состояние
         if user_id in user_clean_state:
             del user_clean_state[user_id]
+        if user_id in user_private_handler_state:
+            del user_private_handler_state[user_id]
         
         # Показываем меню очистки
         markup = InlineKeyboardMarkup(row_width=1)
@@ -423,7 +425,14 @@ def clean_back_callback(call):
             "<i>Фильмы и данные других пользователей останутся без изменений.</i>\n\n"
             "Выберите действие:"
         )
-        bot.edit_message_text(help_text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+        try:
+            bot.edit_message_text(help_text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+        except Exception as edit_e:
+            logger.error(f"[CLEAN BACK] Ошибка редактирования сообщения: {edit_e}", exc_info=True)
+            try:
+                bot.send_message(chat_id, help_text, reply_markup=markup, parse_mode='HTML')
+            except Exception as send_e:
+                logger.error(f"[CLEAN BACK] Ошибка отправки сообщения: {send_e}", exc_info=True)
     except Exception as e:
         logger.error(f"[CLEAN BACK] Ошибка: {e}", exc_info=True)
         try:
