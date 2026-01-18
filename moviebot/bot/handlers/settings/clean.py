@@ -117,6 +117,11 @@ def clean_action_choice(call):
                 if BOT_ID and BOT_ID in active_members_from_stats:
                     active_members_from_stats.discard(BOT_ID)
                 
+                # ВАЖНО: Если active_members_from_stats пусто, добавляем инициатора
+                if not active_members_from_stats:
+                    active_members_from_stats.add(user_id)
+                    logger.info(f"[CLEAN] active_members_from_stats пусто, добавлен инициатор user_id={user_id}")
+                
                 # Определяем количество участников для голосования
                 if chat_member_count:
                     if chat_member_count > 0:
@@ -125,19 +130,26 @@ def clean_action_choice(call):
                         active_members_count = chat_member_count
                         active_members = active_members_from_stats
                     else:
-                        active_members_count = max(len(active_members_from_stats), 2)
+                        active_members_count = max(len(active_members_from_stats), 1)
                         active_members = active_members_from_stats
                 else:
-                    active_members_count = max(len(active_members_from_stats), 2)
+                    active_members_count = max(len(active_members_from_stats), 1)
                     active_members = active_members_from_stats
                 
-                if active_members_count < 2:
+                # Если active_members пусто, добавляем хотя бы инициатора
+                if not active_members:
+                    active_members.add(user_id)
+                    active_members_count = 1
+                
+                if active_members_count < 1:
                     error_msg = (
-                        f"⚠️ Не найдено активных участников чата за последние 30 дней.\n\n"
+                        f"⚠️ Не найдено активных участников чата.\n\n"
                         f"Используйте /dbcheck для подробной диагностики БД"
                     )
                     bot.edit_message_text(error_msg, call.message.chat.id, call.message.message_id)
                     return
+                
+                logger.info(f"[CLEAN] Определены участники для голосования (chat_db): active_members_count={active_members_count}, active_members={active_members}, chat_member_count={chat_member_count}")
                 
                 msg = bot.send_message(chat_id, 
                     f"⚠️ <b>ВНИМАНИЕ!</b> Запрошено полное обнуление базы данных чата.\n\n"
@@ -153,6 +165,8 @@ def clean_action_choice(call):
                     'active_members': active_members,
                     'action': 'chat'  # Явно указываем action для chat_db
                 }
+                
+                logger.info(f"[CLEAN] Создано голосование для chat_db: message_id={msg.message_id}, chat_id={chat_id}, members_count={active_members_count}, active_members={active_members}")
                 
                 logger.info(f"[CLEAN] Создано голосование для chat_db: message_id={msg.message_id}, chat_id={chat_id}, members_count={active_members_count}, active_members={active_members}")
                 
@@ -253,6 +267,11 @@ def clean_action_choice(call):
                 if BOT_ID and BOT_ID in active_members_from_stats:
                     active_members_from_stats.discard(BOT_ID)
                 
+                # ВАЖНО: Если active_members_from_stats пусто, добавляем инициатора
+                if not active_members_from_stats:
+                    active_members_from_stats.add(user_id)
+                    logger.info(f"[CLEAN] active_members_from_stats пусто (unwatched_movies), добавлен инициатор user_id={user_id}")
+                
                 # Определяем количество участников для голосования
                 if chat_member_count:
                     if chat_member_count > 0:
@@ -261,19 +280,26 @@ def clean_action_choice(call):
                         active_members_count = chat_member_count
                         active_members = active_members_from_stats
                     else:
-                        active_members_count = max(len(active_members_from_stats), 2)
+                        active_members_count = max(len(active_members_from_stats), 1)
                         active_members = active_members_from_stats
                 else:
-                    active_members_count = max(len(active_members_from_stats), 2)
+                    active_members_count = max(len(active_members_from_stats), 1)
                     active_members = active_members_from_stats
                 
-                if active_members_count < 2:
+                # Если active_members пусто, добавляем хотя бы инициатора
+                if not active_members:
+                    active_members.add(user_id)
+                    active_members_count = 1
+                
+                if active_members_count < 1:
                     error_msg = (
-                        f"⚠️ Не найдено активных участников чата за последние 30 дней.\n\n"
+                        f"⚠️ Не найдено активных участников чата.\n\n"
                         f"Используйте /dbcheck для подробной диагностики БД"
                     )
                     bot.edit_message_text(error_msg, call.message.chat.id, call.message.message_id)
                     return
+                
+                logger.info(f"[CLEAN] Определены участники для голосования (unwatched_movies): active_members_count={active_members_count}, active_members={active_members}, chat_member_count={chat_member_count}")
                 
                 msg = bot.send_message(chat_id, 
                     f"⚠️ <b>ВНИМАНИЕ!</b> Запрошено удаление всех непросмотренных фильмов.\n\n"
@@ -289,6 +315,8 @@ def clean_action_choice(call):
                     'active_members': active_members,
                     'action': 'unwatched_movies'
                 }
+                
+                logger.info(f"[CLEAN] Создано голосование для unwatched_movies: message_id={msg.message_id}, chat_id={chat_id}, members_count={active_members_count}, active_members={active_members}")
                 
                 bot.edit_message_text("✅ Запрос на удаление непросмотренных фильмов отправлен. Ожидаю голосования всех участников.", call.message.chat.id, call.message.message_id)
             except Exception as e:
