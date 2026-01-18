@@ -1387,12 +1387,27 @@ def search_movies(query, top_k=15):
                         has_director_match = any(director_name in director_str_normalized for director_name in directors_normalized)
                 
                 # Проверяем актёров
+                # ВАЖНО: Разбиваем actors_str по запятым и проверяем каждое имя отдельно
                 if 'actors_str' in row.index:
                     actors_str = row.get('actors_str', '')
                     if pd.notna(actors_str):
-                        actors_str_normalized = _normalize_text(str(actors_str))
-                        has_all_actors = all(actor_name in actors_str_normalized for actor_name in actors_normalized)
-                        has_some_actors = any(actor_name in actors_str_normalized for actor_name in actors_normalized)
+                        # Разбиваем по запятым и нормализуем каждого актёра отдельно
+                        actors_in_movie = [a.strip() for a in str(actors_str).split(',') if a.strip()]
+                        actors_in_movie_normalized = [_normalize_text(actor) for actor in actors_in_movie]
+                        
+                        # Проверяем, есть ли ВСЕ актёры (каждый актёр должен совпадать с одним из актёров в фильме)
+                        has_all_actors = all(
+                            any(actor_name in movie_actor or movie_actor in actor_name 
+                                for movie_actor in actors_in_movie_normalized)
+                            for actor_name in actors_normalized
+                        )
+                        
+                        # Проверяем, есть ли хотя бы один актёр
+                        has_some_actors = any(
+                            any(actor_name in movie_actor or movie_actor in actor_name 
+                                for movie_actor in actors_in_movie_normalized)
+                            for actor_name in actors_normalized
+                        )
                 
                 # Приоритет 1: Режиссёр + все актёры
                 if has_director_match and has_all_actors:
@@ -1466,20 +1481,29 @@ def search_movies(query, top_k=15):
             actors_normalized = [_normalize_text(name) for name in mentioned_actors_only]
             
             # Ищем фильмы со ВСЕМИ актёрами (высший приоритет)
+            # ВАЖНО: Разбиваем actors_str по запятым и проверяем каждое имя отдельно
             for idx in range(len(movies)):
                 row = movies.iloc[idx]
                 if 'actors_str' in row.index:
                     actors_str = row.get('actors_str', '')
                     if pd.notna(actors_str):
-                        actors_str_normalized = _normalize_text(str(actors_str))
-                        # Проверяем, есть ли ВСЕ актёры в списке
-                        all_found = all(actor_name in actors_str_normalized for actor_name in actors_normalized)
+                        # Разбиваем по запятым и нормализуем каждого актёра отдельно
+                        actors_in_movie = [a.strip() for a in str(actors_str).split(',') if a.strip()]
+                        actors_in_movie_normalized = [_normalize_text(actor) for actor in actors_in_movie]
+                        
+                        # Проверяем, есть ли ВСЕ актёры (каждый актёр должен совпадать с одним из актёров в фильме)
+                        all_found = all(
+                            any(actor_name in movie_actor or movie_actor in actor_name 
+                                for movie_actor in actors_in_movie_normalized)
+                            for actor_name in actors_normalized
+                        )
                         if all_found:
                             movies_with_all_actors.append(idx)
             
             logger.info(f"[SEARCH MOVIES] Найдено фильмов со ВСЕМИ указанными актёрами: {len(movies_with_all_actors)}")
             
             # Затем ищем фильмы с отдельными актёрами (ниже приоритет)
+            # ВАЖНО: Разбиваем actors_str по запятым и проверяем каждое имя отдельно
             logger.info(f"[SEARCH MOVIES] Теперь ищем фильмы с отдельными актёрами...")
             for idx in range(len(movies)):
                 if idx in movies_with_all_actors:
@@ -1489,9 +1513,16 @@ def search_movies(query, top_k=15):
                 if 'actors_str' in row.index:
                     actors_str = row.get('actors_str', '')
                     if pd.notna(actors_str):
-                        actors_str_normalized = _normalize_text(str(actors_str))
+                        # Разбиваем по запятым и нормализуем каждого актёра отдельно
+                        actors_in_movie = [a.strip() for a in str(actors_str).split(',') if a.strip()]
+                        actors_in_movie_normalized = [_normalize_text(actor) for actor in actors_in_movie]
+                        
                         # Проверяем, есть ли хотя бы один актёр
-                        any_found = any(actor_name in actors_str_normalized for actor_name in actors_normalized)
+                        any_found = any(
+                            any(actor_name in movie_actor or movie_actor in actor_name 
+                                for movie_actor in actors_in_movie_normalized)
+                            for actor_name in actors_normalized
+                        )
                         if any_found:
                             movies_with_some_actors.append(idx)
             
@@ -1662,13 +1693,20 @@ def search_movies(query, top_k=15):
             
             if len(mentioned_actors_only) >= 2:
                 # НОВАЯ ЛОГИКА: 2+ актёра — проверяем, есть ли ВСЕ актёры или отдельные, и режиссёр
+                # ВАЖНО: Разбиваем actors_str по запятым и проверяем каждое имя отдельно
                 actors_str = row.get('actors_str', '')
                 if 'actors_str' in row.index and pd.notna(actors_str):
-                    actors_normalized = _normalize_text(str(actors_str))
+                    # Разбиваем по запятым и нормализуем каждого актёра отдельно
+                    actors_in_movie = [a.strip() for a in str(actors_str).split(',') if a.strip()]
+                    actors_in_movie_normalized = [_normalize_text(actor) for actor in actors_in_movie]
                     actors_names_normalized = [_normalize_text(name) for name in mentioned_actors_only]
                     
-                    # Проверяем, есть ли ВСЕ актёры
-                    all_actors_found = all(actor_name in actors_normalized for actor_name in actors_names_normalized)
+                    # Проверяем, есть ли ВСЕ актёры (каждый актёр должен совпадать с одним из актёров в фильме)
+                    all_actors_found = all(
+                        any(actor_name in movie_actor or movie_actor in actor_name 
+                            for movie_actor in actors_in_movie_normalized)
+                        for actor_name in actors_names_normalized
+                    )
                     
                     if has_director_match and all_actors_found:
                         # МАКСИМАЛЬНЫЙ БУСТ: Режиссёр + все актёры (выше чем только актёры)
@@ -1676,7 +1714,12 @@ def search_movies(query, top_k=15):
                         logger.info(f"[SEARCH MOVIES] Режиссёр {mentioned_directors_only} + ВСЕ актёры {mentioned_actors_only} найдены → +{actor_boost} для {imdb_id_clean}")
                     elif has_director_match:
                         # Режиссёр + отдельные актёры
-                        found_count = sum(1 for actor_name in actors_names_normalized if actor_name in actors_normalized)
+                        # ВАЖНО: Разбиваем actors_str по запятым и проверяем каждое имя отдельно
+                        found_count = sum(
+                            1 for actor_name in actors_names_normalized
+                            if any(actor_name in movie_actor or movie_actor in actor_name 
+                                  for movie_actor in actors_in_movie_normalized)
+                        )
                         if found_count > 0:
                             actor_boost = 1500 + (300 * found_count)  # Режиссёр + актёры (выше чем только актёры)
                             logger.info(f"[SEARCH MOVIES] Режиссёр {mentioned_directors_only} + найдено {found_count} из {len(mentioned_actors_only)} актёров → +{actor_boost} для {imdb_id_clean}")
@@ -1686,7 +1729,12 @@ def search_movies(query, top_k=15):
                         logger.info(f"[SEARCH MOVIES] ВСЕ актёры {mentioned_actors_only} найдены (без режиссёра) → +{actor_boost} для {imdb_id_clean}")
                     else:
                         # Отдельные актёры, без режиссёра
-                        found_count = sum(1 for actor_name in actors_names_normalized if actor_name in actors_normalized)
+                        # ВАЖНО: Разбиваем actors_str по запятым и проверяем каждое имя отдельно
+                        found_count = sum(
+                            1 for actor_name in actors_names_normalized
+                            if any(actor_name in movie_actor or movie_actor in actor_name 
+                                  for movie_actor in actors_in_movie_normalized)
+                        )
                         if found_count > 0:
                             actor_boost = 300 * found_count  # Только отдельные актёры
                             logger.info(f"[SEARCH MOVIES] Найдено {found_count} из {len(mentioned_actors_only)} актёров (без режиссёра) → +{actor_boost} для {imdb_id_clean}")
