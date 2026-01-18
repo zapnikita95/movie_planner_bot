@@ -2601,11 +2601,13 @@ def show_streaming_list_callback(call):
                 pass
         
         # Добавляем кнопки с кинотеатрами
-        for platform, url in list(sources_dict.items())[:6]:
+        # Используем индекс вместо URL в callback_data (лимит Telegram - 64 байта)
+        platforms_list = list(sources_dict.items())[:6]
+        for idx, (platform, url) in enumerate(platforms_list):
             if selected_service == platform:
-                markup.add(InlineKeyboardButton(f"✅ {platform}", callback_data=f"plan:select_streaming:{plan_id}:{platform}:{url}"))
+                markup.add(InlineKeyboardButton(f"✅ {platform}", callback_data=f"plan:select_streaming:{plan_id}:{idx}"))
             else:
-                markup.add(InlineKeyboardButton(platform, callback_data=f"plan:select_streaming:{plan_id}:{platform}:{url}"))
+                markup.add(InlineKeyboardButton(platform, callback_data=f"plan:select_streaming:{plan_id}:{idx}"))
         
         markup.add(InlineKeyboardButton("❌ Отмена", callback_data=f"plan:cancel_streaming:{plan_id}"))
         
@@ -2624,11 +2626,43 @@ def select_streaming_callback(call):
         
         parts = call.data.split(":")
         plan_id = int(parts[2])
-        platform = parts[3]
-        url = ':'.join(parts[4:])  # собираем url обратно (если были :)
+        platform_idx = int(parts[3])  # Индекс платформы (0-5)
         
         chat_id = call.message.chat.id
         message_id = call.message.message_id
+        
+        # Получаем URL платформы из БД (из ticket_file_id, где сохранен JSON с источниками)
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        platform = None
+        url = None
+        try:
+            with db_lock:
+                cursor_local.execute('SELECT ticket_file_id FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+                row = cursor_local.fetchone()
+                if row:
+                    ticket_file_id = row.get('ticket_file_id') if isinstance(row, dict) else row[0]
+                    if ticket_file_id:
+                        try:
+                            sources_dict = json.loads(ticket_file_id)
+                            platforms_list = list(sources_dict.items())[:6]
+                            if 0 <= platform_idx < len(platforms_list):
+                                platform, url = platforms_list[platform_idx]
+                        except Exception as json_e:
+                            logger.error(f"[SELECT STREAMING] Ошибка парсинга sources JSON: {json_e}", exc_info=True)
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
+        
+        if not platform or not url:
+            bot.answer_callback_query(call.id, "❌ Ошибка: платформа не найдена", show_alert=True)
+            return
         
         # Сохраняем выбор в БД
         conn_local = get_db_connection()
