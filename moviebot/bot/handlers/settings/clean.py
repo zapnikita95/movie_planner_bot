@@ -151,12 +151,24 @@ def clean_action_choice(call):
                 
                 logger.info(f"[CLEAN] Определены участники для голосования (chat_db): active_members_count={active_members_count}, active_members={active_members}, chat_member_count={chat_member_count}")
                 
+                # Создаем inline кнопки для каждого участника
+                markup = InlineKeyboardMarkup(row_width=1)
+                for member_id in active_members:
+                    # Получаем имя пользователя
+                    try:
+                        member_info = bot.get_chat_member(chat_id, member_id)
+                        member_name = member_info.user.first_name or f"user_{member_id}"
+                    except:
+                        member_name = f"user_{member_id}"
+                    markup.add(InlineKeyboardButton(f"✅ {member_name}", callback_data=f"clean_vote:chat:{member_id}"))
+                
                 msg = bot.send_message(chat_id, 
                     f"⚠️ <b>ВНИМАНИЕ!</b> Запрошено полное обнуление базы данных чата.\n\n"
                     f"Участников в чате: {active_members_count}\n"
-                    f"Для подтверждения все активные участники должны ответить на это сообщение текстом <b>\"ДА, УДАЛИТЬ\"</b>.\n\n"
+                    f"Для подтверждения все активные участники должны нажать кнопку со своим именем ниже.\n\n"
                     f"Если не все участники подтвердят, база не будет удалена.",
-                    parse_mode='HTML')
+                    parse_mode='HTML',
+                    reply_markup=markup)
                 
                 clean_chat_text_votes[msg.message_id] = {
                     'chat_id': chat_id,
@@ -301,12 +313,24 @@ def clean_action_choice(call):
                 
                 logger.info(f"[CLEAN] Определены участники для голосования (unwatched_movies): active_members_count={active_members_count}, active_members={active_members}, chat_member_count={chat_member_count}")
                 
+                # Создаем inline кнопки для каждого участника
+                markup = InlineKeyboardMarkup(row_width=1)
+                for member_id in active_members:
+                    # Получаем имя пользователя
+                    try:
+                        member_info = bot.get_chat_member(chat_id, member_id)
+                        member_name = member_info.user.first_name or f"user_{member_id}"
+                    except:
+                        member_name = f"user_{member_id}"
+                    markup.add(InlineKeyboardButton(f"✅ {member_name}", callback_data=f"clean_vote:unwatched:{member_id}"))
+                
                 msg = bot.send_message(chat_id, 
                     f"⚠️ <b>ВНИМАНИЕ!</b> Запрошено удаление всех непросмотренных фильмов.\n\n"
                     f"Участников в чате: {active_members_count}\n"
-                    f"Для подтверждения все активные участники должны ответить на это сообщение текстом <b>\"ДА, УДАЛИТЬ\"</b>.\n\n"
+                    f"Для подтверждения все активные участники должны нажать кнопку со своим именем ниже.\n\n"
                     f"Если не все участники подтвердят, фильмы не будут удалены.",
-                    parse_mode='HTML')
+                    parse_mode='HTML',
+                    reply_markup=markup)
                 
                 clean_chat_text_votes[msg.message_id] = {
                     'chat_id': chat_id,
@@ -672,6 +696,118 @@ def handle_clean_reply(message):
         except:
             pass
 
+
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("clean_vote:"))
+def clean_vote_callback(call):
+    """Обработчик inline кнопок для голосования за удаление"""
+    try:
+        bot.answer_callback_query(call.id)
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        message_id = call.message.message_id
+        
+        # Парсим callback_data: clean_vote:action:member_id
+        parts = call.data.split(":")
+        if len(parts) < 3:
+            bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+            return
+        
+        action = parts[1]  # 'chat' или 'unwatched'
+        expected_member_id = int(parts[2])
+        
+        # Проверяем, что пользователь голосует за себя
+        if user_id != expected_member_id:
+            bot.answer_callback_query(call.id, "❌ Это не ваша кнопка", show_alert=True)
+            return
+        
+        # Проверяем, есть ли голосование для этого сообщения
+        if message_id not in clean_chat_text_votes:
+            bot.answer_callback_query(call.id, "❌ Голосование не найдено", show_alert=True)
+            return
+        
+        vote_state = clean_chat_text_votes[message_id]
+        
+        # Проверяем, что это правильный чат и пользователь в списке активных
+        if vote_state['chat_id'] != chat_id:
+            bot.answer_callback_query(call.id, "❌ Неверный чат", show_alert=True)
+            return
+        
+        if user_id not in vote_state['active_members']:
+            bot.answer_callback_query(call.id, "❌ Вы не в списке участников", show_alert=True)
+            return
+        
+        # Проверяем, не голосовал ли уже
+        if user_id in vote_state['voted']:
+            bot.answer_callback_query(call.id, "✅ Вы уже проголосовали", show_alert=True)
+            return
+        
+        # Добавляем голос
+        vote_state['voted'].add(user_id)
+        logger.info(f"[CLEAN VOTE] Пользователь {user_id} проголосовал за {action}. Проголосовало: {len(vote_state['voted'])}/{vote_state['members_count']}")
+        
+        # Обновляем кнопки - помечаем проголосовавших
+        markup = InlineKeyboardMarkup(row_width=1)
+        for member_id in vote_state['active_members']:
+            try:
+                member_info = bot.get_chat_member(chat_id, member_id)
+                member_name = member_info.user.first_name or f"user_{member_id}"
+            except:
+                member_name = f"user_{member_id}"
+            
+            if member_id in vote_state['voted']:
+                markup.add(InlineKeyboardButton(f"✅ {member_name} ✓", callback_data=f"clean_vote:{action}:{member_id}"))
+            else:
+                markup.add(InlineKeyboardButton(f"⏳ {member_name}", callback_data=f"clean_vote:{action}:{member_id}"))
+        
+        try:
+            bot.edit_message_reply_markup(chat_id, message_id, reply_markup=markup)
+        except Exception as e:
+            logger.error(f"[CLEAN VOTE] Ошибка обновления кнопок: {e}", exc_info=True)
+        
+        # Проверяем, все ли проголосовали
+        if len(vote_state['voted']) >= vote_state['members_count']:
+            # Все проголосовали - выполняем удаление
+            logger.info(f"[CLEAN VOTE] Все участники проголосовали, выполняем удаление для {action}")
+            
+            # Создаем FakeMessage для handle_clean_confirm_internal
+            class FakeMessage:
+                def __init__(self, chat_id, user_id):
+                    self.chat = type('obj', (object,), {'id': chat_id})()
+                    class User:
+                        def __init__(self, user_id):
+                            self.id = user_id
+                    self.from_user = User(user_id)
+            
+            fake_msg = FakeMessage(chat_id, user_id)
+            
+            # Устанавливаем target в зависимости от action
+            target = 'chat' if action == 'chat' else 'unwatched_movies'
+            user_clean_state[user_id] = {'target': target, 'confirm_needed': True}
+            
+            # Вызываем handle_clean_confirm_internal
+            from moviebot.bot.handlers.series import handle_clean_confirm_internal
+            handle_clean_confirm_internal(fake_msg)
+            
+            # Удаляем состояние голосования
+            del clean_chat_text_votes[message_id]
+            
+            # Отправляем сообщение об успехе
+            if action == 'chat':
+                bot.send_message(chat_id, "✅ Все участники подтвердили. База данных чата обнулена.")
+                logger.info(f"[CLEAN VOTE] ✅ База данных чата обнулена")
+            else:
+                bot.send_message(chat_id, "✅ Все участники подтвердили. Непросмотренные фильмы удалены.")
+                logger.info(f"[CLEAN VOTE] ✅ Непросмотренные фильмы удалены")
+        else:
+            # Еще не все проголосовали
+            remaining = vote_state['members_count'] - len(vote_state['voted'])
+            bot.answer_callback_query(call.id, f"✅ Ваш голос учтен. Осталось: {remaining}", show_alert=False)
+    except Exception as e:
+        logger.error(f"[CLEAN VOTE] ❌ Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
 
 def register_clean_handlers(bot):
     """Регистрирует обработчики команды /clean"""
