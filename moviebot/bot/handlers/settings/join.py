@@ -99,7 +99,13 @@ def join_command(message):
                     
                     # Получаем информацию о групповой подписке
                     paid_participants_count = 0
-                    total_participants_count = len(all_group_member_ids)  # Уже без бота
+                    # Используем get_chat_member_count для точного подсчета всех участников (минус бот)
+                    try:
+                        chat_member_count = bot.get_chat_member_count(chat_id)
+                        total_participants_count = max(1, chat_member_count - 1)  # Вычитаем бота
+                    except:
+                        # Fallback на количество администраторов, если не удалось получить общее количество
+                        total_participants_count = len(all_group_member_ids) if all_group_member_ids else 1
                     group_subscription_info = None
                     try:
                         from moviebot.database.db_operations import get_active_group_subscription_by_chat_id, get_subscription_members
@@ -327,7 +333,13 @@ def join_add_callback(call):
                     
                     # Получаем информацию о групповой подписке
                     paid_participants_count = 0
-                    total_participants_count = len(all_group_member_ids)  # Уже без бота
+                    # Используем get_chat_member_count для точного подсчета всех участников (минус бот)
+                    try:
+                        chat_member_count = bot.get_chat_member_count(chat_id)
+                        total_participants_count = max(1, chat_member_count - 1)  # Вычитаем бота
+                    except:
+                        # Fallback на количество администраторов, если не удалось получить общее количество
+                        total_participants_count = len(all_group_member_ids) if all_group_member_ids else 1
                     group_subscription_info = None
                     try:
                         from moviebot.database.db_operations import get_active_group_subscription_by_chat_id, get_subscription_members
@@ -424,14 +436,20 @@ def join_add_callback(call):
                         paid_participants_count = 0
                         total_participants_count = 0
                         try:
-                            admins = bot.get_chat_administrators(chat_id)
-                            all_group_member_ids = set()
-                            for admin in admins:
-                                admin_user = admin.user
-                                if BOT_ID and admin_user.id == BOT_ID:
-                                    continue
-                                all_group_member_ids.add(admin_user.id)
-                            total_participants_count = len(all_group_member_ids)
+                            # Используем get_chat_member_count для точного подсчета всех участников (минус бот)
+                            try:
+                                chat_member_count = bot.get_chat_member_count(chat_id)
+                                total_participants_count = max(1, chat_member_count - 1)  # Вычитаем бота
+                            except:
+                                # Fallback на количество администраторов, если не удалось получить общее количество
+                                admins = bot.get_chat_administrators(chat_id)
+                                all_group_member_ids = set()
+                                for admin in admins:
+                                    admin_user = admin.user
+                                    if BOT_ID and admin_user.id == BOT_ID:
+                                        continue
+                                    all_group_member_ids.add(admin_user.id)
+                                total_participants_count = len(all_group_member_ids) if all_group_member_ids else 1
                         
                             from moviebot.database.db_operations import get_active_group_subscription_by_chat_id, get_subscription_members
                             group_sub = get_active_group_subscription_by_chat_id(chat_id)

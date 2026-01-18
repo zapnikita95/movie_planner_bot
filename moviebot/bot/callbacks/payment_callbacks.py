@@ -1457,15 +1457,26 @@ def register_payment_callbacks(bot_instance):
                     'expansion_new_size': new_size
                 }
                 
-                # Показываем информацию о расширении и кнопку оплаты
+                # Показываем информацию о расширении и выбор оплаты
+                next_payment_date = sub.get('next_payment_date')
+                
                 text = f"📈 <b>Расширение подписки</b>\n\n"
                 text += f"Текущий размер: <b>{current_size} участников</b>\n"
                 text += f"Новый размер: <b>{new_size} участников</b>\n"
                 text += f"💰 Доплата: <b>{diff}₽</b>\n\n"
-                text += "Нажмите кнопку ниже, чтобы оплатить расширение:"
+                
+                text += "Выберите способ перехода:\n\n"
+                text += f"1️⃣ <b>Оплатить сейчас и расширить</b> — доплатите {diff}₽, подписка расширится сразу\n"
                 
                 markup = InlineKeyboardMarkup(row_width=1)
-                markup.add(InlineKeyboardButton(f"💳 Оплатить {diff}₽", callback_data=f"payment:pay:group:{new_size}:{plan_type}:{period_type}"))
+                markup.add(InlineKeyboardButton("1️⃣ Оплатить сейчас и расширить", callback_data=f"payment:expand_now:{subscription_id}:{new_size}"))
+                
+                # Предлагаем второй вариант для всех периодов (кроме lifetime), если есть next_payment_date
+                if period_type != 'lifetime' and next_payment_date:
+                    next_payment_str = next_payment_date.strftime('%d.%m.%Y') if isinstance(next_payment_date, datetime) else str(next_payment_date)
+                    text += f"2️⃣ <b>Расширить со следующего списания</b> — подписка расширится без доплаты с {next_payment_str}\n"
+                    markup.add(InlineKeyboardButton("2️⃣ Расширить со следующего списания", callback_data=f"payment:expand_next:{subscription_id}:{new_size}"))
+                
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
                 
                 try:
@@ -1481,6 +1492,157 @@ def register_payment_callbacks(bot_instance):
                     if "message is not modified" not in str(e):
                         logger.error(f"[PAYMENT] Ошибка редактирования сообщения: {e}")
                 return
+            
+            if action.startswith("expand_now:") or action.startswith("expand_next:"):
+                # Обработка расширения подписки (оплатить сейчас или со следующего списания)
+                logger.info(f"[PAYMENT EXPAND] Получен callback: action={action}, user_id={user_id}")
+                try:
+                    bot_instance.answer_callback_query(call.id)
+                except:
+                    pass
+                
+                parts = action.split(":")
+                expand_type = "now" if "expand_now" in action else "next"
+                subscription_id = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else None
+                new_size = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else None
+                
+                if not subscription_id or not new_size:
+                    bot_instance.answer_callback_query(call.id, "Ошибка: неверные параметры", show_alert=True)
+                    return
+                
+                from moviebot.database.db_operations import get_subscription_by_id
+                sub = get_subscription_by_id(subscription_id)
+                
+                if not sub or sub.get('user_id') != user_id or not sub.get('is_active', True):
+                    bot_instance.answer_callback_query(call.id, "Подписка не найдена или не активна", show_alert=True)
+                    return
+                
+                # Если в личке, используем chat_id из подписки
+                if is_private:
+                    chat_id = sub.get('chat_id')
+                
+                current_size = sub.get('group_size') or 2
+                plan_type = sub.get('plan_type')
+                period_type = sub.get('period_type')
+                group_chat_id = sub.get('chat_id')
+                next_payment_date = sub.get('next_payment_date')
+                
+                # Вычисляем разницу в цене
+                current_price_base = SUBSCRIPTION_PRICES['group'][str(current_size)][plan_type].get(period_type, 0)
+                new_price_base = SUBSCRIPTION_PRICES['group'][str(new_size)][plan_type].get(period_type, 0)
+                diff = new_price_base - current_price_base
+                
+                # Применяем скидку, если есть личная подписка
+                from moviebot.database.db_operations import get_user_personal_subscriptions
+                personal_subs = get_user_personal_subscriptions(user_id)
+                if personal_subs:
+                    if new_size == 5:
+                        diff = int(diff * 0.5)  # Скидка 50%
+                    elif new_size == 10:
+                        diff = int(new_price_base * 0.5) - current_price_base
+                
+                if expand_type == "now":
+                    # Оплатить сейчас - создаем платеж на разницу
+                    if diff <= 0:
+                        bot_instance.answer_callback_query(call.id, "Ошибка: доплата не требуется", show_alert=True)
+                        return
+                    
+                    # Сохраняем состояние для создания платежа на расширение
+                    user_payment_state[user_id] = {
+                        'step': 'pay',
+                        'subscription_type': 'group',
+                        'plan_type': plan_type,
+                        'period_type': period_type,
+                        'price': diff,
+                        'group_size': new_size,
+                        'chat_id': group_chat_id,
+                        'group_username': sub.get('group_username'),
+                        'telegram_username': call.from_user.username,
+                        'is_expansion': True,
+                        'expansion_subscription_id': subscription_id,
+                        'expansion_current_size': current_size,
+                        'expansion_new_size': new_size
+                    }
+                    
+                    # Показываем подтверждение
+                    text = f"💳 <b>Подтверждение доплаты</b>\n\n"
+                    text += f"Текущий размер: <b>{current_size} участников</b>\n"
+                    text += f"Новый размер: <b>{new_size} участников</b>\n\n"
+                    text += f"💰 Доплата: <b>{diff}₽</b>\n\n"
+                    text += "После оплаты подписка расширится сразу."
+                    
+                    markup = InlineKeyboardMarkup(row_width=1)
+                    markup.add(InlineKeyboardButton("✅ Подтвердить", callback_data="payment:confirm"))
+                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
+                    
+                    try:
+                        safe_edit_message(
+                            bot_instance,
+                            chat_id=call.message.chat.id,
+                            message_id=call.message.message_id,
+                            text=text,
+                            reply_markup=markup,
+                            parse_mode='HTML'
+                        )
+                    except Exception as e:
+                        if "message is not modified" not in str(e):
+                            logger.error(f"[PAYMENT EXPAND] Ошибка: {e}")
+                    return
+                
+                else:  # expand_type == "next"
+                    # Расширить со следующего списания - обновляем group_size и next_payment_date
+                    if not next_payment_date:
+                        bot_instance.answer_callback_query(call.id, "Ошибка: не найдена дата следующего списания", show_alert=True)
+                        return
+                    
+                    # Обновляем group_size и price в подписке с activated_at = next_payment_date
+                    from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+                    conn_update = get_db_connection()
+                    cursor_update = get_db_cursor()
+                    try:
+                        with db_lock:
+                            cursor_update.execute("""
+                                UPDATE subscriptions 
+                                SET group_size = %s, price = %s
+                                WHERE id = %s
+                            """, (new_size, new_price_base, subscription_id))
+                            conn_update.commit()
+                            logger.info(f"[PAYMENT EXPAND] Обновлен размер подписки {subscription_id} до {new_size}, цена={new_price_base}₽, действует с {next_payment_date}")
+                    finally:
+                        try:
+                            cursor_update.close()
+                        except:
+                            pass
+                        try:
+                            conn_update.close()
+                        except:
+                            pass
+                    
+                    next_payment_str = next_payment_date.strftime('%d.%m.%Y') if isinstance(next_payment_date, datetime) else str(next_payment_date)
+                    
+                    text = f"✅ <b>Расширение подписки запланировано</b>\n\n"
+                    text += f"Текущий размер: <b>{current_size} участников</b>\n"
+                    text += f"Действует до: <b>{next_payment_str}</b>\n\n"
+                    text += f"Новый размер: <b>{new_size} участников</b>\n"
+                    text += f"Действует с: <b>{next_payment_str}</b>\n\n"
+                    text += f"💰 Следующее списание: <b>{new_price_base}₽</b>"
+                    
+                    markup = InlineKeyboardMarkup(row_width=1)
+                    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:group:current"))
+                    
+                    try:
+                        safe_edit_message(
+                            bot_instance,
+                            chat_id=call.message.chat.id,
+                            message_id=call.message.message_id,
+                            text=text,
+                            reply_markup=markup,
+                            parse_mode='HTML'
+                        )
+                    except Exception as e:
+                        if "message is not modified" not in str(e):
+                            logger.error(f"[PAYMENT EXPAND] Ошибка: {e}")
+                    return
         
             if action.startswith("add_member:"):
                 # Добавление участника в подписку через кнопку
