@@ -1573,39 +1573,39 @@ def search_movies(query, top_k=15):
                 all_movie_indices = all_movie_indices_full
             
             if all_movie_indices:
-                # Ранжируем найденные фильмы по семантическому сходству с запросом
-                all_movie_descriptions = []
-                valid_indices = []
+                # ОПТИМИЗАЦИЯ: Используем FAISS search напрямую для быстрого ранжирования
+                # Вместо перегенерации эмбеддингов - используем обычный FAISS поиск, но ограничиваем результаты найденными индексами
+                # Это намного быстрее, чем генерировать эмбеддинги заново
+                logger.info(f"[SEARCH MOVIES] Используем FAISS search для ранжирования {len(all_movie_indices)} найденных фильмов...")
                 
+                # Делаем обычный FAISS search, но потом фильтруем только наши индексы
+                D_full, I_full = index.search(query_emb, k=min(search_k, len(movies)))
+                candidate_indices_found = []
+                candidate_distances_found = []
+                
+                # Создаём set для быстрого поиска
+                target_indices_set = set(all_movie_indices)
+                
+                # Идём по результатам FAISS и берём только те, что в нашем списке
+                for dist, idx in zip(D_full[0], I_full[0]):
+                    if idx in target_indices_set:
+                        candidate_indices_found.append(int(idx))
+                        candidate_distances_found.append(float(dist))
+                        # Если нашли все наши индексы - можно прервать
+                        if len(candidate_indices_found) >= len(all_movie_indices):
+                            break
+                
+                # Если не все нашли через FAISS (может быть из-за порядка), добавляем остальные с большим расстоянием
+                found_set = set(candidate_indices_found)
                 for idx in all_movie_indices:
-                    row = movies.iloc[idx]
-                    description = row.get('description', '')
-                    if pd.notna(description) and description:
-                        all_movie_descriptions.append(description)
-                        valid_indices.append(idx)
+                    if idx not in found_set:
+                        candidate_indices_found.append(idx)
+                        candidate_distances_found.append(1.0)  # Максимальное расстояние для не найденных
                 
-                if all_movie_descriptions:
-                    logger.info(f"[SEARCH MOVIES] Генерируем эмбеддинги для {len(all_movie_descriptions)} фильмов с режиссёром и актёрами...")
-                    all_movie_embeddings = model.encode(all_movie_descriptions, convert_to_numpy=True, normalize_embeddings=False, batch_size=int(os.getenv('EMBEDDINGS_BATCH_SIZE', '64')))
-                    
-                    query_emb_flat = query_emb[0]
-                    distances = []
-                    for emb in all_movie_embeddings:
-                        dot_product = np.dot(query_emb_flat, emb)
-                        norm_query = np.linalg.norm(query_emb_flat)
-                        norm_emb = np.linalg.norm(emb)
-                        if norm_query > 0 and norm_emb > 0:
-                            cosine_sim = dot_product / (norm_query * norm_emb)
-                            distance = 1.0 - cosine_sim
-                        else:
-                            distance = 1.0
-                        distances.append(distance)
-                    
-                    sorted_pairs = sorted(zip(valid_indices, distances), key=lambda x: x[1])
-                    candidate_indices = [idx for idx, _ in sorted_pairs]
-                    candidate_distances = [dist for _, dist in sorted_pairs]
-                    
-                    logger.info(f"[SEARCH MOVIES] Отранжировано {len(candidate_indices)} фильмов с режиссёром и актёрами по семантическому сходству")
+                candidate_indices = candidate_indices_found
+                candidate_distances = candidate_distances_found
+                
+                logger.info(f"[SEARCH MOVIES] Отранжировано {len(candidate_indices)} фильмов с режиссёром и актёрами через FAISS search")
                 else:
                     logger.warning(f"[SEARCH MOVIES] Не найдено описаний для фильмов с режиссёром и актёрами")
                     candidate_indices = all_movie_indices
@@ -1685,41 +1685,38 @@ def search_movies(query, top_k=15):
                 all_movie_indices = movies_with_all_actors + movies_with_some_actors
             
             if all_movie_indices:
-                # Ранжируем найденные фильмы по семантическому сходству с запросом
-                all_movie_descriptions = []
-                valid_indices = []
+                # ОПТИМИЗАЦИЯ: Используем FAISS search напрямую для быстрого ранжирования
+                # Вместо перегенерации эмбеддингов - используем обычный FAISS поиск, но ограничиваем результаты найденными индексами
+                logger.info(f"[SEARCH MOVIES] Используем FAISS search для ранжирования {len(all_movie_indices)} найденных фильмов...")
                 
+                # Делаем обычный FAISS search, но потом фильтруем только наши индексы
+                D_full, I_full = index.search(query_emb, k=min(search_k, len(movies)))
+                candidate_indices_found = []
+                candidate_distances_found = []
+                
+                # Создаём set для быстрого поиска
+                target_indices_set = set(all_movie_indices)
+                
+                # Идём по результатам FAISS и берём только те, что в нашем списке
+                for dist, idx in zip(D_full[0], I_full[0]):
+                    if idx in target_indices_set:
+                        candidate_indices_found.append(int(idx))
+                        candidate_distances_found.append(float(dist))
+                        # Если нашли все наши индексы - можно прервать
+                        if len(candidate_indices_found) >= len(all_movie_indices):
+                            break
+                
+                # Если не все нашли через FAISS (может быть из-за порядка), добавляем остальные с большим расстоянием
+                found_set = set(candidate_indices_found)
                 for idx in all_movie_indices:
-                    row = movies.iloc[idx]
-                    description = row.get('description', '')
-                    if pd.notna(description) and description:
-                        all_movie_descriptions.append(description)
-                        valid_indices.append(idx)
+                    if idx not in found_set:
+                        candidate_indices_found.append(idx)
+                        candidate_distances_found.append(1.0)  # Максимальное расстояние для не найденных
                 
-                if all_movie_descriptions:
-                    logger.info(f"[SEARCH MOVIES] Генерируем эмбеддинги для {len(all_movie_descriptions)} фильмов с актёрами...")
-                    all_movie_embeddings = model.encode(all_movie_descriptions, convert_to_numpy=True, normalize_embeddings=False, batch_size=int(os.getenv('EMBEDDINGS_BATCH_SIZE', '64')))
-                    
-                    # Вычисляем расстояния до запроса
-                    query_emb_flat = query_emb[0]
-                    distances = []
-                    for emb in all_movie_embeddings:
-                        dot_product = np.dot(query_emb_flat, emb)
-                        norm_query = np.linalg.norm(query_emb_flat)
-                        norm_emb = np.linalg.norm(emb)
-                        if norm_query > 0 and norm_emb > 0:
-                            cosine_sim = dot_product / (norm_query * norm_emb)
-                            distance = 1.0 - cosine_sim
-                        else:
-                            distance = 1.0
-                        distances.append(distance)
-                    
-                    # Сортируем по расстоянию (ближайшие первыми)
-                    sorted_pairs = sorted(zip(valid_indices, distances), key=lambda x: x[1])
-                    candidate_indices = [idx for idx, _ in sorted_pairs]
-                    candidate_distances = [dist for _, dist in sorted_pairs]
-                    
-                    logger.info(f"[SEARCH MOVIES] Отранжировано {len(candidate_indices)} фильмов с актёрами по семантическому сходству")
+                candidate_indices = candidate_indices_found
+                candidate_distances = candidate_distances_found
+                
+                logger.info(f"[SEARCH MOVIES] Отранжировано {len(candidate_indices)} фильмов с актёрами через FAISS search")
                 else:
                     logger.warning(f"[SEARCH MOVIES] Не найдено описаний для фильмов с актёрами")
                     candidate_indices = all_movie_indices
@@ -1773,28 +1770,39 @@ def search_movies(query, top_k=15):
                             actor_movie_descriptions.append(description)
                             valid_indices.append(idx)
                     
-                    if actor_movie_descriptions:
-                        logger.info(f"[SEARCH MOVIES] Генерируем эмбеддинги для {len(actor_movie_descriptions)} фильмов с актёром...")
-                        actor_movie_embeddings = model.encode(actor_movie_descriptions, convert_to_numpy=True, normalize_embeddings=False, batch_size=int(os.getenv('EMBEDDINGS_BATCH_SIZE', '64')))
+                    if actor_movie_indices:
+                        # ОПТИМИЗАЦИЯ: Используем FAISS search напрямую для быстрого ранжирования
+                        # Вместо перегенерации эмбеддингов - используем обычный FAISS поиск
+                        logger.info(f"[SEARCH MOVIES] Используем FAISS search для ранжирования {len(actor_movie_indices)} найденных фильмов...")
                         
-                        query_emb_flat = query_emb[0]
-                        distances = []
-                        for emb in actor_movie_embeddings:
-                            dot_product = np.dot(query_emb_flat, emb)
-                            norm_query = np.linalg.norm(query_emb_flat)
-                            norm_emb = np.linalg.norm(emb)
-                            if norm_query > 0 and norm_emb > 0:
-                                cosine_sim = dot_product / (norm_query * norm_emb)
-                                distance = 1.0 - cosine_sim
-                            else:
-                                distance = 1.0
-                            distances.append(distance)
+                        # Делаем обычный FAISS search, но потом фильтруем только наши индексы
+                        D_full, I_full = index.search(query_emb, k=min(search_k, len(movies)))
+                        candidate_indices_found = []
+                        candidate_distances_found = []
                         
-                        sorted_pairs = sorted(zip(valid_indices, distances), key=lambda x: x[1])
-                        candidate_indices = [idx for idx, _ in sorted_pairs]
-                        candidate_distances = [dist for _, dist in sorted_pairs]
+                        # Создаём set для быстрого поиска
+                        target_indices_set = set(actor_movie_indices)
                         
-                        logger.info(f"[SEARCH MOVIES] Отранжировано {len(candidate_indices)} фильмов с актёром по семантическому сходству")
+                        # Идём по результатам FAISS и берём только те, что в нашем списке
+                        for dist, idx in zip(D_full[0], I_full[0]):
+                            if idx in target_indices_set:
+                                candidate_indices_found.append(int(idx))
+                                candidate_distances_found.append(float(dist))
+                                # Если нашли все наши индексы - можно прервать
+                                if len(candidate_indices_found) >= len(actor_movie_indices):
+                                    break
+                        
+                        # Если не все нашли через FAISS (может быть из-за порядка), добавляем остальные с большим расстоянием
+                        found_set = set(candidate_indices_found)
+                        for idx in actor_movie_indices:
+                            if idx not in found_set:
+                                candidate_indices_found.append(idx)
+                                candidate_distances_found.append(1.0)  # Максимальное расстояние для не найденных
+                        
+                        candidate_indices = candidate_indices_found
+                        candidate_distances = candidate_distances_found
+                        
+                        logger.info(f"[SEARCH MOVIES] Отранжировано {len(candidate_indices)} фильмов с актёром через FAISS search")
                     else:
                         logger.warning(f"[SEARCH MOVIES] Не найдено описаний для фильмов с актёром")
                         candidate_indices = actor_movie_indices
