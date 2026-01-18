@@ -1037,6 +1037,48 @@ def _normalize_text(text):
     return normalized
 
 
+def _levenshtein_distance(s1, s2):
+    """Вычисляет расстояние Левенштейна между двумя строками"""
+    if len(s1) < len(s2):
+        return _levenshtein_distance(s2, s1)
+    
+    if len(s2) == 0:
+        return len(s1)
+    
+    previous_row = list(range(len(s2) + 1))
+    for i, c1 in enumerate(s1):
+        current_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = previous_row[j + 1] + 1
+            deletions = current_row[j] + 1
+            substitutions = previous_row[j] + (c1 != c2)
+            current_row.append(min(insertions, deletions, substitutions))
+        previous_row = current_row
+    
+    return previous_row[-1]
+
+
+def _find_name_in_set_with_typos(name, name_set, max_distance=2):
+    """
+    Ищет имя в множестве с учётом опечаток (расстояние Левенштейна <= max_distance).
+    Сначала проверяет точное совпадение, затем ищет с учётом опечаток.
+    
+    Returns:
+        tuple: (found, matched_name) где found - bool, matched_name - найденное имя из set или None
+    """
+    # Сначала проверяем точное совпадение (быстро)
+    if name in name_set:
+        return (True, name)
+    
+    # Если не найдено точно, ищем с учётом опечаток
+    for candidate in name_set:
+        distance = _levenshtein_distance(name, candidate)
+        if distance <= max_distance:
+            return (True, candidate)
+    
+    return (False, None)
+
+
 def _get_actor_position(actors_str, actor_name_normalized):
     """
     Определяет позицию актёра в списке актёров фильма.
@@ -1390,20 +1432,31 @@ def search_movies(query, top_k=15):
                     potential_name = ' '.join(query_en_words[i:i+word_count])
                     potential_name_normalized = _normalize_text(potential_name)
                     
-                    # Проверяем в топ-актёрах (приоритет №1)
-                    if top_actors_set and potential_name_normalized in top_actors_set:
-                        if potential_name_normalized not in found_names:
-                            found_names.add(potential_name_normalized)
-                            mentioned_actors_en.append(('actor', potential_name_normalized))
-                            logger.info(f"[SEARCH MOVIES] Найдено имя актёра в топ-{TOP_ACTORS_COUNT}: '{potential_name_normalized}' ({word_count} слова)")
+                    # Проверяем в топ-актёрах (приоритет №1) с учётом опечаток (расстояние Левенштейна <= 2)
+                    if top_actors_set:
+                        found_actor, matched_actor_name = _find_name_in_set_with_typos(potential_name_normalized, top_actors_set, max_distance=2)
+                        if found_actor:
+                            # Используем правильное имя из топ-списка (может отличаться от запроса из-за опечаток)
+                            if matched_actor_name not in found_names:
+                                found_names.add(matched_actor_name)
+                                mentioned_actors_en.append(('actor', matched_actor_name))
+                                if matched_actor_name != potential_name_normalized:
+                                    logger.info(f"[SEARCH MOVIES] Найдено имя актёра в топ-{TOP_ACTORS_COUNT} с учётом опечатки: '{potential_name_normalized}' → '{matched_actor_name}' (расстояние Левенштейна <= 2)")
+                                else:
+                                    logger.info(f"[SEARCH MOVIES] Найдено имя актёра в топ-{TOP_ACTORS_COUNT}: '{matched_actor_name}' ({word_count} слова)")
                     
-                    # Проверяем в топ-режиссёрах (приоритет №2, только если не актёр)
-                    elif top_directors_set and potential_name_normalized in top_directors_set:
-                        # Режиссёры добавляем только если это не актёр (проверяем, не найден ли как актёр)
-                        if potential_name_normalized not in found_names:
-                            found_names.add(potential_name_normalized)
-                            mentioned_actors_en.append(('director', potential_name_normalized))
-                            logger.info(f"[SEARCH MOVIES] Найдено имя режиссёра в топ-{TOP_DIRECTORS_COUNT}: '{potential_name_normalized}' ({word_count} слова)")
+                    # Проверяем в топ-режиссёрах (приоритет №2, только если не актёр) с учётом опечаток
+                    elif top_directors_set:
+                        found_director, matched_director_name = _find_name_in_set_with_typos(potential_name_normalized, top_directors_set, max_distance=2)
+                        if found_director:
+                            # Режиссёры добавляем только если это не актёр (проверяем, не найден ли как актёр)
+                            if matched_director_name not in found_names:
+                                found_names.add(matched_director_name)
+                                mentioned_actors_en.append(('director', matched_director_name))
+                                if matched_director_name != potential_name_normalized:
+                                    logger.info(f"[SEARCH MOVIES] Найдено имя режиссёра в топ-{TOP_DIRECTORS_COUNT} с учётом опечатки: '{potential_name_normalized}' → '{matched_director_name}' (расстояние Левенштейна <= 2)")
+                                else:
+                                    logger.info(f"[SEARCH MOVIES] Найдено имя режиссёра в топ-{TOP_DIRECTORS_COUNT}: '{matched_director_name}' ({word_count} слова)")
         
         # Если не нашли в топ-списках, НЕ предполагаем что это актёр
         # Топ-список актёров - это единственный источник истины для определения актёров
