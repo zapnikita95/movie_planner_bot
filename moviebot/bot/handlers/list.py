@@ -243,8 +243,6 @@ def show_list_page(bot, chat_id, user_id, page=1, message_id=None):
                 year_str = f" ({year})" if year and year != '—' and str(year).lower() != 'none' else ""
                 text += f"• <b>{title}</b>{year_str}{genre_str} [ID: {movie_id}]\n<a href='{link}'>{link}</a>\n\n"
             
-            text += "\n<i>В ответном сообщении пришлите ID фильмов, и они будут отмечены как просмотренные</i>"
-            
             # Создаем кнопки пагинации
             markup = InlineKeyboardMarkup()
             
