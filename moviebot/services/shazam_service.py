@@ -755,9 +755,10 @@ def build_tmdb_index():
             # Попытка 1: парсим как JSON
             items = json.loads(cast_value) if isinstance(cast_value, str) else cast_value
             if isinstance(items, list):
-                # Берём первые 30 актёров для поиска (раньше было 10)
-                # Это важно для поиска фильмов с несколькими актёрами, которые могут быть дальше в списке
-                names = [item.get('name', '') for item in items[:30] if isinstance(item, dict) and 'name' in item]
+                # Берём первые 60 актёров для поиска (раньше было 10, потом 30)
+                # Это важно для поиска фильмов с актёрами, которые могут быть дальше в списке
+                # Например, в "Speed" (1994) Keanu Reeves находится на позиции 47
+                names = [item.get('name', '') for item in items[:60] if isinstance(item, dict) and 'name' in item]
                 return ', '.join([n for n in names if n])
         except (json.JSONDecodeError, TypeError, AttributeError):
             pass
@@ -766,9 +767,10 @@ def build_tmdb_index():
         try:
             cast_str = str(cast_value).strip()
             if cast_str and cast_str != 'nan' and not cast_str.startswith('['):
-                # Разбиваем по запятым, берём первые 30 для поиска (раньше было 10)
-                # Это важно для поиска фильмов с несколькими актёрами, которые могут быть дальше в списке
-                actors = [a.strip() for a in cast_str.split(',')[:30] if a.strip()]
+                # Разбиваем по запятым, берём первые 60 для поиска (раньше было 10, потом 30)
+                # Это важно для поиска фильмов с актёрами, которые могут быть дальше в списке
+                # Например, в "Speed" (1994) Keanu Reeves находится на позиции 47
+                actors = [a.strip() for a in cast_str.split(',')[:60] if a.strip()]
                 return ', '.join(actors)
         except (TypeError, AttributeError):
             pass
