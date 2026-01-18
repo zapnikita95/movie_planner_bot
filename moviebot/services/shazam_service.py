@@ -1606,10 +1606,6 @@ def search_movies(query, top_k=15):
                 candidate_distances = candidate_distances_found
                 
                 logger.info(f"[SEARCH MOVIES] Отранжировано {len(candidate_indices)} фильмов с режиссёром и актёрами через FAISS search")
-                else:
-                    logger.warning(f"[SEARCH MOVIES] Не найдено описаний для фильмов с режиссёром и актёрами")
-                    candidate_indices = all_movie_indices
-                    candidate_distances = [0.0] * len(all_movie_indices)
             else:
                 logger.warning(f"[SEARCH MOVIES] Не найдено фильмов с указанным режиссёром и актёрами")
                 mentioned_actor_en = None
@@ -1717,10 +1713,6 @@ def search_movies(query, top_k=15):
                 candidate_distances = candidate_distances_found
                 
                 logger.info(f"[SEARCH MOVIES] Отранжировано {len(candidate_indices)} фильмов с актёрами через FAISS search")
-                else:
-                    logger.warning(f"[SEARCH MOVIES] Не найдено описаний для фильмов с актёрами")
-                    candidate_indices = all_movie_indices
-                    candidate_distances = [0.0] * len(all_movie_indices)
             else:
                 logger.warning(f"[SEARCH MOVIES] Не найдено фильмов с указанными актёрами")
                 mentioned_actor_en = None
