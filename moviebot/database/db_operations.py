@@ -165,10 +165,12 @@ def get_user_timezone(user_id):
 
     # Используем локальное подключение, чтобы не зависеть от глобального курсора
     conn_local = get_db_connection()
-    cursor_local = get_db_cursor()
+    cursor_local = None
 
     try:
         with db_lock:
+            # Создаем курсор напрямую из соединения внутри db_lock, чтобы избежать проблем с закрытым курсором
+            cursor_local = conn_local.cursor()
             cursor_local.execute(
                 "SELECT value FROM settings WHERE chat_id = %s AND key = %s",
                 (user_id, 'user_timezone')
@@ -196,10 +198,11 @@ def get_user_timezone(user_id):
         logger.error(f"Ошибка получения часового пояса для user_id={user_id}: {e}", exc_info=True)
         return None
     finally:
-        try:
-            cursor_local.close()
-        except:
-            pass
+        if cursor_local:
+            try:
+                cursor_local.close()
+            except:
+                pass
         try:
             conn_local.close()
         except:
