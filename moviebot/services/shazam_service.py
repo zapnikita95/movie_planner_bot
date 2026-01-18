@@ -1324,9 +1324,36 @@ def _extract_keywords(query_en):
     return keywords
 
 
+def _check_series_keywords(query):
+    """Проверяет, упоминаются ли в запросе слова о сериалах"""
+    import re
+    
+    # Слова, указывающие на поиск сериала (на русском и английском)
+    series_keywords = [
+        'сериал', 'сериалы', 'серия', 'серии', 'сезон', 'сезоны', 'сезонов', 
+        'эпизод', 'эпизоды', 'эпизодов', 'серик', 'серики',
+        'series', 'tv series', 'tv show', 'tv shows', 'episode', 'episodes',
+        'season', 'seasons', 'serial', 'serials'
+    ]
+    
+    query_lower = query.lower()
+    for keyword in series_keywords:
+        # Ищем целое слово (с границами слов)
+        pattern = r'\b' + re.escape(keyword) + r'\b'
+        if re.search(pattern, query_lower, re.IGNORECASE):
+            return True
+    
+    return False
+
+
 def search_movies(query, top_k=15):
     try:
         logger.info(f"[SEARCH MOVIES] Начало поиска для запроса: '{query}' (FUZZINESS_LEVEL={FUZZINESS_LEVEL})")
+        
+        # Проверяем, упоминаются ли слова о сериалах
+        is_series_query = _check_series_keywords(query)
+        if is_series_query:
+            logger.info(f"[SEARCH MOVIES] В запросе упомянуты слова о сериалах - фильтруем по сериалам")
         
         # Удаляем мусорные фразы о желании посмотреть фильм
         query_cleaned = _remove_wish_phrases(query)
@@ -1757,10 +1784,16 @@ def search_movies(query, top_k=15):
             candidate_distances = [float(D[0][i]) for i in range(len(I[0]))]
             logger.info(f"[SEARCH MOVIES] Обычный поиск, кандидатов: {len(candidate_indices)}")
         
-        # Ранжируем кандидатов
+        # Ранжируем кандидаты
         logger.info(f"[SEARCH MOVIES] Шаг 6: Формирование результатов...")
         results = []
         for i, idx in enumerate(candidate_indices):
+            # Если пользователь искал сериалы, но в индексе нет информации о типе - пропускаем фильтрацию
+            # В будущем, когда будет поле is_series в индексе, здесь можно будет фильтровать:
+            # if is_series_query:
+            #     row_is_series = row.get('is_series', False) if 'is_series' in row.index else False
+            #     if not row_is_series:
+            #         continue  # Пропускаем фильмы, оставляем только сериалы
             if idx >= len(movies):
                 continue
             row = movies.iloc[idx]
