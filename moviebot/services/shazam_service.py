@@ -186,9 +186,42 @@ def get_whisper():
 
 
 def _clean_russian_fillers(text):
-    """Удаляет русские слова-паразиты и междометия из текста перед переводом"""
+    """
+    Удаляет русские слова-паразиты и междометия из текста перед переводом.
+    ВАЖНО: Не трогает английские слова (уже заменённые имена актёров), чтобы сохранить их корректность.
+    """
     import re
     
+    # Проверяем, есть ли в тексте английские слова (заменённые имена актёров)
+    # Если есть - работаем более аккуратно, не трогая английские слова
+    has_english_words = bool(re.search(r'\b[A-Za-z][A-Za-z]+\b', text))
+    
+    # Если есть английские слова - используем более мягкую очистку, сохраняя структуру
+    if has_english_words:
+        # Удаляем только русские слова-паразиты, НЕ меняя регистр и структуру английских слов
+        russian_fillers_pattern = re.compile(
+            r'\b(?:типа|как бы|какбы|как-бы|вообще|вобщем|короче|значит|вот|это|такое|там|тут|здесь|'
+            r'ну|э|эм|мм|а|ах|ох|ух|хм|хмык|да|даа|нет|ладно|окей|ок|ага|угу|мда|'
+            r'слушай|понимаешь|видишь|знаешь|слышишь|представь|понял|кстати|собственно|'
+            r'впрочем|практически|конечно|разумеется|естественно|то есть|тоесть|так сказать|'
+            r'таксказать|в принципе|впринципе|в общем|вобщем|в общем-то|что-то|чтото|что то|'
+            r'блин|черт|черт побери|черт знает|черт возьми)\b',
+            re.IGNORECASE
+        )
+        
+        # Удаляем русские слова-паразиты, сохраняя английские слова
+        cleaned_text = russian_fillers_pattern.sub('', text)
+        
+        # Убираем лишние пробелы
+        cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
+        
+        # Если слишком много удалилось - возвращаем оригинал
+        if not cleaned_text or len(cleaned_text.split()) < 2:
+            return text
+        
+        return cleaned_text
+    
+    # Если нет английских слов - используем старую логику (полная очистка)
     # Большой список русских слов-паразитов, междометий и слов, которые могут ухудшить поиск
     russian_fillers = [
         # Междометия и звуки
@@ -340,6 +373,10 @@ def _replace_russian_actor_names(text):
         ('брэда питта', 'Brad Pitt'),
         ('брэду питту', 'Brad Pitt'),
         ('брэдом питтом', 'Brad Pitt'),
+        ('бред питт', 'Brad Pitt'),  # Опечатка: "Бред" вместо "Брэд"
+        ('бреда питта', 'Brad Pitt'),
+        ('бреду питту', 'Brad Pitt'),
+        ('бредом питтом', 'Brad Pitt'),
         ('леонардо дикаприо', 'Leonardo DiCaprio'),
         ('леонардо ди каприо', 'Leonardo DiCaprio'),
         ('леонарда дикаприо', 'Leonardo DiCaprio'),
@@ -403,12 +440,45 @@ def translate_to_english(text):
             text_with_replaced_names = _replace_russian_actor_names(text)
             
             # ШАГ 2: Очищаем текст от русских слов-паразитов перед переводом
+            # ВАЖНО: _clean_russian_fillers теперь сохраняет английские слова (заменённые имена)
             cleaned_text = _clean_russian_fillers(text_with_replaced_names)
             if cleaned_text != text_with_replaced_names:
                 logger.info(f"[TRANSLATE] Очищен текст от слов-паразитов: '{text_with_replaced_names[:100]}...' → '{cleaned_text[:100]}...'")
             
-            result = translator(cleaned_text, max_length=512)
-            translated = result[0]['translation_text']
+            # ШАГ 3: Защищаем английские имена от перевода - заменяем на временные плейсхолдеры
+            # Это критично, потому что переводчик может разбить "Morgan Freeman" на "Morgan is a freeman"
+            import re
+            english_names_pattern = re.compile(r'\b([A-Z][a-z]+ [A-Z][a-z]+)\b')  # Имена вида "Morgan Freeman"
+            placeholders = {}
+            placeholder_counter = 0
+            protected_text = cleaned_text
+            
+            def replace_with_placeholder(match):
+                nonlocal placeholder_counter
+                name = match.group(1)
+                placeholder = f"__ACTOR_NAME_{placeholder_counter}__"
+                placeholders[placeholder] = name
+                placeholder_counter += 1
+                return placeholder
+            
+            # Заменяем все английские имена на плейсхолдеры
+            protected_text = english_names_pattern.sub(replace_with_placeholder, protected_text)
+            
+            # ШАГ 4: Переводим защищённый текст (без английских имён)
+            if any(c.lower() in russian_chars for c in protected_text):
+                result = translator(protected_text, max_length=512)
+                translated_protected = result[0]['translation_text']
+            else:
+                # Весь текст уже на английском (все имена заменены) - используем как есть
+                translated_protected = protected_text
+            
+            # ШАГ 5: Возвращаем английские имена обратно
+            translated = translated_protected
+            for placeholder, original_name in placeholders.items():
+                translated = translated.replace(placeholder, original_name)
+            
+            if placeholders:
+                logger.info(f"[TRANSLATE] Защищены английские имена от перевода: {len(placeholders)} имён")
             
             # Фикс для "Великая депрессия"
             if "great depression" in translated.lower():
