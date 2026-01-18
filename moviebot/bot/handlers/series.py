@@ -1435,6 +1435,81 @@ def search_films_with_type(query, page=1, search_type='mixed'):
     return films, total_pages
 
 # Обработчик поиска
+@bot.callback_query_handler(func=lambda call: call.data.startswith("view_film_from_ticket:"))
+def view_film_from_ticket_callback(call):
+    """Обработчик кнопки 'Описание фильма' из билетов - показывает описание запланированного фильма"""
+    try:
+        bot.answer_callback_query(call.id)
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        # Парсим kp_id из callback_data
+        kp_id = call.data.split(":")[1]
+        
+        # Получаем информацию о фильме из базы
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        film_row = None
+        try:
+            with db_lock:
+                cursor_local.execute('''
+                    SELECT id, title, link, watched
+                    FROM movies
+                    WHERE chat_id = %s AND kp_id = %s
+                ''', (chat_id, kp_id))
+                film_row = cursor_local.fetchone()
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
+        
+        if not film_row:
+            bot.answer_callback_query(call.id, "❌ Фильм не найден в базе", show_alert=True)
+            return
+        
+        if isinstance(film_row, dict):
+            film_id = film_row.get('id')
+            title = film_row.get('title')
+            link = film_row.get('link')
+            watched = film_row.get('watched', 0)
+        else:
+            film_id = film_row[0]
+            title = film_row[1]
+            link = film_row[2]
+            watched = film_row[3] if len(film_row) > 3 else 0
+        
+        # Получаем информацию о фильме через API
+        from moviebot.api.kinopoisk_api import extract_movie_info
+        info = extract_movie_info(link)
+        
+        if not info:
+            bot.answer_callback_query(call.id, "❌ Не удалось получить информацию о фильме", show_alert=True)
+            return
+        
+        # Формируем existing для передачи в show_film_info_with_buttons
+        existing = (film_id, title, watched)
+        
+        # Показываем описание фильма
+        show_film_info_with_buttons(
+            chat_id=chat_id,
+            user_id=user_id,
+            info=info,
+            link=link,
+            kp_id=kp_id,
+            existing=existing
+        )
+    except Exception as e:
+        logger.error(f"[VIEW FILM FROM TICKET] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("add_film_"))
 def search_film_callback(call):
     try:
@@ -2674,6 +2749,62 @@ def handle_rand_content_type(call):
                 title = plan_row[4]
                 kp_id = plan_row[5] if len(plan_row) > 5 else None
             
+            # Если нет билетов и есть film_id и kp_id, открываем описание фильма напрямую
+            if not ticket_file_id and film_id and kp_id:
+                # Получаем информацию о фильме из базы
+                conn_film = get_db_connection()
+                cursor_film = get_db_cursor()
+                film_row = None
+                try:
+                    with db_lock:
+                        cursor_film.execute('''
+                            SELECT id, title, link, watched
+                            FROM movies
+                            WHERE chat_id = %s AND kp_id = %s
+                        ''', (chat_id, kp_id))
+                        film_row = cursor_film.fetchone()
+                finally:
+                    try:
+                        cursor_film.close()
+                    except:
+                        pass
+                    try:
+                        conn_film.close()
+                    except:
+                        pass
+                
+                if film_row:
+                    if isinstance(film_row, dict):
+                        film_id_val = film_row.get('id')
+                        film_title = film_row.get('title')
+                        link = film_row.get('link')
+                        watched = film_row.get('watched', 0)
+                    else:
+                        film_id_val = film_row[0]
+                        film_title = film_row[1]
+                        link = film_row[2]
+                        watched = film_row[3] if len(film_row) > 3 else 0
+                    
+                    # Получаем информацию о фильме через API
+                    from moviebot.api.kinopoisk_api import extract_movie_info
+                    info = extract_movie_info(link)
+                    
+                    if info:
+                        # Формируем existing для передачи в show_film_info_with_buttons
+                        existing = (film_id_val, film_title, watched)
+                        
+                        # Показываем описание фильма
+                        show_film_info_with_buttons(
+                            chat_id=chat_id,
+                            user_id=user_id,
+                            info=info,
+                            link=link,
+                            kp_id=kp_id,
+                            existing=existing
+                        )
+                        return
+            
+            # Если есть билеты или это мероприятие без фильма, показываем информацию о сеансе
             # Форматируем дату и время
             user_tz = get_user_timezone_or_default(user_id)
             if plan_dt:
@@ -2797,9 +2928,9 @@ def handle_rand_content_type(call):
 
     @bot.callback_query_handler(func=lambda call: call.data.startswith("ticket_new_film"))
     def ticket_new_film_callback(call):
-        """Обработчик кнопки 'Добавить фильм' - начинает флоу добавления билета на фильм"""
+        """Обработчик кнопки 'Добавить фильм' - начинает флоу планирования фильма в кино"""
         try:
-            from moviebot.states import user_ticket_state
+            from moviebot.states import user_plan_state
             
             bot.answer_callback_query(call.id)
             user_id = call.from_user.id
@@ -2809,51 +2940,35 @@ def handle_rand_content_type(call):
             parts = call.data.split(":")
             file_id = parts[1] if len(parts) > 1 else None
             
-            # Начинаем флоу добавления билета на фильм
-            user_ticket_state[user_id] = {
-                'step': 'waiting_new_session',
+            # Начинаем флоу планирования фильма в кино
+            # Устанавливаем состояние планирования с автоматическим plan_type='cinema'
+            user_plan_state[user_id] = {
+                'step': 1,  # Шаг 1: ожидание ссылки или ID фильма
                 'chat_id': chat_id,
-                'type': 'film',
-                'file_id': file_id
+                'plan_type': 'cinema',  # Автоматически ставим "В кино"
+                'file_id': file_id  # Сохраняем file_id для последующего добавления билета
             }
             
-            # Проверяем, не совпадает ли текст с текущим сообщением
-            current_text = call.message.text or ""
-            new_text = (
-                "🎬 <b>Добавление билета на фильм</b>\n\n"
-                "Отправьте ссылку на фильм или его ID с Кинопоиска и укажите дату/время сеанса.\n"
-                "Формат: ссылка или ID + дата + время\n"
-                "Например: https://kinopoisk.ru/film/123456/ 15 января 19:30"
-            )
+            # Отправляем сообщение с запросом ссылки
+            text = "Пришлите в ответном сообщении ссылку или ID фильма, которое хотели бы запланировать к просмотру"
             
-            # Если текст совпадает, просто обновляем клавиатуру или отправляем новое сообщение
-            if current_text.strip() == new_text.strip():
-                # Текст не изменился, отправляем новое сообщение
-                bot.send_message(
+            try:
+                bot.edit_message_text(
+                    text,
                     chat_id,
-                    new_text,
+                    call.message.message_id,
                     parse_mode='HTML'
                 )
-            else:
-                # Текст изменился, обновляем сообщение
+            except Exception as edit_e:
+                logger.error(f"[TICKET NEW FILM] Ошибка при редактировании сообщения: {edit_e}", exc_info=True)
                 try:
-                    bot.edit_message_text(
-                        new_text,
+                    bot.send_message(
                         chat_id,
-                        call.message.message_id,
+                        text,
                         parse_mode='HTML'
                     )
-                except telebot.apihelper.ApiTelegramException as e:
-                    error_str = str(e).lower()
-                    if "message is not modified" in error_str:
-                        # Если сообщение не изменилось, отправляем новое
-                        bot.send_message(
-                            chat_id,
-                            new_text,
-                            parse_mode='HTML'
-                        )
-                    else:
-                        raise
+                except Exception as send_e:
+                    logger.error(f"[TICKET NEW FILM] Ошибка при отправке сообщения: {send_e}", exc_info=True)
         except Exception as e:
             logger.error(f"[TICKET NEW FILM] Ошибка: {e}", exc_info=True)
             try:

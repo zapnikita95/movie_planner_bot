@@ -150,8 +150,11 @@ def clean_action_choice(call):
                     'chat_id': chat_id,
                     'members_count': active_members_count,
                     'voted': set(),
-                    'active_members': active_members
+                    'active_members': active_members,
+                    'action': 'chat'  # Явно указываем action для chat_db
                 }
+                
+                logger.info(f"[CLEAN] Создано голосование для chat_db: message_id={msg.message_id}, chat_id={chat_id}, members_count={active_members_count}, active_members={active_members}")
                 
                 bot.edit_message_text("✅ Запрос на обнуление базы отправлен. Ожидаю подтверждения всех активных участников.", call.message.chat.id, call.message.message_id)
             except Exception as e:
@@ -451,19 +454,27 @@ def check_clean_reply(message):
     
     # 2. Проверяем clean_chat_text_votes для chat_db и unwatched_movies
     # ВАЖНО: Проверяем ВСЕ сообщения в clean_chat_text_votes для этого чата, не только reply
+    logger.info(f"[CHECK CLEAN REPLY] Проверка clean_chat_text_votes: всего голосований={len(clean_chat_text_votes)}, chat_id={chat_id}, user_id={user_id}")
     for reply_msg_id, vote_state in clean_chat_text_votes.items():
-        if vote_state['chat_id'] == chat_id and user_id in vote_state['active_members']:
-            # Если есть reply, проверяем, что это правильное сообщение
-            if message.reply_to_message:
-                if message.reply_to_message.message_id == reply_msg_id:
-                    logger.info(f"[CHECK CLEAN REPLY] ✅ Группа: найдено голосование reply_msg_id={reply_msg_id}, user_id={user_id}")
+        logger.info(f"[CHECK CLEAN REPLY] Проверка голосования: reply_msg_id={reply_msg_id}, vote_chat_id={vote_state['chat_id']}, user_in_active={user_id in vote_state['active_members']}, active_members={vote_state['active_members']}")
+        if vote_state['chat_id'] == chat_id:
+            if user_id in vote_state['active_members']:
+                # Если есть reply, проверяем, что это правильное сообщение
+                if message.reply_to_message:
+                    if message.reply_to_message.message_id == reply_msg_id:
+                        logger.info(f"[CHECK CLEAN REPLY] ✅ Группа: найдено голосование reply_msg_id={reply_msg_id}, user_id={user_id}")
+                        return True
+                    else:
+                        logger.info(f"[CHECK CLEAN REPLY] ❌ Группа: reply_msg_id не совпадает: reply={message.reply_to_message.message_id}, ожидалось={reply_msg_id}")
+                else:
+                    # Если нет reply, но есть активное голосование в этом чате, тоже принимаем
+                    # Это позволяет обрабатывать сообщения без reply, если они в правильном чате
+                    logger.info(f"[CHECK CLEAN REPLY] ✅ Группа: найдено голосование без reply reply_msg_id={reply_msg_id}, user_id={user_id}")
                     return True
             else:
-                # Если нет reply, но есть активное голосование в этом чате, тоже принимаем
-                # Это позволяет обрабатывать сообщения без reply, если они в правильном чате
-                logger.info(f"[CHECK CLEAN REPLY] ✅ Группа: найдено голосование без reply reply_msg_id={reply_msg_id}, user_id={user_id}")
-                return True
+                logger.info(f"[CHECK CLEAN REPLY] ❌ Группа: user_id={user_id} не в active_members={vote_state['active_members']}")
     
+    logger.info(f"[CHECK CLEAN REPLY] ❌ Группа: не найдено подходящего голосования для user_id={user_id}, chat_id={chat_id}")
     return False
 
 

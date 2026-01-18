@@ -1385,6 +1385,30 @@ def get_plan_link_internal(message, state):
 
     user_plan_state[user_id]['link'] = link
     user_plan_state[user_id]['kp_id'] = kp_id  # Сохраняем kp_id в состояние
+    
+    # Если plan_type уже установлен (например, 'cinema' из ticket_new_film_callback), пропускаем шаг выбора места
+    plan_type = state.get('plan_type')
+    if plan_type == 'cinema':
+        # Автоматически устанавливаем plan_type='cinema' и переходим к выбору даты (step=3)
+        user_plan_state[user_id]['plan_type'] = 'cinema'
+        user_plan_state[user_id]['step'] = 3
+        
+        # Отправляем сообщение с запросом даты
+        date_text = (
+            "📅 <b>Когда планируете смотреть?</b>\n\n"
+            "Примеры:\n"
+            "• сегодня\n"
+            "• завтра 20:00\n"
+            "• 15.01\n"
+            "• понедельник вечером\n"
+            "• 17 января 21:00"
+        )
+        prompt_msg = bot.send_message(chat_id, date_text, parse_mode='HTML')
+        user_plan_state[user_id]['prompt_message_id'] = prompt_msg.message_id
+        logger.info(f"[PLAN] Пропущен шаг выбора места для plan_type=cinema, переходим к выбору даты (step=3)")
+        return
+    
+    # Если plan_type не установлен, показываем выбор места (step=2)
     user_plan_state[user_id]['step'] = 2
 
     markup = InlineKeyboardMarkup()

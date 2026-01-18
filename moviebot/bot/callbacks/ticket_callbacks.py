@@ -205,12 +205,10 @@ def ticket_new_callback(call):
         markup.add(InlineKeyboardButton("➕ Добавить фильм", callback_data=f"ticket_new_film:{file_id}" if file_id else "ticket_new_film"))
         #markup.add(InlineKeyboardButton("🎤 Добавить билет", callback_data="ticket:add_event"))
         markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-        markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
         
         try:
             bot.edit_message_text(
-                "🎫 <b>Добавление билета</b>\n\n"
-                "Выберите тип билета:",
+                "🎫 <b>Добавление билета</b>",
                 chat_id,
                 call.message.message_id,
                 reply_markup=markup,
@@ -221,8 +219,7 @@ def ticket_new_callback(call):
             try:
                 bot.send_message(
                     chat_id,
-                    "🎫 <b>Добавление билета</b>\n\n"
-                    "Выберите тип билета:",
+                    "🎫 <b>Добавление билета</b>",
                     reply_markup=markup,
                     parse_mode='HTML'
                 )
