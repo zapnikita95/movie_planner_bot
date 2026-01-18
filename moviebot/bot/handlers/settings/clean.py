@@ -409,7 +409,7 @@ def check_clean_reply(message):
     text = message.text.strip().upper() if message.text else ""
     
     # Нормализуем текст: убираем пробелы, запятые, приводим к верхнему регистру
-    normalized_text = text.replace(' ', '').replace(',', '').upper()
+    normalized_text = text.replace(' ', '').replace(',', '').replace('.', '').upper()
     if normalized_text != 'ДАУДАЛИТЬ':
         return False
     
@@ -422,6 +422,7 @@ def check_clean_reply(message):
         state = user_private_handler_state[user_id]
         handler_name = state.get('handler')
         if handler_name in ['clean_chat', 'clean_user', 'clean_imported_ratings']:
+            logger.info(f"[CHECK CLEAN REPLY] ✅ Личный чат: handler={handler_name}, user_id={user_id}")
             return True
         return False
     
@@ -433,22 +434,34 @@ def check_clean_reply(message):
         if target in ['user', 'imported_ratings']:
             # Для групп нужен реплай
             if not message.reply_to_message:
+                logger.info(f"[CHECK CLEAN REPLY] ❌ Группа: нет reply_to_message для target={target}, user_id={user_id}")
                 return False
             if not message.reply_to_message.from_user or message.reply_to_message.from_user.id != BOT_ID:
+                logger.info(f"[CHECK CLEAN REPLY] ❌ Группа: reply не от бота для target={target}, user_id={user_id}")
                 return False
             reply_text = message.reply_to_message.text or ""
             if target == 'user' and "Обнуление базы данных пользователя" not in reply_text:
+                logger.info(f"[CHECK CLEAN REPLY] ❌ Группа: текст reply не соответствует для target={target}, user_id={user_id}")
                 return False
             if target == 'imported_ratings' and "Удаление импортированных оценок с Кинопоиска" not in reply_text:
+                logger.info(f"[CHECK CLEAN REPLY] ❌ Группа: текст reply не соответствует для target={target}, user_id={user_id}")
                 return False
+            logger.info(f"[CHECK CLEAN REPLY] ✅ Группа: target={target}, user_id={user_id}")
             return True
     
-    # 2. Проверяем clean_chat_text_votes для chat_db
-    if message.reply_to_message:
-        reply_msg_id = message.reply_to_message.message_id
-        if reply_msg_id in clean_chat_text_votes:
-            vote_state = clean_chat_text_votes[reply_msg_id]
-            if vote_state['chat_id'] == chat_id and user_id in vote_state['active_members']:
+    # 2. Проверяем clean_chat_text_votes для chat_db и unwatched_movies
+    # ВАЖНО: Проверяем ВСЕ сообщения в clean_chat_text_votes для этого чата, не только reply
+    for reply_msg_id, vote_state in clean_chat_text_votes.items():
+        if vote_state['chat_id'] == chat_id and user_id in vote_state['active_members']:
+            # Если есть reply, проверяем, что это правильное сообщение
+            if message.reply_to_message:
+                if message.reply_to_message.message_id == reply_msg_id:
+                    logger.info(f"[CHECK CLEAN REPLY] ✅ Группа: найдено голосование reply_msg_id={reply_msg_id}, user_id={user_id}")
+                    return True
+            else:
+                # Если нет reply, но есть активное голосование в этом чате, тоже принимаем
+                # Это позволяет обрабатывать сообщения без reply, если они в правильном чате
+                logger.info(f"[CHECK CLEAN REPLY] ✅ Группа: найдено голосование без reply reply_msg_id={reply_msg_id}, user_id={user_id}")
                 return True
     
     return False
@@ -529,58 +542,79 @@ def handle_clean_reply(message):
                 return
         
         # 2. Обрабатываем голосование для chat_db и unwatched_movies
+        # Проверяем ВСЕ активные голосования в этом чате
+        found_vote = False
+        reply_msg_id = None
+        
         if message.reply_to_message:
             reply_msg_id = message.reply_to_message.message_id
             if reply_msg_id in clean_chat_text_votes:
                 vote_state = clean_chat_text_votes[reply_msg_id]
                 if vote_state['chat_id'] == chat_id and user_id in vote_state['active_members']:
-                    # Добавляем пользователя в список проголосовавших
-                    if user_id not in vote_state['voted']:
-                        vote_state['voted'].add(user_id)
-                        action = vote_state.get('action', 'chat')
-                        logger.info(f"[CLEAN REPLY] Пользователь {user_id} проголосовал за {action}. Проголосовало: {len(vote_state['voted'])}/{vote_state['members_count']}")
-                        
-                        # Проверяем, все ли проголосовали
-                        if len(vote_state['voted']) >= vote_state['members_count']:
-                            # Все проголосовали - выполняем удаление
-                            logger.info(f"[CLEAN REPLY] Все участники проголосовали, выполняем удаление для {action}")
-                            
-                            # Создаем FakeMessage для handle_clean_confirm_internal
-                            class FakeMessage:
-                                def __init__(self, chat_id, user_id):
-                                    self.chat = type('obj', (object,), {'id': chat_id})()
-                                    class User:
-                                        def __init__(self, user_id):
-                                            self.id = user_id
-                                    self.from_user = User(user_id)
-                            
-                            fake_msg = FakeMessage(chat_id, user_id)
-                            
-                            # Устанавливаем target в зависимости от action
-                            target = 'chat' if action == 'chat' else 'unwatched_movies'
-                            user_clean_state[user_id] = {'target': target, 'confirm_needed': True}
-                            
-                            # Вызываем handle_clean_confirm_internal
-                            from moviebot.bot.handlers.series import handle_clean_confirm_internal
-                            handle_clean_confirm_internal(fake_msg)
-                            
-                            # Удаляем состояние голосования
-                            del clean_chat_text_votes[reply_msg_id]
-                            
-                            # Отправляем сообщение об успехе
-                            if action == 'chat':
-                                bot.send_message(chat_id, "✅ Все участники подтвердили. База данных чата обнулена.")
-                                logger.info(f"[CLEAN REPLY] ✅ База данных чата обнулена")
-                            else:
-                                bot.send_message(chat_id, "✅ Все участники подтвердили. Непросмотренные фильмы удалены.")
-                                logger.info(f"[CLEAN REPLY] ✅ Непросмотренные фильмы удалены")
-                        else:
-                            # Еще не все проголосовали
-                            remaining = vote_state['members_count'] - len(vote_state['voted'])
-                            bot.reply_to(message, f"✅ Ваш голос учтен. Осталось подтверждений: {remaining}")
+                    found_vote = True
+        else:
+            # Если нет reply, ищем активное голосование в этом чате
+            for msg_id, vote_state in clean_chat_text_votes.items():
+                if vote_state['chat_id'] == chat_id and user_id in vote_state['active_members']:
+                    reply_msg_id = msg_id
+                    found_vote = True
+                    break
+        
+        if found_vote and reply_msg_id:
+            vote_state = clean_chat_text_votes[reply_msg_id]
+            # Добавляем пользователя в список проголосовавших
+            if user_id not in vote_state['voted']:
+                vote_state['voted'].add(user_id)
+                action = vote_state.get('action', 'chat')
+                logger.info(f"[CLEAN REPLY] Пользователь {user_id} проголосовал за {action}. Проголосовало: {len(vote_state['voted'])}/{vote_state['members_count']}")
+                
+                # Проверяем, все ли проголосовали
+                if len(vote_state['voted']) >= vote_state['members_count']:
+                    # Все проголосовали - выполняем удаление
+                    logger.info(f"[CLEAN REPLY] Все участники проголосовали, выполняем удаление для {action}")
+                    
+                    # Создаем FakeMessage для handle_clean_confirm_internal
+                    class FakeMessage:
+                        def __init__(self, chat_id, user_id):
+                            self.chat = type('obj', (object,), {'id': chat_id})()
+                            class User:
+                                def __init__(self, user_id):
+                                    self.id = user_id
+                            self.from_user = User(user_id)
+                    
+                    fake_msg = FakeMessage(chat_id, user_id)
+                    
+                    # Устанавливаем target в зависимости от action
+                    target = 'chat' if action == 'chat' else 'unwatched_movies'
+                    user_clean_state[user_id] = {'target': target, 'confirm_needed': True}
+                    
+                    # Вызываем handle_clean_confirm_internal
+                    from moviebot.bot.handlers.series import handle_clean_confirm_internal
+                    handle_clean_confirm_internal(fake_msg)
+                    
+                    # Удаляем состояние голосования
+                    del clean_chat_text_votes[reply_msg_id]
+                    
+                    # Отправляем сообщение об успехе
+                    if action == 'chat':
+                        bot.send_message(chat_id, "✅ Все участники подтвердили. База данных чата обнулена.")
+                        logger.info(f"[CLEAN REPLY] ✅ База данных чата обнулена")
                     else:
-                        bot.reply_to(message, "✅ Вы уже проголосовали.")
-                return
+                        bot.send_message(chat_id, "✅ Все участники подтвердили. Непросмотренные фильмы удалены.")
+                        logger.info(f"[CLEAN REPLY] ✅ Непросмотренные фильмы удалены")
+                else:
+                    # Еще не все проголосовали
+                    remaining = vote_state['members_count'] - len(vote_state['voted'])
+                    if message.reply_to_message:
+                        bot.reply_to(message, f"✅ Ваш голос учтен. Осталось подтверждений: {remaining}")
+                    else:
+                        bot.send_message(chat_id, f"✅ Ваш голос учтен, {message.from_user.first_name}. Осталось подтверждений: {remaining}")
+            else:
+                if message.reply_to_message:
+                    bot.reply_to(message, "✅ Вы уже проголосовали.")
+                else:
+                    bot.send_message(chat_id, f"✅ Вы уже проголосовали, {message.from_user.first_name}.")
+            return
         
         logger.warning(f"[CLEAN REPLY] Не найдено соответствующего состояния для user_id={user_id}, chat_id={chat_id}")
     except Exception as e:
