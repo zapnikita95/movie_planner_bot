@@ -409,6 +409,13 @@ def _replace_russian_actor_names(text):
         ('руссла кроу', 'Russell Crowe'),
         ('русслу кроу', 'Russell Crowe'),
         ('русслом кроу', 'Russell Crowe'),
+        # Русские актёры с популярными фильмами
+        # В базе TMDB имя записано как "Sergei Bodrov" (не "Sergey"), но используем более стандартное "Sergey"
+        # Система найдёт через расстояние Левенштейна (Sergey vs Sergei - расстояние = 1)
+        ('сергей бодров', 'Sergey Bodrov'),
+        ('сергея бодрова', 'Sergey Bodrov'),
+        ('сергею бодрову', 'Sergey Bodrov'),
+        ('сергеем бодровым', 'Sergey Bodrov'),
     ]
     
     result_text = text
