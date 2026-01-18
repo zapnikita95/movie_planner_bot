@@ -313,6 +313,83 @@ def _clean_russian_fillers(text):
     return cleaned_text
 
 
+def _replace_russian_actor_names(text):
+    """
+    Заменяет популярные русские имена актёров на английские ДО перевода,
+    чтобы переводчик не пытался их переводить как обычные слова.
+    Например: "Морган Фриман" → "Morgan Freeman" (вместо "Morgan is a freeman")
+    """
+    import re
+    
+    # Словарь популярных русских имён актёров -> английские имена
+    # Формат: (русское_имя_нижний_регистр, английское_имя)
+    # Важно: русское имя должно быть в нижнем регистре для case-insensitive замены
+    actor_names_map = [
+        # Топ-актёры, которые часто переводятся неправильно
+        ('морган фриман', 'Morgan Freeman'),
+        ('моргана фримана', 'Morgan Freeman'),
+        ('моргану фриману', 'Morgan Freeman'),
+        ('морганом фриманом', 'Morgan Freeman'),
+        ('моргане фримане', 'Morgan Freeman'),
+        ('моргане фримане', 'Morgan Freeman'),
+        ('джим керри', 'Jim Carrey'),
+        ('джима керри', 'Jim Carrey'),
+        ('джиму керри', 'Jim Carrey'),
+        ('джимом керри', 'Jim Carrey'),
+        ('брэд питт', 'Brad Pitt'),
+        ('брэда питта', 'Brad Pitt'),
+        ('брэду питту', 'Brad Pitt'),
+        ('брэдом питтом', 'Brad Pitt'),
+        ('леонардо дикаприо', 'Leonardo DiCaprio'),
+        ('леонардо ди каприо', 'Leonardo DiCaprio'),
+        ('леонарда дикаприо', 'Leonardo DiCaprio'),
+        ('леонардо ди каприо', 'Leonardo DiCaprio'),
+        ('джонни депп', 'Johnny Depp'),
+        ('джонни деппа', 'Johnny Depp'),
+        ('джонни деппу', 'Johnny Depp'),
+        ('джонни деппом', 'Johnny Depp'),
+        ('киану ривз', 'Keanu Reeves'),
+        ('киану ривза', 'Keanu Reeves'),
+        ('киану ривзу', 'Keanu Reeves'),
+        ('киану ривзом', 'Keanu Reeves'),
+        ('том хэнкс', 'Tom Hanks'),
+        ('тома хэнкса', 'Tom Hanks'),
+        ('тому хэнксу', 'Tom Hanks'),
+        ('томом хэнксом', 'Tom Hanks'),
+        ('роберт де ниро', 'Robert De Niro'),
+        ('роберта де ниро', 'Robert De Niro'),
+        ('роберту де ниро', 'Robert De Niro'),
+        ('робертом де ниро', 'Robert De Niro'),
+        ('аль пачино', 'Al Pacino'),
+        ('аля пачино', 'Al Pacino'),
+        ('алю пачино', 'Al Pacino'),
+        ('алем пачино', 'Al Pacino'),
+        ('мел гибсон', 'Mel Gibson'),
+        ('мела гибсона', 'Mel Gibson'),
+        ('мелу гибсону', 'Mel Gibson'),
+        ('мелом гибсоном', 'Mel Gibson'),
+        ('руссл кроу', 'Russell Crowe'),
+        ('руссла кроу', 'Russell Crowe'),
+        ('русслу кроу', 'Russell Crowe'),
+        ('русслом кроу', 'Russell Crowe'),
+    ]
+    
+    result_text = text
+    replacements_made = []
+    
+    for ru_name, en_name in actor_names_map:
+        # Case-insensitive поиск с границами слов, чтобы не заменять части других слов
+        pattern = re.compile(r'\b' + re.escape(ru_name) + r'\b', re.IGNORECASE)
+        if pattern.search(result_text):
+            result_text = pattern.sub(en_name, result_text)
+            replacements_made.append(f"'{ru_name}' → '{en_name}'")
+    
+    if replacements_made:
+        logger.info(f"[TRANSLATE] Заменены русские имена актёров: {', '.join(replacements_made)}")
+    
+    return result_text
+
+
 def translate_to_english(text):
     translator = get_translator()
     if not translator or translator is False:
@@ -321,10 +398,14 @@ def translate_to_english(text):
     russian_chars = set('абвгдеёжзийклмнопрстуфхцчшщъыьэюя')
     if any(c.lower() in russian_chars for c in text):
         try:
-            # Очищаем текст от русских слов-паразитов перед переводом
-            cleaned_text = _clean_russian_fillers(text)
-            if cleaned_text != text:
-                logger.info(f"[TRANSLATE] Очищен текст от слов-паразитов: '{text[:100]}...' → '{cleaned_text[:100]}...'")
+            # ШАГ 1: Заменяем русские имена актёров на английские ДО перевода
+            # Это предотвращает неправильный перевод типа "Морган Фриман" → "Morgan is a freeman"
+            text_with_replaced_names = _replace_russian_actor_names(text)
+            
+            # ШАГ 2: Очищаем текст от русских слов-паразитов перед переводом
+            cleaned_text = _clean_russian_fillers(text_with_replaced_names)
+            if cleaned_text != text_with_replaced_names:
+                logger.info(f"[TRANSLATE] Очищен текст от слов-паразитов: '{text_with_replaced_names[:100]}...' → '{cleaned_text[:100]}...'")
             
             result = translator(cleaned_text, max_length=512)
             translated = result[0]['translation_text']
