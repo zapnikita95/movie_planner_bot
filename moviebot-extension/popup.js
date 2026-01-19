@@ -451,8 +451,11 @@ async function addFilmToDatabase(kpId) {
       alert('Ошибка добавления фильма: ' + (json.error || 'неизвестная ошибка'));
     }
   } catch (err) {
-    console.error('Ошибка добавления фильма:', err);
-    alert('Ошибка добавления фильма: ' + (err.message || 'Проверьте подключение к интернету'));
+    console.error('[ADD FILM] Ошибка в catch блоке:', err);
+    console.error('[ADD FILM] Stack trace:', err.stack);
+    const errorMessage = err.message || 'Проверьте подключение к интернету';
+    console.error('[ADD FILM] Показываем alert с ошибкой:', errorMessage);
+    alert('Ошибка добавления фильма: ' + errorMessage);
   }
 }
 
