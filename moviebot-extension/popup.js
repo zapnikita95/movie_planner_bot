@@ -977,15 +977,23 @@ async function handleCreatePlan() {
   
   isProcessing = true;
   const createBtn = document.getElementById('create-plan-btn');
+  if (!createBtn) {
+    isProcessing = false;
+    return;
+  }
   const originalText = createBtn.textContent;
   createBtn.disabled = true;
   createBtn.textContent = '⏳ Создаём план...';
   
   try {
     const planType = selectedPlanType;
-  const planTimeText = document.getElementById('plan-time-text').value.trim();
-  const planDatetime = document.getElementById('plan-datetime').value;
-  const streamingService = document.getElementById('streaming-service').value;
+    const planTimeTextEl = document.getElementById('plan-time-text');
+    const planDatetimeEl = document.getElementById('plan-datetime');
+    const streamingServiceEl = document.getElementById('streaming-service');
+    
+    const planTimeText = planTimeTextEl ? planTimeTextEl.value.trim() : '';
+    const planDatetime = planDatetimeEl ? planDatetimeEl.value : '';
+    const streamingService = streamingServiceEl ? streamingServiceEl.value : '';
   
   let planDatetimeISO = null;
   
@@ -1082,8 +1090,10 @@ async function handleCreatePlan() {
     alert('Ошибка создания плана: ' + (err.message || 'Проверьте подключение к интернету'));
   } finally {
     isProcessing = false;
-    createBtn.disabled = false;
-    createBtn.textContent = originalText;
+    if (createBtn) {
+      createBtn.disabled = false;
+      createBtn.textContent = originalText;
+    }
   }
 }
 
