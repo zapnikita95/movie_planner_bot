@@ -1039,8 +1039,8 @@ async function handleCreatePlan() {
     return;
   }
   
-  try {
-    const response = await fetch(`${API_BASE_URL}/api/extension/create-plan`, {
+  // Создаем план
+  const response = await fetch(`${API_BASE_URL}/api/extension/create-plan`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
