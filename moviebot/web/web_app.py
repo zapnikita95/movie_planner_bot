@@ -1941,15 +1941,34 @@ def create_web_app(bot):
             cursor = get_db_cursor()
             try:
                 # Без db_lock как просил пользователь
+                # Проверяем, есть ли уже план для этого фильма
                 cursor.execute("""
-                    INSERT INTO plans (chat_id, film_id, plan_type, plan_datetime, user_id, streaming_service, streaming_url)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                    RETURNING id
-                """, (chat_id, film_id, plan_type, dt, user_id, streaming_service, streaming_url))
-                result = cursor.fetchone()
-                plan_id = result.get('id') if isinstance(result, dict) else result[0]
-                conn.commit()
+                    SELECT id FROM plans 
+                    WHERE chat_id = %s AND film_id = %s
+                """, (chat_id, film_id))
+                existing_plan = cursor.fetchone()
                 
+                if existing_plan:
+                    # Обновляем существующий план
+                    plan_id = existing_plan.get('id') if isinstance(existing_plan, dict) else existing_plan[0]
+                    cursor.execute("""
+                        UPDATE plans 
+                        SET plan_type = %s, plan_datetime = %s, streaming_service = %s, streaming_url = %s
+                        WHERE id = %s
+                    """, (plan_type, dt, streaming_service, streaming_url, plan_id))
+                    logger.info(f"[EXTENSION API] План обновлен: plan_id={plan_id}")
+                else:
+                    # Создаем новый план
+                    cursor.execute("""
+                        INSERT INTO plans (chat_id, film_id, plan_type, plan_datetime, user_id, streaming_service, streaming_url)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                        RETURNING id
+                    """, (chat_id, film_id, plan_type, dt, user_id, streaming_service, streaming_url))
+                    result = cursor.fetchone()
+                    plan_id = result.get('id') if isinstance(result, dict) else result[0]
+                    logger.info(f"[EXTENSION API] План создан: plan_id={plan_id}")
+                
+                conn.commit()
                 resp = jsonify({"success": True, "plan_id": plan_id})
                 return add_cors_headers(resp)
             finally:
