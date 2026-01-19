@@ -815,10 +815,4 @@ def register_start_handlers(bot):
             except:
                 pass
 
-def register_start_handlers(bot):
-    """Регистрация всех обработчиков из этого модуля"""
-    
-    # Команда /code уже зарегистрирована на уровне модуля выше
-    logger.info("[REGISTER START HANDLERS] Команда /code уже зарегистрирована на уровне модуля")
-    # Callback handlers для start_menu и back_to_start_menu уже зарегистрированы на уровне модуля выше
-    logger.info("[REGISTER START HANDLERS] Callback handlers для start_menu и back_to_start_menu уже зарегистрированы на уровне модуля")
+# Удаляем дублирующую функцию register_start_handlers - она уже определена выше на строке 358
