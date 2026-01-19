@@ -6,6 +6,7 @@ let chatId = null;
 let userId = null;
 let currentFilm = null;
 let lastDetectedUrl = null; // Для отслеживания изменений URL
+let isProcessing = false; // Флаг для защиты от двойных кликов
 
 // Инициализация
 document.addEventListener('DOMContentLoaded', async () => {
@@ -51,7 +52,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   // Обработчики событий
   document.getElementById('bind-btn').addEventListener('click', handleBind);
-  document.getElementById('logout-btn').addEventListener('click', handleLogout);
+  const logoutBtn = document.getElementById('logout-btn');
+  logoutBtn.addEventListener('click', handleLogout);
+  logoutBtn.title = 'Нажмите, чтобы отвязать аккаунт';
   document.getElementById('create-plan-btn').addEventListener('click', handleCreatePlan);
   document.getElementById('cancel-plan-btn').addEventListener('click', () => {
     document.getElementById('planning-form').classList.add('hidden');
@@ -64,6 +67,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('plan-type-cinema').addEventListener('click', () => {
     setPlanType('cinema');
   });
+  
+  // Убеждаемся, что форма планирования скрыта изначально
+  document.getElementById('planning-form').classList.add('hidden');
 });
 
 // Автоматическое определение и загрузка фильма с текущей страницы
@@ -242,10 +248,12 @@ async function handleBind() {
 }
 
 async function handleLogout() {
-  await chrome.storage.local.remove(['linked_chat_id', 'linked_user_id']);
-  chatId = null;
-  userId = null;
-  showAuthScreen();
+  if (confirm('Отвязать аккаунт от браузера?')) {
+    await chrome.storage.local.remove(['linked_chat_id', 'linked_user_id']);
+    chatId = null;
+    userId = null;
+    showAuthScreen();
+  }
 }
 
 async function loadFilmByImdbId(imdbId) {
@@ -336,15 +344,31 @@ function displayFilmInfo(film, data) {
     dbBtn.textContent = '➕ Добавить в базу';
     dbBtn.className = 'btn btn-primary';
     dbBtn.addEventListener('click', async () => {
+      if (isProcessing) return;
       console.log('[BUTTON CLICK] Клик по "Добавить в базу", film.kp_id:', film.kp_id);
-      await addFilmToDatabase(film.kp_id);
+      isProcessing = true;
+      dbBtn.disabled = true;
+      dbBtn.textContent = '⏳ Добавляем...';
+      try {
+        await addFilmToDatabase(film.kp_id);
+      } finally {
+        isProcessing = false;
+      }
     });
   } else {
     dbBtn.textContent = '🗑️ Удалить из базы';
     dbBtn.className = 'btn btn-secondary';
     dbBtn.addEventListener('click', async () => {
+      if (isProcessing) return;
       if (confirm('Вы уверены, что хотите удалить фильм из базы?')) {
-        await deleteFilmFromDatabase(film.kp_id);
+        isProcessing = true;
+        dbBtn.disabled = true;
+        dbBtn.textContent = '⏳ Удаляем...';
+        try {
+          await deleteFilmFromDatabase(film.kp_id);
+        } finally {
+          isProcessing = false;
+        }
       }
     });
   }
@@ -354,7 +378,10 @@ function displayFilmInfo(film, data) {
   const planBtn = document.createElement('button');
   planBtn.textContent = data.has_plan ? '✏️ Изменить в расписании' : '📅 Запланировать просмотр';
   planBtn.className = 'btn btn-primary';
-  planBtn.addEventListener('click', () => showPlanningForm());
+  planBtn.addEventListener('click', () => {
+    if (isProcessing) return;
+    showPlanningForm();
+  });
   actionsEl.appendChild(planBtn);
   
   document.getElementById('film-info').classList.remove('hidden');
@@ -366,12 +393,14 @@ async function addFilmToDatabase(kpId) {
   if (!kpId) {
     console.error('[ADD FILM] Ошибка: kpId не указан');
     alert('Ошибка: не указан ID фильма');
+    isProcessing = false;
     return;
   }
   
   if (!chatId) {
     console.error('[ADD FILM] Ошибка: chatId не указан');
     alert('Ошибка: не авторизован. Пожалуйста, привяжите аккаунт через /code в боте');
+    isProcessing = false;
     return;
   }
   
@@ -438,6 +467,8 @@ async function addFilmToDatabase(kpId) {
     const errorMessage = err.message || 'Проверьте подключение к интернету';
     console.error('[ADD FILM] Показываем alert с ошибкой:', errorMessage);
     alert('Ошибка добавления фильма: ' + errorMessage);
+  } finally {
+    isProcessing = false;
   }
 }
 
@@ -449,12 +480,23 @@ async function deleteFilmFromDatabase(kpId) {
       body: JSON.stringify({ kp_id: kpId, chat_id: chatId })
     });
     
+    if (!response.ok) {
+      let errorText = '';
+      try {
+        const errorJson = await response.json();
+        errorText = errorJson.error || 'неизвестная ошибка';
+      } catch (e) {
+        errorText = await response.text();
+      }
+      throw new Error(`HTTP error! status: ${response.status}, error: ${errorText}`);
+    }
+    
     const json = await response.json();
     if (json.success) {
       // Перезагружаем информацию
-      if (currentFilm.kp_id) {
+      if (currentFilm && currentFilm.kp_id) {
         await loadFilmByKpId(currentFilm.kp_id);
-      } else if (currentFilm.imdb_id) {
+      } else if (currentFilm && currentFilm.imdb_id) {
         await loadFilmByImdbId(currentFilm.imdb_id);
       }
     } else {
@@ -462,7 +504,9 @@ async function deleteFilmFromDatabase(kpId) {
     }
   } catch (err) {
     console.error('Ошибка удаления фильма:', err);
-    alert('Ошибка удаления фильма');
+    alert('Ошибка удаления фильма: ' + (err.message || 'Проверьте подключение к интернету'));
+  } finally {
+    isProcessing = false;
   }
 }
 
@@ -552,26 +596,71 @@ function setPlanType(type) {
   if (type === 'home') {
     homeBtn.classList.remove('btn-secondary');
     homeBtn.classList.add('btn-primary', 'active');
+    homeBtn.style.border = '2px solid #007bff';
     cinemaBtn.classList.remove('btn-primary', 'active');
     cinemaBtn.classList.add('btn-secondary');
+    cinemaBtn.style.border = '2px solid transparent';
     streamingEl.classList.remove('hidden');
-    // TODO: загрузить список онлайн-кинотеатров из API
+    // Загружаем список онлайн-кинотеатров из API
+    if (currentFilm && currentFilm.kp_id) {
+      loadStreamingServices(currentFilm.kp_id);
+    }
   } else {
     cinemaBtn.classList.remove('btn-secondary');
     cinemaBtn.classList.add('btn-primary', 'active');
+    cinemaBtn.style.border = '2px solid #007bff';
     homeBtn.classList.remove('btn-primary', 'active');
     homeBtn.classList.add('btn-secondary');
+    homeBtn.style.border = '2px solid transparent';
     streamingEl.classList.add('hidden');
   }
 }
 
+async function loadStreamingServices(kpId) {
+  if (!kpId) return;
+  
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/extension/streaming-services?kp_id=${kpId}`);
+    if (!response.ok) {
+      console.error('Ошибка загрузки стриминговых сервисов:', response.status);
+      return;
+    }
+    
+    const json = await response.json();
+    const select = document.getElementById('streaming-service');
+    
+    // Очищаем текущие опции (кроме первой "Выберите сервис")
+    select.innerHTML = '<option value="">Выберите сервис</option>';
+    
+    if (json.success && json.services && json.services.length > 0) {
+      json.services.forEach(service => {
+        const option = document.createElement('option');
+        option.value = service.name;
+        option.textContent = service.name;
+        select.appendChild(option);
+      });
+    }
+  } catch (err) {
+    console.error('Ошибка загрузки стриминговых сервисов:', err);
+  }
+}
+
 async function handleCreatePlan() {
+  if (isProcessing) return;
+  
   if (!currentFilm || !currentFilm.film_id) {
     alert('Фильм не выбран');
     return;
   }
   
-  const planType = selectedPlanType;
+  isProcessing = true;
+  const createBtn = document.getElementById('create-plan-btn');
+  const originalText = createBtn.textContent;
+  createBtn.disabled = true;
+  createBtn.textContent = '⏳ Создаём план...';
+  
+  try {
+    const planType = selectedPlanType;
   const planTimeText = document.getElementById('plan-time-text').value.trim();
   const planDatetime = document.getElementById('plan-datetime').value;
   const streamingService = document.getElementById('streaming-service').value;
@@ -662,6 +751,10 @@ async function handleCreatePlan() {
   } catch (err) {
     console.error('Ошибка создания плана:', err);
     alert('Ошибка создания плана: ' + (err.message || 'Проверьте подключение к интернету'));
+  } finally {
+    isProcessing = false;
+    createBtn.disabled = false;
+    createBtn.textContent = originalText;
   }
 }
 

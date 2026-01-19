@@ -2172,6 +2172,42 @@ def create_web_app(bot):
             # after_request hook автоматически добавит CORS заголовки
             return resp, 500
     
+    @app.route('/api/extension/streaming-services', methods=['GET', 'OPTIONS'])
+    def get_streaming_services():
+        """Получение списка стриминговых сервисов для фильма"""
+        # Обработка preflight запроса
+        if request.method == 'OPTIONS':
+            logger.info("[EXTENSION API] OPTIONS preflight request for /api/extension/streaming-services")
+            response = jsonify({'status': 'ok'})
+            # after_request hook автоматически добавит CORS заголовки
+            return response
+        
+        kp_id = request.args.get('kp_id')
+        if not kp_id:
+            resp = jsonify({"success": False, "error": "kp_id required"})
+            return resp, 400
+        
+        try:
+            from moviebot.api.kinopoisk_api import get_external_sources
+            sources = get_external_sources(int(kp_id))
+            
+            # Форматируем список сервисов
+            services = []
+            if sources:
+                for platform, url in sources:
+                    services.append({
+                        'name': platform,
+                        'url': url
+                    })
+            
+            resp = jsonify({"success": True, "services": services})
+            # after_request hook автоматически добавит CORS заголовки
+            return resp
+        except Exception as e:
+            logger.error(f"Ошибка получения стриминговых сервисов: {e}", exc_info=True)
+            resp = jsonify({"success": False, "error": "server error"})
+            return resp, 500
+    
     logger.info(f"[WEB APP] ===== FLASK ПРИЛОЖЕНИЕ СОЗДАНО =====")
     logger.info(f"[WEB APP] Зарегистрированные роуты: {[str(rule) for rule in app.url_map.iter_rules()]}")
     logger.info(f"[WEB APP] Возвращаем app: {app}")
