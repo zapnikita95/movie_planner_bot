@@ -1786,7 +1786,7 @@ def create_web_app(bot):
             if not info:
                 resp = jsonify({"success": False, "error": "film not found"})
                 # after_request hook автоматически добавит CORS заголовки
-            return resp, 404
+                return resp, 404
             
             # Определяем правильную ссылку на основе is_series
             is_series = info.get('is_series', False)
