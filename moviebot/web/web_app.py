@@ -1547,14 +1547,27 @@ def create_web_app(bot):
     # API endpoints для браузерного расширения
     # ========================================================================
     
-    @app.route('/api/extension/verify', methods=['GET'])
+    def add_cors_headers(response):
+        """Добавляет CORS заголовки к ответу"""
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+        response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+        return response
+    
+    @app.route('/api/extension/verify', methods=['GET', 'OPTIONS'])
     def verify_extension_code():
         """Проверка кода расширения и возврат chat_id"""
+        # Обработка preflight запроса
+        if request.method == 'OPTIONS':
+            response = jsonify({'status': 'ok'})
+            return add_cors_headers(response)
+        
         from moviebot.database.db_connection import get_db_connection, get_db_cursor
         
         code = request.args.get('code')
         if not code:
-            return jsonify({"success": False, "error": "code required"}), 400
+            resp = jsonify({"success": False, "error": "code required"})
+            return add_cors_headers(resp), 400
 
         conn = get_db_connection()
         cursor = get_db_cursor()
@@ -1570,11 +1583,14 @@ def create_web_app(bot):
                 user_id = row.get('user_id') if isinstance(row, dict) else row[1]
                 cursor.execute("UPDATE extension_links SET used = TRUE WHERE code = %s", (code,))
                 conn.commit()
-                return jsonify({"success": True, "chat_id": chat_id, "user_id": user_id})
-            return jsonify({"success": False, "error": "invalid or expired code"}), 400
+                resp = jsonify({"success": True, "chat_id": chat_id, "user_id": user_id})
+                return add_cors_headers(resp)
+            resp = jsonify({"success": False, "error": "invalid or expired code"})
+            return add_cors_headers(resp), 400
         except Exception as e:
             logger.error("Ошибка проверки кода расширения", exc_info=True)
-            return jsonify({"success": False, "error": "server error"}), 500
+            resp = jsonify({"success": False, "error": "server error"})
+            return add_cors_headers(resp), 500
         finally:
             try:
                 cursor.close()
@@ -1585,8 +1601,12 @@ def create_web_app(bot):
             except:
                 pass
     
-    @app.route('/api/extension/film-info', methods=['GET'])
+    @app.route('/api/extension/film-info', methods=['GET', 'OPTIONS'])
     def get_film_info():
+        # Обработка preflight запроса
+        if request.method == 'OPTIONS':
+            response = jsonify({'status': 'ok'})
+            return add_cors_headers(response)
         """Получение информации о фильме по kp_id или imdb_id"""
         from moviebot.api.kinopoisk_api import extract_movie_info, get_film_by_imdb_id
         from moviebot.database.db_connection import get_db_connection, get_db_cursor
@@ -1598,17 +1618,20 @@ def create_web_app(bot):
         chat_id = request.args.get('chat_id', type=int)
         
         if not kp_id and not imdb_id:
-            return jsonify({"success": False, "error": "kp_id or imdb_id required"}), 400
+            resp = jsonify({"success": False, "error": "kp_id or imdb_id required"})
+            return add_cors_headers(resp), 400
         
         if not chat_id:
-            return jsonify({"success": False, "error": "chat_id required"}), 400
+            resp = jsonify({"success": False, "error": "chat_id required"})
+            return add_cors_headers(resp), 400
         
         try:
             # Если передан imdb_id, конвертируем в kp_id
             if imdb_id and not kp_id:
                 film_info = get_film_by_imdb_id(imdb_id)
                 if not film_info or not film_info.get('kp_id'):
-                    return jsonify({"success": False, "error": "film not found"}), 404
+                    resp = jsonify({"success": False, "error": "film not found"})
+                    return add_cors_headers(resp), 404
                 kp_id = film_info.get('kp_id')
             
             # Получаем информацию о фильме через API для определения типа
@@ -1671,7 +1694,7 @@ def create_web_app(bot):
                 except:
                     pass
             
-            return jsonify({
+            resp = jsonify({
                 "success": True,
                 "film": {
                     "kp_id": info.get('kp_id'),
@@ -1688,12 +1711,18 @@ def create_web_app(bot):
                 "watched": watched,
                 "has_plan": has_plan
             })
+            return add_cors_headers(resp)
         except Exception as e:
             logger.error("Ошибка получения информации о фильме", exc_info=True)
-            return jsonify({"success": False, "error": "server error"}), 500
+            resp = jsonify({"success": False, "error": "server error"})
+            return add_cors_headers(resp), 500
     
-    @app.route('/api/extension/add-film', methods=['POST'])
+    @app.route('/api/extension/add-film', methods=['POST', 'OPTIONS'])
     def add_film_to_database():
+        # Обработка preflight запроса
+        if request.method == 'OPTIONS':
+            response = jsonify({'status': 'ok'})
+            return add_cors_headers(response)
         """Добавление фильма в базу данных"""
         from moviebot.api.kinopoisk_api import extract_movie_info
         from moviebot.database.db_connection import get_db_connection, get_db_cursor
@@ -1703,14 +1732,16 @@ def create_web_app(bot):
         chat_id = data.get('chat_id', type=int)
         
         if not kp_id or not chat_id:
-            return jsonify({"success": False, "error": "kp_id and chat_id required"}), 400
+            resp = jsonify({"success": False, "error": "kp_id and chat_id required"})
+            return add_cors_headers(resp), 400
         
         try:
             link = f"https://kinopoisk.ru/film/{kp_id}"
             info = extract_movie_info(link)
             
             if not info:
-                return jsonify({"success": False, "error": "film not found"}), 404
+                resp = jsonify({"success": False, "error": "film not found"})
+                return add_cors_headers(resp), 404
             
             conn = get_db_connection()
             cursor = get_db_cursor()
@@ -1739,7 +1770,8 @@ def create_web_app(bot):
                 film_id = result.get('id') if isinstance(result, dict) else result[0]
                 conn.commit()
                 
-                return jsonify({"success": True, "film_id": film_id})
+                resp = jsonify({"success": True, "film_id": film_id})
+                return add_cors_headers(resp)
             finally:
                 try:
                     cursor.close()
@@ -1751,10 +1783,15 @@ def create_web_app(bot):
                     pass
         except Exception as e:
             logger.error("Ошибка добавления фильма в базу", exc_info=True)
-            return jsonify({"success": False, "error": "server error"}), 500
+            resp = jsonify({"success": False, "error": "server error"})
+            return add_cors_headers(resp), 500
     
-    @app.route('/api/extension/create-plan', methods=['POST'])
+    @app.route('/api/extension/create-plan', methods=['POST', 'OPTIONS'])
     def create_plan():
+        # Обработка preflight запроса
+        if request.method == 'OPTIONS':
+            response = jsonify({'status': 'ok'})
+            return add_cors_headers(response)
         """Создание плана просмотра"""
         from moviebot.database.db_connection import get_db_connection, get_db_cursor
         from datetime import datetime
@@ -1770,7 +1807,8 @@ def create_web_app(bot):
         streaming_url = data.get('streaming_url')
         
         if not all([chat_id, film_id, plan_type, plan_datetime, user_id]):
-            return jsonify({"success": False, "error": "missing required fields"}), 400
+            resp = jsonify({"success": False, "error": "missing required fields"})
+            return add_cors_headers(resp), 400
         
         try:
             # Парсим datetime
@@ -1791,7 +1829,8 @@ def create_web_app(bot):
                 plan_id = result.get('id') if isinstance(result, dict) else result[0]
                 conn.commit()
                 
-                return jsonify({"success": True, "plan_id": plan_id})
+                resp = jsonify({"success": True, "plan_id": plan_id})
+                return add_cors_headers(resp)
             finally:
                 try:
                     cursor.close()
@@ -1803,7 +1842,8 @@ def create_web_app(bot):
                     pass
         except Exception as e:
             logger.error("Ошибка создания плана", exc_info=True)
-            return jsonify({"success": False, "error": "server error"}), 500
+            resp = jsonify({"success": False, "error": "server error"})
+            return add_cors_headers(resp), 500
     
     logger.info(f"[WEB APP] ===== FLASK ПРИЛОЖЕНИЕ СОЗДАНО =====")
     logger.info(f"[WEB APP] Зарегистрированные роуты: {[str(rule) for rule in app.url_map.iter_rules()]}")
