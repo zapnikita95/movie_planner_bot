@@ -538,8 +538,8 @@ def register_start_handlers(bot):
             except:
                 pass
 
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("start_menu:"))
-    def start_menu_callback(call):
+    # Callback handlers для start_menu и back_to_start_menu уже зарегистрированы на уровне модуля выше
+    # Не дублируем их здесь
         try:
             user_id = call.from_user.id
             chat_id = call.message.chat.id
