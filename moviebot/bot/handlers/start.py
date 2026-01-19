@@ -540,8 +540,6 @@ def register_start_handlers(bot):
 
     # Callback handlers для start_menu и back_to_start_menu уже зарегистрированы на уровне модуля выше
     # Не дублируем их здесь
-        try:
-            user_id = call.from_user.id
             chat_id = call.message.chat.id
             message_id = call.message.message_id
             message_thread_id = getattr(call.message, 'message_thread_id', None)
@@ -702,8 +700,6 @@ def register_start_handlers(bot):
                 pass
 
 # Удаляем дублирующий обработчик back_to_start_menu - он уже зарегистрирован выше на уровне модуля
-        try:
-            bot.answer_callback_query(call.id, "⏳ Возвращаемся...")
 
             user_id = call.from_user.id
             chat_id = call.message.chat.id
