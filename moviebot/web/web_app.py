@@ -1662,7 +1662,7 @@ def create_web_app(bot):
                 if not film_info or not film_info.get('kp_id'):
                     resp = jsonify({"success": False, "error": "film not found"})
                     # after_request hook автоматически добавит CORS заголовки
-            return resp, 404
+                    return resp, 404
                 kp_id = film_info.get('kp_id')
             
             # Получаем информацию о фильме через API для определения типа
