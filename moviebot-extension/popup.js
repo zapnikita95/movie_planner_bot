@@ -80,6 +80,12 @@ async function detectAndLoadFilm(url) {
         const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
         if (tabs && tabs[0]) {
           chrome.tabs.sendMessage(tabs[0].id, { action: 'get_kp_id' }, async (response) => {
+            // Проверяем ошибки Chrome runtime
+            if (chrome.runtime.lastError) {
+              console.log('Content script не отвечает, используем URL:', chrome.runtime.lastError.message);
+              await loadFilmByKpId(kpId);
+              return;
+            }
             if (response && response.kpId) {
               await loadFilmByKpId(response.kpId);
             } else {
@@ -105,6 +111,12 @@ async function detectAndLoadFilm(url) {
         const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
         if (tabs && tabs[0]) {
           chrome.tabs.sendMessage(tabs[0].id, { action: 'get_imdb_id' }, async (response) => {
+            // Проверяем ошибки Chrome runtime
+            if (chrome.runtime.lastError) {
+              console.log('Content script не отвечает, используем URL:', chrome.runtime.lastError.message);
+              await loadFilmByImdbId(imdbId);
+              return;
+            }
             if (response && response.imdbId) {
               await loadFilmByImdbId(response.imdbId);
             } else {
@@ -128,6 +140,13 @@ async function detectAndLoadFilm(url) {
         const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
         if (tabs && tabs[0]) {
           chrome.tabs.sendMessage(tabs[0].id, { action: 'get_imdb_id' }, async (response) => {
+            // Проверяем ошибки Chrome runtime
+            if (chrome.runtime.lastError) {
+              console.log('Content script не отвечает:', chrome.runtime.lastError.message);
+              document.getElementById('film-title').textContent = 'Не удалось определить фильм';
+              document.getElementById('film-year').textContent = 'Попробуйте открыть страницу фильма на Кинопоиске или IMDb';
+              return;
+            }
             if (response && response.imdbId) {
               await loadFilmByImdbId(response.imdbId);
             } else {
@@ -136,6 +155,9 @@ async function detectAndLoadFilm(url) {
               document.getElementById('film-year').textContent = 'Попробуйте открыть страницу фильма на Кинопоиске или IMDb';
             }
           });
+        } else {
+          document.getElementById('film-title').textContent = 'Не удалось определить фильм';
+          document.getElementById('film-year').textContent = 'Попробуйте открыть страницу фильма на Кинопоиске или IMDb';
         }
       } catch (error) {
         console.error('Ошибка получения imdb_id:', error);
@@ -351,16 +373,36 @@ function displayFilmInfo(film, data) {
 }
 
 async function addFilmToDatabase(kpId) {
+  if (!kpId) {
+    alert('Ошибка: не указан ID фильма');
+    return;
+  }
+  
+  if (!chatId) {
+    alert('Ошибка: не авторизован. Пожалуйста, привяжите аккаунт через /code в боте');
+    return;
+  }
+  
   try {
+    console.log('Добавление фильма в базу:', { kp_id: kpId, chat_id: chatId });
+    
     const response = await fetch(`${API_BASE_URL}/api/extension/add-film`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ kp_id: kpId, chat_id: chatId })
     });
     
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
     const json = await response.json();
+    console.log('Ответ сервера:', json);
+    
     if (json.success) {
-      currentFilm.film_id = json.film_id;
+      if (currentFilm) {
+        currentFilm.film_id = json.film_id;
+      }
       // Показываем сообщение
       const statusEl = document.getElementById('status');
       if (statusEl) {
@@ -372,17 +414,20 @@ async function addFilmToDatabase(kpId) {
         }, 3000);
       }
       // Перезагружаем информацию по kp_id
-      if (currentFilm.kp_id) {
+      if (currentFilm && currentFilm.kp_id) {
         await loadFilmByKpId(currentFilm.kp_id);
-      } else if (currentFilm.imdb_id) {
+      } else if (currentFilm && currentFilm.imdb_id) {
         await loadFilmByImdbId(currentFilm.imdb_id);
+      } else {
+        // Если currentFilm не установлен, загружаем по kpId
+        await loadFilmByKpId(kpId);
       }
     } else {
       alert('Ошибка добавления фильма: ' + (json.error || 'неизвестная ошибка'));
     }
   } catch (err) {
     console.error('Ошибка добавления фильма:', err);
-    alert('Ошибка добавления фильма');
+    alert('Ошибка добавления фильма: ' + (err.message || 'Проверьте подключение к интернету'));
   }
 }
 
