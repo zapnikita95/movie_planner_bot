@@ -1912,11 +1912,40 @@ def create_web_app(bot):
                 
                 film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
                 
+                # Получаем информацию о фильме перед удалением для уведомления
+                cursor.execute("SELECT title, kp_id, link FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
+                film_info_row = cursor.fetchone()
+                title_before_delete = None
+                kp_id_for_notification = None
+                link_before_delete = None
+                if film_info_row:
+                    title_before_delete = film_info_row.get('title') if isinstance(film_info_row, dict) else film_info_row[0]
+                    kp_id_for_notification = film_info_row.get('kp_id') if isinstance(film_info_row, dict) else film_info_row[1]
+                    link_before_delete = film_info_row.get('link') if isinstance(film_info_row, dict) else film_info_row[2]
+                
                 # Удаляем связанные данные
                 cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
                 cursor.execute('DELETE FROM plans WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
                 cursor.execute('DELETE FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
                 conn.commit()
+                
+                # Отправляем сообщение в Telegram об удалении фильма
+                if title_before_delete and kp_id_for_notification:
+                    try:
+                        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+                        is_series_del = '/series/' in link_before_delete if link_before_delete else False
+                        type_emoji = "📺" if is_series_del else "🎬"
+                        text = f"{type_emoji} <b>{title_before_delete}</b>\n\n❌ Фильм удален из базы через расширение браузера"
+                        
+                        markup = InlineKeyboardMarkup()
+                        # Кнопка "К описанию" - будет показывать фильм даже если его нет в базе (через API)
+                        markup.add(InlineKeyboardButton("📖 К описанию", callback_data=f"show_film:{kp_id_for_notification}"))
+                        
+                        bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup)
+                        logger.info(f"[EXTENSION API] Сообщение об удалении фильма отправлено в chat_id={chat_id}")
+                    except Exception as e:
+                        logger.error(f"[EXTENSION API] Ошибка отправки сообщения об удалении фильма: {e}", exc_info=True)
+                        # Не прерываем выполнение, если не удалось отправить сообщение
                 
                 resp = jsonify({"success": True})
                 # after_request hook автоматически добавит CORS заголовки

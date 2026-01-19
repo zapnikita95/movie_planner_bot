@@ -1677,14 +1677,9 @@ def back_to_film_description(call):
                         chat_id, message_id, message_thread_id=message_thread_id
                     )
                 else:
-                    bot.send_message(
-                        chat_id,
-                        f"❌ Ошибка при загрузке описания: {str(show_e)[:100]}",
-                        message_thread_id=message_thread_id
-                    )
-            except Exception as send_err:
-                logger.error(f"[BACK TO FILM] Не удалось отправить сообщение об ошибке: {send_err}")
-            # НЕ делаем raise - продолжаем выполнение, чтобы не прерывать обработку
+                    bot.send_message(chat_id, f"❌ Ошибка при загрузке описания: {str(show_e)[:100]}", message_thread_id=message_thread_id)
+            except:
+                pass
 
         logger.info(f"[BACK TO FILM] ===== КОНЕЦ ОБРАБОТКИ ===== is_series={is_series}, existing={'есть' if existing else 'нет'}")
 
@@ -1706,7 +1701,102 @@ def back_to_film_description(call):
                 bot.send_message(chat_id, "❌ Ошибка при загрузке описания", message_thread_id=message_thread_id)
         except Exception as final_err:
             logger.error(f"[BACK TO FILM] Ошибка в блоке обработки ошибок: {final_err}", exc_info=True)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("show_film:"))
+def show_film_callback(call):
+    """Обработчик кнопки «📖 К описанию» — показывает описание фильма (аналог back_to_film_description)"""
+    logger.info(f"[SHOW FILM] START: data={call.data}, user={call.from_user.id}")
+    
+    # Используем ту же логику, что и back_to_film_description
+    chat_id = call.message.chat.id
+    user_id = call.from_user.id
+    message_id = call.message.message_id
+    message_thread_id = getattr(call.message, 'message_thread_id', None)
+    
+    # Проверяем, не устарел ли callback query
+    callback_is_old = False
+    try:
+        bot.answer_callback_query(call.id, text="⏳ Загружаю...")
+    except Exception as answer_error:
+        error_str = str(answer_error)
+        if "query is too old" in error_str or "query ID is invalid" in error_str or "timeout expired" in error_str:
+            callback_is_old = True
+            logger.warning(f"[SHOW FILM] Callback query устарел: {answer_error}")
+        else:
+            logger.error(f"[SHOW FILM] Ошибка answer_callback_query: {answer_error}", exc_info=True)
+    
+    try:
+        kp_id_str = call.data.split(":", 1)[1].strip()
+        kp_id_int = int(kp_id_str)
         
+        # Получаем данные о фильме (та же логика что и в back_to_film_description)
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        
+        existing = None
+        link_from_db = None
+        is_series = False
+        
+        with db_lock:
+            try:
+                cursor_local.execute("""
+                    SELECT id, title, watched, link, is_series
+                    FROM movies 
+                    WHERE chat_id = %s AND kp_id = %s
+                """, (chat_id, kp_id_str))
+                row = cursor_local.fetchone()
+                
+                if row:
+                    film_id = row.get('id') if isinstance(row, dict) else row[0]
+                    title_db = row.get('title') if isinstance(row, dict) else row[1]
+                    watched = row.get('watched') if isinstance(row, dict) else row[2]
+                    link_from_db = row.get('link') if isinstance(row, dict) else row[3]
+                    is_series_db = row.get('is_series') if isinstance(row, dict) else row[4]
+                    is_series = bool(is_series_db) if is_series_db is not None else False
+                    existing = (film_id, title_db, watched)
+                    
+                conn_local.commit()
+            except Exception as db_err:
+                logger.error(f"[SHOW FILM] Ошибка БД: {db_err}", exc_info=True)
+                try:
+                    conn_local.rollback()
+                except:
+                    pass
+        
+        # Получаем информацию о фильме через API
+        from moviebot.api.kinopoisk_api import extract_movie_info
+        
+        link = link_from_db if link_from_db else (f"https://www.kinopoisk.ru/series/{kp_id_int}/" if is_series else f"https://www.kinopoisk.ru/film/{kp_id_int}/")
+        info = extract_movie_info(link)
+        
+        if not info:
+            bot.answer_callback_query(call.id, "❌ Не удалось загрузить информацию о фильме", show_alert=True)
+            return
+        
+        info['is_series'] = is_series
+        
+        # Показываем описание фильма
+        from moviebot.bot.handlers.series import show_film_info_with_buttons
+        show_film_info_with_buttons(
+            chat_id=chat_id,
+            user_id=user_id,
+            info=info,
+            link=link,
+            kp_id=kp_id_int,
+            existing=existing,
+            message_id=None,  # Всегда новое сообщение
+            message_thread_id=message_thread_id
+        )
+        
+        bot.answer_callback_query(call.id, "✅ Готово!")
+        
+    except Exception as e:
+        logger.error(f"[SHOW FILM] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка загрузки", show_alert=True)
+        except:
+            pass
+
 @bot.callback_query_handler(func=lambda call: call.data == "delete_this_message")
 def delete_recommendations_message(call):
     try:
