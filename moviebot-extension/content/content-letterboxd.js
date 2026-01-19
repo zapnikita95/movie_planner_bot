@@ -33,6 +33,15 @@ function extractImdbId() {
 
 // Отправляем imdb_id в background script
 const imdbId = extractImdbId();
+
+// Обработчик запроса от popup
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === 'get_imdb_id') {
+    sendResponse({ imdbId: imdbId || null });
+    return true;
+  }
+});
+
 if (imdbId) {
   chrome.runtime.sendMessage({ 
     action: "found_imdb_id", 

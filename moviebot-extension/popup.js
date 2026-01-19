@@ -15,7 +15,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     userId = data.linked_user_id;
     showMainScreen();
     
-    // Проверяем параметры URL
+    // Получаем текущую активную вкладку
+    try {
+      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tabs && tabs[0] && tabs[0].url) {
+        const currentUrl = tabs[0].url;
+        await detectAndLoadFilm(currentUrl);
+      }
+    } catch (error) {
+      console.error('Ошибка получения текущей вкладки:', error);
+    }
+    
+    // Также проверяем параметры URL (для обратной совместимости)
     const urlParams = new URLSearchParams(window.location.search);
     const imdbId = urlParams.get('imdb_id');
     const kpId = urlParams.get('kp_id');
@@ -24,11 +35,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     if (ticketUrl) {
       showTicketUpload(ticketUrl);
-    } else if (kpId) {
+    } else if (kpId && !currentFilm) {
       await loadFilmByKpId(kpId);
-    } else if (imdbId) {
+    } else if (imdbId && !currentFilm) {
       await loadFilmByImdbId(imdbId);
-    } else if (url) {
+    } else if (url && !currentFilm) {
       await loadFilmByUrl(url);
     }
   } else {
@@ -41,6 +52,100 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('create-plan-btn').addEventListener('click', handleCreatePlan);
   document.getElementById('plan-type').addEventListener('change', handlePlanTypeChange);
 });
+
+// Автоматическое определение и загрузка фильма с текущей страницы
+async function detectAndLoadFilm(url) {
+  if (!url || !chatId) return;
+  
+  try {
+    // Показываем индикатор загрузки
+    document.getElementById('film-info').classList.remove('hidden');
+    document.getElementById('film-title').textContent = 'Загрузка...';
+    document.getElementById('film-year').textContent = '';
+    document.getElementById('film-status').innerHTML = '';
+    document.getElementById('film-actions').innerHTML = '';
+    
+    // Кинопоиск
+    const kpMatch = url.match(/kinopoisk\.ru\/(film|series)\/(\d+)/i);
+    if (kpMatch) {
+      const kpId = kpMatch[2];
+      // Пытаемся получить данные от content script, если нет - используем URL
+      try {
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tabs && tabs[0]) {
+          chrome.tabs.sendMessage(tabs[0].id, { action: 'get_kp_id' }, async (response) => {
+            if (response && response.kpId) {
+              await loadFilmByKpId(response.kpId);
+            } else {
+              await loadFilmByKpId(kpId);
+            }
+          });
+        } else {
+          await loadFilmByKpId(kpId);
+        }
+      } catch (error) {
+        console.error('Ошибка получения kp_id:', error);
+        await loadFilmByKpId(kpId);
+      }
+      return;
+    }
+    
+    // IMDb
+    const imdbMatch = url.match(/imdb\.com\/title\/(tt\d+)/i);
+    if (imdbMatch) {
+      const imdbId = imdbMatch[1];
+      // Пытаемся получить данные от content script
+      try {
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tabs && tabs[0]) {
+          chrome.tabs.sendMessage(tabs[0].id, { action: 'get_imdb_id' }, async (response) => {
+            if (response && response.imdbId) {
+              await loadFilmByImdbId(response.imdbId);
+            } else {
+              await loadFilmByImdbId(imdbId);
+            }
+          });
+        } else {
+          await loadFilmByImdbId(imdbId);
+        }
+      } catch (error) {
+        console.error('Ошибка получения imdb_id:', error);
+        await loadFilmByImdbId(imdbId);
+      }
+      return;
+    }
+    
+    // Letterboxd
+    if (url.includes('letterboxd.com/film/')) {
+      // Запрашиваем imdb_id у content script
+      try {
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tabs && tabs[0]) {
+          chrome.tabs.sendMessage(tabs[0].id, { action: 'get_imdb_id' }, async (response) => {
+            if (response && response.imdbId) {
+              await loadFilmByImdbId(response.imdbId);
+            } else {
+              // Fallback: пытаемся загрузить через URL (но это не сработает для letterboxd)
+              document.getElementById('film-title').textContent = 'Не удалось определить фильм';
+              document.getElementById('film-year').textContent = 'Попробуйте открыть страницу фильма на Кинопоиске или IMDb';
+            }
+          });
+        }
+      } catch (error) {
+        console.error('Ошибка получения imdb_id:', error);
+        document.getElementById('film-title').textContent = 'Ошибка загрузки';
+        document.getElementById('film-year').textContent = 'Попробуйте обновить страницу';
+      }
+      return;
+    }
+    
+    // Если не распознан - скрываем информацию о фильме
+    document.getElementById('film-info').classList.add('hidden');
+  } catch (error) {
+    console.error('Ошибка определения фильма:', error);
+    document.getElementById('film-info').classList.add('hidden');
+  }
+}
 
 function showAuthScreen() {
   document.getElementById('auth-screen').classList.remove('hidden');

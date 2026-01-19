@@ -15,6 +15,15 @@ function extractKpId() {
 
 // Отправляем kp_id в background script
 const kpData = extractKpId();
+
+// Обработчик запроса от popup
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === 'get_kp_id') {
+    sendResponse({ kpId: kpData ? kpData.kp_id : null, isSeries: kpData ? kpData.is_series : false });
+    return true;
+  }
+});
+
 if (kpData) {
   chrome.runtime.sendMessage({ 
     action: "found_kp_id", 

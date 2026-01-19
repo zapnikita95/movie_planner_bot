@@ -10,7 +10,8 @@
     "scripting",
     "contextMenus",
     "downloads",
-    "notifications"
+    "notifications",
+    "tabs"
   ],
   "host_permissions": [
     "*://*.kinopoisk.ru/*",
