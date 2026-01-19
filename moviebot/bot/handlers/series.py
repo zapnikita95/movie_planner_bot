@@ -6843,8 +6843,9 @@ def handle_rand_final(call):
             if expected_participant_id is not None and user_id != expected_participant_id:
                 try:
                     bot.answer_callback_query(call.id, "Эта кнопка доступна только для выбранного участника случайного события", show_alert=True)
-                except:
-                    pass
+                    logger.info(f"[RANDOM CALLBACK] Показана ошибка пользователю {user_id} (кнопка для {expected_participant_id})")
+                except Exception as e:
+                    logger.warning(f"[RANDOM CALLBACK] Не удалось показать ошибку: {e}")
                 logger.info(f"[RANDOM CALLBACK] Пользователь {user_id} пытается использовать кнопку, предназначенную для {expected_participant_id}")
                 return
             

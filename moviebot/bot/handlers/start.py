@@ -225,8 +225,9 @@ def register_start_handlers(bot):
             if expected_user_id is not None and user_id != expected_user_id:
                 try:
                     bot.answer_callback_query(call.id, "Эта кнопка доступна только для победителя случайного события", show_alert=True)
-                except:
-                    pass
+                    logger.info(f"[START MENU] Показана ошибка пользователю {user_id} (кнопка для {expected_user_id})")
+                except Exception as e:
+                    logger.warning(f"[START MENU] Не удалось показать ошибку: {e}")
                 logger.info(f"[START MENU] Пользователь {user_id} пытается использовать кнопку, предназначенную для {expected_user_id}")
                 return
             
