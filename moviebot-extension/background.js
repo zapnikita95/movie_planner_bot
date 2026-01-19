@@ -22,24 +22,34 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 
 // Обработка сообщений от content scripts
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.action === "found_imdb_id") {
-    handleImdbId(message.imdbId, sender.tab);
-    sendResponse({ success: true });
-  } else if (message.action === "found_kp_id") {
-    handleKpId(message.kp_id, message.is_series, sender.tab);
-    sendResponse({ success: true });
-  } else if (message.action === "letterboxd_fallback") {
-    // Fallback для letterboxd если не найден imdb_id
-    sendResponse({ success: true });
-  } else if (message.action === "found_ticket_site") {
-    handleTicketSite(sender.tab);
-    sendResponse({ success: true });
-  } else if (message.action === "open_popup") {
-    // Не открываем popup автоматически - только при клике на иконку
-    sendResponse({ success: true });
-  } else if (message.action === "open_ticket_upload") {
-    // Не открываем popup автоматически - только при клике на иконку
-    sendResponse({ success: true });
+  try {
+    if (message.action === "found_imdb_id") {
+      handleImdbId(message.imdbId, sender.tab);
+      sendResponse({ success: true });
+    } else if (message.action === "found_kp_id") {
+      handleKpId(message.kp_id, message.is_series, sender.tab);
+      sendResponse({ success: true });
+    } else if (message.action === "letterboxd_fallback") {
+      // Fallback для letterboxd если не найден imdb_id
+      sendResponse({ success: true });
+    } else if (message.action === "found_ticket_site") {
+      handleTicketSite(sender.tab);
+      sendResponse({ success: true });
+    } else if (message.action === "open_popup") {
+      // Не открываем popup автоматически - только при клике на иконку
+      sendResponse({ success: true });
+    } else if (message.action === "open_ticket_upload") {
+      // Не открываем popup автоматически - только при клике на иконку
+      sendResponse({ success: true });
+    }
+  } catch (error) {
+    console.error('Ошибка обработки сообщения:', error);
+    // Пытаемся отправить ответ об ошибке, если это возможно
+    try {
+      sendResponse({ success: false, error: error.message });
+    } catch (e) {
+      // Игнорируем ошибку, если sendResponse уже был вызван
+    }
   }
   return true; // Для асинхронного ответа
 });

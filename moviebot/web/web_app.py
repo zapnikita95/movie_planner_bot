@@ -1549,9 +1549,23 @@ def create_web_app(bot):
     
     def add_cors_headers(response):
         """Добавляет CORS заголовки к ответу"""
+        if response is None:
+            response = jsonify({'status': 'ok'})
         response.headers.add('Access-Control-Allow-Origin', '*')
         response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
         response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+        response.headers.add('Access-Control-Allow-Credentials', 'true')
+        return response
+    
+    # Добавляем after_request hook для автоматического добавления CORS заголовков
+    @app.after_request
+    def after_request(response):
+        """Автоматически добавляет CORS заголовки ко всем ответам от extension API"""
+        if request.path.startswith('/api/extension/'):
+            response.headers.add('Access-Control-Allow-Origin', '*')
+            response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
+            response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
+            response.headers.add('Access-Control-Allow-Credentials', 'true')
         return response
     
     @app.route('/api/extension/verify', methods=['GET', 'OPTIONS'])
