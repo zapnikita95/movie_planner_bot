@@ -2936,7 +2936,7 @@ def _send_random_participant_event(chat_id, now, cursor_local, conn_local):
         
         # Готовим сообщение
         markup = InlineKeyboardMarkup(row_width=1)
-        markup.add(InlineKeyboardButton("🎲 Найти фильм", callback_data="rand_final:go"))
+        markup.add(InlineKeyboardButton("🎲 Найти фильм", callback_data=f"rand_final:go:{user_id}"))
         markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
         markup.add(InlineKeyboardButton("❌ Закрыть", callback_data="random_event:close"))
         

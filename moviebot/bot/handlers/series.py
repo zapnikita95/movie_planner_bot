@@ -6829,7 +6829,25 @@ def handle_rand_final(call):
         chat_id = call.message.chat.id
 
         # === СПЕЦИАЛЬНЫЙ СЛУЧАЙ: кнопка "Найти фильм" из случайных событий (без состояния) ===
-        if call.data == "rand_final:go":
+        if call.data.startswith("rand_final:go"):
+            # Парсим callback_data: rand_final:go или rand_final:go:participant_id
+            parts = call.data.split(":")
+            expected_participant_id = None
+            if len(parts) > 2:
+                try:
+                    expected_participant_id = int(parts[2])
+                except (ValueError, IndexError):
+                    pass
+            
+            # Проверяем, что кнопка доступна только для выбранного участника
+            if expected_participant_id is not None and user_id != expected_participant_id:
+                try:
+                    bot.answer_callback_query(call.id, "Эта кнопка доступна только для выбранного участника случайного события", show_alert=True)
+                except:
+                    pass
+                logger.info(f"[RANDOM CALLBACK] Пользователь {user_id} пытается использовать кнопку, предназначенную для {expected_participant_id}")
+                return
+            
             logger.info(f"[RANDOM CALLBACK] Кнопка 'Найти фильм' из случайных событий, запускаем рандом по своей базе")
             bot.answer_callback_query(call.id)
             

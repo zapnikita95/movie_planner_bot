@@ -386,9 +386,9 @@ def update_dice_game_message(chat_id, game_state, message_id, bot_id=None):
                 
                 winner_mention = f"@{winner_info.get('username')}" if winner_info.get('username') else user_display
                 markup_winner = InlineKeyboardMarkup(row_width=1)
-                markup_winner.add(InlineKeyboardButton("🔍 Поиск фильмов и сериалов", callback_data="start_menu:search"))
-                markup_winner.add(InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random"))
-                markup_winner.add(InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres"))
+                markup_winner.add(InlineKeyboardButton("🔍 Поиск фильмов и сериалов", callback_data=f"start_menu:search:{winner_id}"))
+                markup_winner.add(InlineKeyboardButton("🎲 Рандом", callback_data=f"start_menu:random:{winner_id}"))
+                markup_winner.add(InlineKeyboardButton("📅 Премьеры", callback_data=f"start_menu:premieres:{winner_id}"))
                 
                 bot.send_message(
                     chat_id,

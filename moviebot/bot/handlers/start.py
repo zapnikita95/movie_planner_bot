@@ -212,7 +212,25 @@ def register_start_handlers(bot):
             chat_id = call.message.chat.id
             message_id = call.message.message_id
             message_thread_id = getattr(call.message, 'message_thread_id', None)
-            action = call.data.split(":")[1]
+            
+            # Парсим callback_data: start_menu:action или start_menu:action:winner_id
+            parts = call.data.split(":")
+            action = parts[1]
+            expected_user_id = None
+            if len(parts) > 2:
+                try:
+                    expected_user_id = int(parts[2])
+                except (ValueError, IndexError):
+                    pass
+            
+            # Проверяем, что кнопка доступна только для победителя/участника
+            if expected_user_id is not None and user_id != expected_user_id:
+                try:
+                    bot.answer_callback_query(call.id, "Эта кнопка доступна только для победителя случайного события", show_alert=True)
+                except:
+                    pass
+                logger.info(f"[START MENU] Пользователь {user_id} пытается использовать кнопку, предназначенную для {expected_user_id}")
+                return
 
             logger.info(f"[START MENU] Обработка действия: {action}, user_id={user_id}")
 
