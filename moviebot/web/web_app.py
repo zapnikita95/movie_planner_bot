@@ -1619,9 +1619,28 @@ def create_web_app(bot):
             from datetime import datetime
             import pytz
             now = datetime.now(pytz.UTC)
+            # Преобразуем expires_at в datetime если нужно
             if isinstance(expires_at, str):
-                from dateutil import parser
-                expires_at = parser.parse(expires_at)
+                try:
+                    # Пытаемся распарсить ISO формат
+                    if 'T' in expires_at or ' ' in expires_at:
+                        from dateutil import parser
+                        expires_at = parser.parse(expires_at)
+                    else:
+                        # Простой формат даты
+                        expires_at = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+                except Exception:
+                    # Если не получается - пропускаем проверку срока
+                    pass
+            # Если это не datetime объект - пропускаем проверку
+            if not isinstance(expires_at, datetime):
+                # Если не можем определить тип - считаем валидным
+                chat_id = row.get('chat_id') if isinstance(row, dict) else row[0]
+                user_id = row.get('user_id') if isinstance(row, dict) else row[1]
+                cursor.execute("UPDATE extension_links SET used = TRUE WHERE code = %s", (code,))
+                conn.commit()
+                resp = jsonify({"success": True, "chat_id": chat_id, "user_id": user_id})
+                return resp
             if expires_at.tzinfo is None:
                 expires_at = pytz.UTC.localize(expires_at)
             
