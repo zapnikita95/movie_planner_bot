@@ -447,7 +447,11 @@ def handle_rating_internal(message, rating):
 
                 cursor_local.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
                 kp_row = cursor_local.fetchone()
-                kp_id = str(kp_row.get('kp_id') if isinstance(kp_row, dict) else (kp_row[0] if kp_row else None))
+                if kp_row:
+                    kp_id_from_db = kp_row.get('kp_id') if isinstance(kp_row, dict) else kp_row[0]
+                    if kp_id_from_db:
+                        kp_id = str(kp_id_from_db)
+                # Если kp_id не был установлен ранее и не найден в БД, оставляем None
 
             avg_str = f"{avg:.1f}" if avg else "—"
 
@@ -588,24 +592,29 @@ def handle_rating_internal(message, rating):
                                 should_send = True
                                 rec_text = f"🔥 Ты поставил {rating}/10 — вот похожие:\n\n"
 
-                        if should_send:
-                            from moviebot.api.kinopoisk_api import get_similars
-                            kp_id_int = int(kp_id)
-                            similars = get_similars(kp_id_int)
-                            logger.info(f"[RATE] Похожие: {len(similars)} для {kp_id_int}")
+                        if should_send and kp_id and kp_id != "None":
+                            try:
+                                from moviebot.api.kinopoisk_api import get_similars
+                                kp_id_int = int(kp_id)
+                                similars = get_similars(kp_id_int)
+                                logger.info(f"[RATE] Похожие: {len(similars)} для {kp_id_int}")
 
-                            if similars:
-                                markup = InlineKeyboardMarkup(row_width=1)
-                                for sim_id, name, is_series in similars[:6]:
-                                    short = name[:48] + '...' if len(name) > 48 else name
-                                    icon = '📺' if is_series else '🎬'
-                                    markup.add(InlineKeyboardButton(f"{icon} {short}", callback_data=f"back_to_film:{sim_id}"))
-                                markup.add(InlineKeyboardButton("✅ Закрыть", callback_data="delete_this_message"))
+                                if similars:
+                                    markup = InlineKeyboardMarkup(row_width=1)
+                                    for sim_id, name, is_series in similars[:6]:
+                                        short = name[:48] + '...' if len(name) > 48 else name
+                                        icon = '📺' if is_series else '🎬'
+                                        markup.add(InlineKeyboardButton(f"{icon} {short}", callback_data=f"back_to_film:{sim_id}"))
+                                    markup.add(InlineKeyboardButton("✅ Закрыть", callback_data="delete_this_message"))
 
-                                bot.send_message(chat_id, rec_text, reply_markup=markup, parse_mode='HTML')
-                                logger.info(f"[RATE] Похожие отправлены")
-                            else:
-                                logger.info("[RATE] Похожих нет")
+                                    bot.send_message(chat_id, rec_text, reply_markup=markup, parse_mode='HTML')
+                                    logger.info(f"[RATE] Похожие отправлены")
+                                else:
+                                    logger.info("[RATE] Похожих нет")
+                            except (ValueError, TypeError) as e:
+                                logger.error(f"[RATE] Ошибка преобразования kp_id в int: kp_id={kp_id}, error={e}")
+                            except Exception as e:
+                                logger.error(f"[RATE] Ошибка получения похожих: {e}", exc_info=True)
                     else:
                         logger.info("[RATE] Нет доступа к рекомендациям")
                 except Exception as e:
