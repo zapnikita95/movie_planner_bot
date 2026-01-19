@@ -10,6 +10,12 @@ let isProcessing = false; // Флаг для защиты от двойных к
 
 // Инициализация
 document.addEventListener('DOMContentLoaded', async () => {
+  // Устанавливаем правильные пути к логотипам
+  const logoImg = document.getElementById('logo-img');
+  const logoImgAuth = document.getElementById('logo-img-auth');
+  if (logoImg) logoImg.src = chrome.runtime.getURL('icons/icon48.png');
+  if (logoImgAuth) logoImgAuth.src = chrome.runtime.getURL('icons/icon48.png');
+  
   // Проверяем авторизацию
   const data = await chrome.storage.local.get(['linked_chat_id', 'linked_user_id']);
   if (data.linked_chat_id) {
