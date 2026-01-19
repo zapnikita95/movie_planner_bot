@@ -322,13 +322,6 @@ def show_list_page(bot, chat_id, user_id, page=1, message_id=None):
             # Создаем кнопки пагинации
             markup = InlineKeyboardMarkup()
             
-            # Добавляем кнопки действий (три кнопки в ряд)
-            markup.row(
-                InlineKeyboardButton("📅 Запланировать просмотр", callback_data="plan_from_list"),
-                InlineKeyboardButton("◀️ Перейти к описанию", callback_data="view_film_from_list"),
-                InlineKeyboardButton("👁️ Отметить просмотренным", callback_data="mark_watched_from_list")
-            )
-            
             # Пагинация (только если больше одной страницы)
             if total_pages > 1:
                 pagination_buttons = []
@@ -369,15 +362,19 @@ def show_list_page(bot, chat_id, user_id, page=1, message_id=None):
                     for i in range(0, len(pagination_buttons), 10):
                         markup.row(*pagination_buttons[i:i+10])
                 
-                # Добавляем кнопки навигации
+                # Добавляем кнопки навигации (без кнопки "Страница X/Y")
                 nav_buttons = []
                 if page > 1:
                     nav_buttons.append(InlineKeyboardButton("◀️ Назад", callback_data=f"list_page:{page-1}"))
-                nav_buttons.append(InlineKeyboardButton(f"Страница {page}/{total_pages}", callback_data="noop"))
                 if page < total_pages:
                     nav_buttons.append(InlineKeyboardButton("Вперёд ▶️", callback_data=f"list_page:{page+1}"))
                 if nav_buttons:
                     markup.row(*nav_buttons)
+            
+            # Добавляем кнопки действий (каждая в отдельном ряду - большие кнопки)
+            markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data="view_film_from_list"))
+            markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data="plan_from_list"))
+            markup.add(InlineKeyboardButton("👁️ Отметить просмотренным", callback_data="mark_watched_from_list"))
             
             # Добавляем кнопку "Назад в меню"
             markup.add(InlineKeyboardButton("◀️ Назад в меню", callback_data="back_to_start_menu"))
