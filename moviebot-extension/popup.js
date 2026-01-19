@@ -376,6 +376,23 @@ async function handleBind() {
   
   try {
     const response = await fetch(`${API_BASE_URL}/api/extension/verify?code=${code}`);
+    
+    if (!response.ok) {
+      // Обрабатываем ошибки HTTP
+      let errorMessage = 'Ошибка сети';
+      try {
+        const errorJson = await response.json();
+        if (errorJson.error) {
+          errorMessage = errorJson.error;
+        }
+      } catch (e) {
+        // Если не удалось распарсить JSON, используем дефолтное сообщение
+      }
+      statusEl.textContent = errorMessage;
+      statusEl.className = 'status error';
+      return;
+    }
+    
     const json = await response.json();
     
     if (json.success && json.chat_id) {
@@ -407,7 +424,18 @@ async function handleBind() {
         }
       }, 1000);
     } else {
-      statusEl.textContent = json.error || 'Неверный код';
+      // Обрабатываем ошибки от сервера
+      let errorMessage = 'Неверный код';
+      if (json.error) {
+        if (json.error.includes('expired') || json.error.includes('истёк') || json.error.includes('истек')) {
+          errorMessage = 'Код истёк';
+        } else if (json.error.includes('invalid') || json.error.includes('неверный')) {
+          errorMessage = 'Неверный код';
+        } else {
+          errorMessage = json.error;
+        }
+      }
+      statusEl.textContent = errorMessage;
       statusEl.className = 'status error';
     }
   } catch (err) {

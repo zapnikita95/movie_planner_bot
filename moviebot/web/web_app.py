@@ -1594,22 +1594,50 @@ def create_web_app(bot):
         cursor = get_db_cursor()
         try:
             # Без db_lock как просил пользователь
+            # Сначала проверяем, существует ли код
             cursor.execute("""
-                SELECT chat_id, user_id FROM extension_links
-                WHERE code = %s AND expires_at > CURRENT_TIMESTAMP AND used = FALSE
+                SELECT chat_id, user_id, expires_at, used FROM extension_links
+                WHERE code = %s
             """, (code,))
             row = cursor.fetchone()
-            if row:
-                chat_id = row.get('chat_id') if isinstance(row, dict) else row[0]
-                user_id = row.get('user_id') if isinstance(row, dict) else row[1]
-                cursor.execute("UPDATE extension_links SET used = TRUE WHERE code = %s", (code,))
-                conn.commit()
-                resp = jsonify({"success": True, "chat_id": chat_id, "user_id": user_id})
+            
+            if not row:
+                # Код не найден
+                resp = jsonify({"success": False, "error": "Неверный код"})
                 # after_request hook автоматически добавит CORS заголовки
-                return resp
-            resp = jsonify({"success": False, "error": "invalid or expired code"})
+                return resp, 400
+            
+            # Проверяем, использован ли код
+            used = row.get('used') if isinstance(row, dict) else row[3]
+            if used:
+                resp = jsonify({"success": False, "error": "Неверный код"})
+                # after_request hook автоматически добавит CORS заголовки
+                return resp, 400
+            
+            # Проверяем, не истёк ли код
+            expires_at = row.get('expires_at') if isinstance(row, dict) else row[2]
+            from datetime import datetime
+            import pytz
+            now = datetime.now(pytz.UTC)
+            if isinstance(expires_at, str):
+                from dateutil import parser
+                expires_at = parser.parse(expires_at)
+            if expires_at.tzinfo is None:
+                expires_at = pytz.UTC.localize(expires_at)
+            
+            if expires_at <= now:
+                resp = jsonify({"success": False, "error": "Код истёк"})
+                # after_request hook автоматически добавит CORS заголовки
+                return resp, 400
+            
+            # Код валиден - используем его
+            chat_id = row.get('chat_id') if isinstance(row, dict) else row[0]
+            user_id = row.get('user_id') if isinstance(row, dict) else row[1]
+            cursor.execute("UPDATE extension_links SET used = TRUE WHERE code = %s", (code,))
+            conn.commit()
+            resp = jsonify({"success": True, "chat_id": chat_id, "user_id": user_id})
             # after_request hook автоматически добавит CORS заголовки
-            return resp, 400
+            return resp
         except Exception as e:
             logger.error("Ошибка проверки кода расширения", exc_info=True)
             resp = jsonify({"success": False, "error": "server error"})
