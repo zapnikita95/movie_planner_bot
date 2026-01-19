@@ -1833,8 +1833,8 @@ def create_web_app(bot):
                 except:
                     pass
         except Exception as e:
-            logger.error("Ошибка добавления фильма в базу", exc_info=True)
-            resp = jsonify({"success": False, "error": "server error"})
+            logger.error(f"Ошибка добавления фильма в базу: {str(e)}", exc_info=True)
+            resp = jsonify({"success": False, "error": f"server error: {str(e)}"})
             # after_request hook автоматически добавит CORS заголовки
             return resp, 500
     
