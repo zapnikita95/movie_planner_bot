@@ -1561,13 +1561,14 @@ def create_web_app(bot):
             response.headers['Access-Control-Allow-Credentials'] = 'true'
         return response
     
+    # Функция add_cors_headers больше не используется
+    # Все CORS заголовки добавляются автоматически через after_request hook
+    # Оставлена для обратной совместимости, но не добавляет заголовки
     def add_cors_headers(response):
-        """Добавляет CORS заголовки к ответу (используется для явного добавления, если нужно)"""
-        # После after_request заголовки уже добавлены, но на всякий случай проверяем
+        """Заглушка для обратной совместимости - заголовки добавляются через after_request"""
         if response is None:
             response = jsonify({'status': 'ok'})
-        # Не добавляем заголовки здесь, так как after_request уже это делает
-        # Это предотвращает дублирование заголовков
+        # Не добавляем заголовки здесь - after_request hook уже это делает
         return response
     
     @app.route('/api/extension/verify', methods=['GET', 'OPTIONS'])
