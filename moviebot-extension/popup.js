@@ -5,6 +5,7 @@ const API_BASE_URL = 'https://web-production-3921c.up.railway.app';
 let chatId = null;
 let userId = null;
 let currentFilm = null;
+let lastDetectedUrl = null; // Для отслеживания изменений URL
 
 // Инициализация
 document.addEventListener('DOMContentLoaded', async () => {
@@ -15,11 +16,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     userId = data.linked_user_id;
     showMainScreen();
     
-    // Получаем текущую активную вкладку
+    // Получаем текущую активную вкладку и автоматически загружаем фильм
     try {
       const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
       if (tabs && tabs[0] && tabs[0].url) {
         const currentUrl = tabs[0].url;
+        // Всегда обновляем, даже если URL не изменился (на случай обновления страницы)
+        lastDetectedUrl = currentUrl;
         await detectAndLoadFilm(currentUrl);
       }
     } catch (error) {
@@ -239,6 +242,10 @@ async function loadFilmByUrl(url) {
 }
 
 function displayFilmInfo(film, data) {
+  // Очищаем предыдущее состояние
+  currentFilm = null;
+  
+  // Устанавливаем новое состояние
   currentFilm = film;
   currentFilm.film_id = data.film_id;
   
