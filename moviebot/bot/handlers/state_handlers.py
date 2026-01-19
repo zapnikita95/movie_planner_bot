@@ -1555,7 +1555,8 @@ def check_admin_message(message):
         logger.debug(f"[CHECK ADMIN MESSAGE] Нет админских состояний для user_id={user_id}")
         return False
     
-    if not message.text or not text or message.text.startswith('/'):
+    # Команды должны обрабатываться своими обработчиками, не админским
+    if not message.text or not text or message.text.strip().startswith('/'):
         logger.debug(f"[CHECK ADMIN MESSAGE] Нет текста или команда: text='{text}'")
         return False
     

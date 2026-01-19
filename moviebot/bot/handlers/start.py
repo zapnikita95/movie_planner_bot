@@ -19,6 +19,56 @@ logger = logging.getLogger(__name__)
 
 logger.info("[START.PY] Модуль start.py загружен")
 
+# Регистрируем команду /code на уровне модуля, чтобы она точно работала
+@bot.message_handler(commands=['code'])
+def handle_code_command(message):
+    """Команда /code - генерация кода для привязки браузерного расширения"""
+    logger.info(f"[CODE] ===== START: user_id={message.from_user.id}, chat_id={message.chat.id}")
+    import secrets
+    from datetime import datetime, timedelta
+    from moviebot.database.db_connection import get_db_connection, get_db_cursor
+    
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    
+    code = secrets.token_hex(5).upper()  # 10 символов
+    expires = datetime.utcnow() + timedelta(minutes=10)
+    
+    conn = get_db_connection()
+    cursor = get_db_cursor()
+    try:
+        # Без db_lock как просил пользователь
+        cursor.execute("""
+            INSERT INTO extension_links (code, user_id, chat_id, expires_at, used)
+            VALUES (%s, %s, %s, %s, FALSE)
+            ON CONFLICT (code) DO UPDATE SET 
+                user_id = EXCLUDED.user_id,
+                chat_id = EXCLUDED.chat_id,
+                expires_at = EXCLUDED.expires_at,
+                used = FALSE
+        """, (code, user_id, chat_id, expires))
+        conn.commit()
+        
+        logger.info(f"[CODE] Код сгенерирован: {code} для user_id={user_id}, chat_id={chat_id}")
+        bot.reply_to(message,
+            f"Код для расширения: <code>{code}</code>\n\n"
+            "Вставь его в popup расширения. Действует 10 минут.",
+            parse_mode='HTML')
+    except Exception as e:
+        logger.error(f"[CODE] Ошибка генерации кода: {e}", exc_info=True)
+        bot.reply_to(message, "❌ Не получилось сгенерировать код. Попробуй позже.")
+    finally:
+        try:
+            cursor.close()
+        except:
+            pass
+        try:
+            conn.close()
+        except:
+            pass
+    logger.info(f"[CODE] ===== END =====")
+
+logger.info("[START.PY] Команда /code зарегистрирована на уровне модуля")
 
 def register_start_handlers(bot):
     """Регистрация всех обработчиков из этого модуля"""
@@ -484,3 +534,11 @@ def register_start_handlers(bot):
                 bot.answer_callback_query(call.id, "❌ Ошибка возврата в меню", show_alert=True)
             except:
                 pass
+
+    # Команда /code зарегистрирована на уровне модуля (выше), не дублируем здесь
+
+def register_start_handlers(bot):
+    """Регистрация всех обработчиков из этого модуля"""
+    
+    # Команда /code уже зарегистрирована на уровне модуля выше
+    logger.info("[REGISTER START HANDLERS] Команда /code уже зарегистрирована на уровне модуля")

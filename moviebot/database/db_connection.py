@@ -650,6 +650,26 @@ def init_database():
         logger.error(f"Ошибка при создании таблицы администраторов: {e}", exc_info=True)
         conn.rollback()
     
+    # Таблица для кодов расширения
+    try:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS extension_links (
+                code TEXT PRIMARY KEY,
+                user_id BIGINT NOT NULL,
+                chat_id BIGINT NOT NULL,
+                expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                used BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_extension_links_code ON extension_links (code)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_extension_links_expires ON extension_links (expires_at)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_extension_links_chat_id ON extension_links (chat_id)')
+        logger.info("Таблица extension_links создана")
+    except Exception as e:
+        logger.error(f"Ошибка при создании таблицы extension_links: {e}", exc_info=True)
+        conn.rollback()
+    
     conn.commit()
     logger.info("База данных инициализирована")
 

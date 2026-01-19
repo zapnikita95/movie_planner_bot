@@ -1543,6 +1543,268 @@ def create_web_app(bot):
     logger.info("[WEB APP] ✅ Фоновый поток для инициализации индекса шазама запущен")
 
 
+    # ========================================================================
+    # API endpoints для браузерного расширения
+    # ========================================================================
+    
+    @app.route('/api/extension/verify', methods=['GET'])
+    def verify_extension_code():
+        """Проверка кода расширения и возврат chat_id"""
+        from moviebot.database.db_connection import get_db_connection, get_db_cursor
+        
+        code = request.args.get('code')
+        if not code:
+            return jsonify({"success": False, "error": "code required"}), 400
+
+        conn = get_db_connection()
+        cursor = get_db_cursor()
+        try:
+            # Без db_lock как просил пользователь
+            cursor.execute("""
+                SELECT chat_id, user_id FROM extension_links
+                WHERE code = %s AND expires_at > CURRENT_TIMESTAMP AND used = FALSE
+            """, (code,))
+            row = cursor.fetchone()
+            if row:
+                chat_id = row.get('chat_id') if isinstance(row, dict) else row[0]
+                user_id = row.get('user_id') if isinstance(row, dict) else row[1]
+                cursor.execute("UPDATE extension_links SET used = TRUE WHERE code = %s", (code,))
+                conn.commit()
+                return jsonify({"success": True, "chat_id": chat_id, "user_id": user_id})
+            return jsonify({"success": False, "error": "invalid or expired code"}), 400
+        except Exception as e:
+            logger.error("Ошибка проверки кода расширения", exc_info=True)
+            return jsonify({"success": False, "error": "server error"}), 500
+        finally:
+            try:
+                cursor.close()
+            except:
+                pass
+            try:
+                conn.close()
+            except:
+                pass
+    
+    @app.route('/api/extension/film-info', methods=['GET'])
+    def get_film_info():
+        """Получение информации о фильме по kp_id или imdb_id"""
+        from moviebot.api.kinopoisk_api import extract_movie_info, get_film_by_imdb_id
+        from moviebot.database.db_connection import get_db_connection, get_db_cursor
+        import requests
+        from moviebot.config import KP_TOKEN
+        
+        kp_id = request.args.get('kp_id')
+        imdb_id = request.args.get('imdb_id')
+        chat_id = request.args.get('chat_id', type=int)
+        
+        if not kp_id and not imdb_id:
+            return jsonify({"success": False, "error": "kp_id or imdb_id required"}), 400
+        
+        if not chat_id:
+            return jsonify({"success": False, "error": "chat_id required"}), 400
+        
+        try:
+            # Если передан imdb_id, конвертируем в kp_id
+            if imdb_id and not kp_id:
+                film_info = get_film_by_imdb_id(imdb_id)
+                if not film_info or not film_info.get('kp_id'):
+                    return jsonify({"success": False, "error": "film not found"}), 404
+                kp_id = film_info.get('kp_id')
+            
+            # Получаем информацию о фильме через API для определения типа
+            headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
+            url_api = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}"
+            response = requests.get(url_api, headers=headers, timeout=15)
+            
+            is_series = False
+            if response.status_code == 200:
+                data = response.json()
+                api_type = data.get('type', '').upper()
+                if api_type == 'TV_SERIES':
+                    is_series = True
+            
+            # Формируем правильную ссылку в зависимости от типа
+            if is_series:
+                link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+            else:
+                link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+            
+            info = extract_movie_info(link)
+            
+            if not info:
+                return jsonify({"success": False, "error": "film not found"}), 404
+            
+            # Проверяем наличие в базе (без db_lock)
+            conn = get_db_connection()
+            cursor = get_db_cursor()
+            film_in_db = False
+            film_id = None
+            watched = False
+            has_plan = False
+            
+            try:
+                cursor.execute("""
+                    SELECT id, watched FROM movies 
+                    WHERE chat_id = %s AND kp_id = %s
+                """, (chat_id, str(kp_id)))
+                row = cursor.fetchone()
+                if row:
+                    film_in_db = True
+                    film_id = row.get('id') if isinstance(row, dict) else row[0]
+                    watched = bool(row.get('watched') if isinstance(row, dict) else row[1])
+                
+                # Проверяем наличие в расписании
+                if film_id:
+                    cursor.execute("""
+                        SELECT id FROM plans 
+                        WHERE chat_id = %s AND film_id = %s
+                        LIMIT 1
+                    """, (chat_id, film_id))
+                    has_plan = cursor.fetchone() is not None
+            finally:
+                try:
+                    cursor.close()
+                except:
+                    pass
+                try:
+                    conn.close()
+                except:
+                    pass
+            
+            return jsonify({
+                "success": True,
+                "film": {
+                    "kp_id": info.get('kp_id'),
+                    "title": info.get('title'),
+                    "year": info.get('year'),
+                    "is_series": info.get('is_series', False),
+                    "genres": info.get('genres'),
+                    "director": info.get('director'),
+                    "actors": info.get('actors'),
+                    "description": info.get('description')
+                },
+                "in_database": film_in_db,
+                "film_id": film_id,
+                "watched": watched,
+                "has_plan": has_plan
+            })
+        except Exception as e:
+            logger.error("Ошибка получения информации о фильме", exc_info=True)
+            return jsonify({"success": False, "error": "server error"}), 500
+    
+    @app.route('/api/extension/add-film', methods=['POST'])
+    def add_film_to_database():
+        """Добавление фильма в базу данных"""
+        from moviebot.api.kinopoisk_api import extract_movie_info
+        from moviebot.database.db_connection import get_db_connection, get_db_cursor
+        
+        data = request.get_json()
+        kp_id = data.get('kp_id')
+        chat_id = data.get('chat_id', type=int)
+        
+        if not kp_id or not chat_id:
+            return jsonify({"success": False, "error": "kp_id and chat_id required"}), 400
+        
+        try:
+            link = f"https://kinopoisk.ru/film/{kp_id}"
+            info = extract_movie_info(link)
+            
+            if not info:
+                return jsonify({"success": False, "error": "film not found"}), 404
+            
+            conn = get_db_connection()
+            cursor = get_db_cursor()
+            try:
+                # Без db_lock как просил пользователь
+                cursor.execute("""
+                    INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (chat_id, kp_id) DO UPDATE SET
+                        title = EXCLUDED.title,
+                        year = EXCLUDED.year,
+                        genres = EXCLUDED.genres,
+                        description = EXCLUDED.description,
+                        director = EXCLUDED.director,
+                        actors = EXCLUDED.actors,
+                        is_series = EXCLUDED.is_series,
+                        link = EXCLUDED.link
+                    RETURNING id
+                """, (
+                    chat_id, link, str(kp_id), info.get('title'), info.get('year'),
+                    info.get('genres', '—'), info.get('description', 'Нет описания'),
+                    info.get('director', 'Не указан'), info.get('actors', '—'),
+                    1 if info.get('is_series') else 0
+                ))
+                result = cursor.fetchone()
+                film_id = result.get('id') if isinstance(result, dict) else result[0]
+                conn.commit()
+                
+                return jsonify({"success": True, "film_id": film_id})
+            finally:
+                try:
+                    cursor.close()
+                except:
+                    pass
+                try:
+                    conn.close()
+                except:
+                    pass
+        except Exception as e:
+            logger.error("Ошибка добавления фильма в базу", exc_info=True)
+            return jsonify({"success": False, "error": "server error"}), 500
+    
+    @app.route('/api/extension/create-plan', methods=['POST'])
+    def create_plan():
+        """Создание плана просмотра"""
+        from moviebot.database.db_connection import get_db_connection, get_db_cursor
+        from datetime import datetime
+        import pytz
+        
+        data = request.get_json()
+        chat_id = data.get('chat_id', type=int)
+        film_id = data.get('film_id', type=int)
+        plan_type = data.get('plan_type')  # 'home' or 'cinema'
+        plan_datetime = data.get('plan_datetime')  # ISO format
+        user_id = data.get('user_id', type=int)
+        streaming_service = data.get('streaming_service')
+        streaming_url = data.get('streaming_url')
+        
+        if not all([chat_id, film_id, plan_type, plan_datetime, user_id]):
+            return jsonify({"success": False, "error": "missing required fields"}), 400
+        
+        try:
+            # Парсим datetime
+            dt = datetime.fromisoformat(plan_datetime.replace('Z', '+00:00'))
+            if dt.tzinfo is None:
+                dt = pytz.UTC.localize(dt)
+            
+            conn = get_db_connection()
+            cursor = get_db_cursor()
+            try:
+                # Без db_lock как просил пользователь
+                cursor.execute("""
+                    INSERT INTO plans (chat_id, film_id, plan_type, plan_datetime, user_id, streaming_service, streaming_url)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                """, (chat_id, film_id, plan_type, dt, user_id, streaming_service, streaming_url))
+                result = cursor.fetchone()
+                plan_id = result.get('id') if isinstance(result, dict) else result[0]
+                conn.commit()
+                
+                return jsonify({"success": True, "plan_id": plan_id})
+            finally:
+                try:
+                    cursor.close()
+                except:
+                    pass
+                try:
+                    conn.close()
+                except:
+                    pass
+        except Exception as e:
+            logger.error("Ошибка создания плана", exc_info=True)
+            return jsonify({"success": False, "error": "server error"}), 500
+    
     logger.info(f"[WEB APP] ===== FLASK ПРИЛОЖЕНИЕ СОЗДАНО =====")
     logger.info(f"[WEB APP] Зарегистрированные роуты: {[str(rule) for rule in app.url_map.iter_rules()]}")
     logger.info(f"[WEB APP] Возвращаем app: {app}")
