@@ -206,8 +206,6 @@ def register_start_handlers(bot):
     @bot.callback_query_handler(func=lambda call: call.data.startswith("start_menu:"))
     def start_menu_callback(call):
         try:
-            safe_answer_callback_query(bot, call.id)
-
             user_id = call.from_user.id
             chat_id = call.message.chat.id
             message_id = call.message.message_id
@@ -223,7 +221,7 @@ def register_start_handlers(bot):
                 except (ValueError, IndexError):
                     pass
             
-            # Проверяем, что кнопка доступна только для победителя/участника
+            # Проверяем, что кнопка доступна только для победителя/участника (ДО ответа на callback)
             if expected_user_id is not None and user_id != expected_user_id:
                 try:
                     bot.answer_callback_query(call.id, "Эта кнопка доступна только для победителя случайного события", show_alert=True)
@@ -231,6 +229,9 @@ def register_start_handlers(bot):
                     pass
                 logger.info(f"[START MENU] Пользователь {user_id} пытается использовать кнопку, предназначенную для {expected_user_id}")
                 return
+            
+            # Отвечаем на callback только если проверка прошла
+            safe_answer_callback_query(bot, call.id)
 
             logger.info(f"[START MENU] Обработка действия: {action}, user_id={user_id}")
 
