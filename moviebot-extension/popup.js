@@ -288,12 +288,16 @@ async function loadFilmByUrl(url) {
 }
 
 function displayFilmInfo(film, data) {
+  console.log('[DISPLAY FILM] displayFilmInfo вызвана, film:', film, 'data:', data);
+  
   // Очищаем предыдущее состояние
   currentFilm = null;
   
   // Устанавливаем новое состояние
   currentFilm = film;
   currentFilm.film_id = data.film_id;
+  
+  console.log('[DISPLAY FILM] currentFilm установлен:', currentFilm, 'kp_id:', currentFilm.kp_id);
   
   document.getElementById('film-title').textContent = film.title;
   document.getElementById('film-year').textContent = film.year || '';
@@ -320,10 +324,12 @@ function displayFilmInfo(film, data) {
   
   if (!data.in_database) {
     // Фильм не в базе - две кнопки
+    console.log('[DISPLAY FILM] Создание кнопки "Добавить в базу", film:', film, 'film.kp_id:', film.kp_id);
     const addBtn = document.createElement('button');
     addBtn.textContent = '➕ Добавить в базу';
     addBtn.className = 'btn btn-primary';
     addBtn.addEventListener('click', async () => {
+      console.log('[BUTTON CLICK] Клик по "Добавить в базу", film.kp_id:', film.kp_id);
       await addFilmToDatabase(film.kp_id);
     });
     actionsEl.appendChild(addBtn);
@@ -373,31 +379,50 @@ function displayFilmInfo(film, data) {
 }
 
 async function addFilmToDatabase(kpId) {
+  console.log('[ADD FILM] Начало функции, kpId:', kpId, 'chatId:', chatId);
+  
   if (!kpId) {
+    console.error('[ADD FILM] Ошибка: kpId не указан');
     alert('Ошибка: не указан ID фильма');
     return;
   }
   
   if (!chatId) {
+    console.error('[ADD FILM] Ошибка: chatId не указан');
     alert('Ошибка: не авторизован. Пожалуйста, привяжите аккаунт через /code в боте');
     return;
   }
   
   try {
-    console.log('Добавление фильма в базу:', { kp_id: kpId, chat_id: chatId });
+    const url = `${API_BASE_URL}/api/extension/add-film`;
+    const body = JSON.stringify({ kp_id: kpId, chat_id: chatId });
     
-    const response = await fetch(`${API_BASE_URL}/api/extension/add-film`, {
+    console.log('[ADD FILM] Отправка запроса:', { url, body, kp_id: kpId, chat_id: chatId });
+    
+    const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ kp_id: kpId, chat_id: chatId })
+      body: body
     });
     
+    console.log('[ADD FILM] Получен ответ:', { status: response.status, statusText: response.statusText, ok: response.ok });
+    
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      // Пытаемся получить текст ошибки
+      let errorText = '';
+      try {
+        const errorJson = await response.json();
+        errorText = errorJson.error || 'неизвестная ошибка';
+        console.error('[ADD FILM] Ошибка от сервера:', errorJson);
+      } catch (e) {
+        errorText = await response.text();
+        console.error('[ADD FILM] Ошибка парсинга ответа:', errorText);
+      }
+      throw new Error(`HTTP error! status: ${response.status}, error: ${errorText}`);
     }
     
     const json = await response.json();
-    console.log('Ответ сервера:', json);
+    console.log('[ADD FILM] Ответ сервера:', json);
     
     if (json.success) {
       if (currentFilm) {
