@@ -200,13 +200,14 @@ except Exception as e:
     logger.critical(f"[MAIN] ❌ КРИТИЧЕСКАЯ ОШИБКА ПРИ ИМПОРТЕ promo.py: {e}", exc_info=True)
     sys.exit(1)
 
-import moviebot.bot.handlers.state_handlers  # noqa: F401
-import moviebot.bot.handlers.text_messages  # noqa: F401
-
-# Обычные handlers
+# КРИТИЧНО: Сначала регистрируем команды (start, menu), ПОТОМ state_handlers
+# Это нужно, чтобы команды обрабатывались раньше, чем check_admin_message
 from moviebot.bot.handlers.start import register_start_handlers
 register_start_handlers(bot)
-logger.info("✅ start handlers зарегистрированы")
+logger.info("✅ start handlers зарегистрированы (ПЕРЕД state_handlers)")
+
+import moviebot.bot.handlers.state_handlers  # noqa: F401
+import moviebot.bot.handlers.text_messages  # noqa: F401
 
 from moviebot.bot.handlers.list import register_list_handlers
 register_list_handlers(bot)
