@@ -1605,11 +1605,14 @@ def create_web_app(bot):
     
     @app.route('/api/extension/film-info', methods=['GET', 'OPTIONS'])
     def get_film_info():
+        """Получение информации о фильме по kp_id или imdb_id"""
         # Обработка preflight запроса
         if request.method == 'OPTIONS':
+            logger.info("[EXTENSION API] OPTIONS preflight request for /api/extension/film-info")
             response = jsonify({'status': 'ok'})
             return add_cors_headers(response)
-        """Получение информации о фильме по kp_id или imdb_id"""
+        
+        logger.info(f"[EXTENSION API] GET /api/extension/film-info - kp_id={request.args.get('kp_id')}, imdb_id={request.args.get('imdb_id')}, chat_id={request.args.get('chat_id')}")
         from moviebot.api.kinopoisk_api import extract_movie_info, get_film_by_imdb_id
         from moviebot.database.db_connection import get_db_connection, get_db_cursor
         import requests
@@ -1721,13 +1724,21 @@ def create_web_app(bot):
     
     @app.route('/api/extension/add-film', methods=['POST', 'OPTIONS'])
     def add_film_to_database():
+        """Добавление фильма в базу данных"""
         # Обработка preflight запроса
         if request.method == 'OPTIONS':
+            logger.info("[EXTENSION API] OPTIONS preflight request for /api/extension/add-film")
             response = jsonify({'status': 'ok'})
             return add_cors_headers(response)
-        """Добавление фильма в базу данных"""
+        
+        data = request.get_json() if request.is_json else {}
+        logger.info(f"[EXTENSION API] POST /api/extension/add-film - kp_id={data.get('kp_id')}, chat_id={data.get('chat_id')}")
         from moviebot.api.kinopoisk_api import extract_movie_info
         from moviebot.database.db_connection import get_db_connection, get_db_cursor
+        
+        if not request.is_json:
+            resp = jsonify({"success": False, "error": "JSON required"})
+            return add_cors_headers(resp), 400
         
         data = request.get_json()
         kp_id = data.get('kp_id')
@@ -1790,14 +1801,22 @@ def create_web_app(bot):
     
     @app.route('/api/extension/create-plan', methods=['POST', 'OPTIONS'])
     def create_plan():
+        """Создание плана просмотра"""
         # Обработка preflight запроса
         if request.method == 'OPTIONS':
+            logger.info("[EXTENSION API] OPTIONS preflight request for /api/extension/create-plan")
             response = jsonify({'status': 'ok'})
             return add_cors_headers(response)
-        """Создание плана просмотра"""
+        
+        data = request.get_json() if request.is_json else {}
+        logger.info(f"[EXTENSION API] POST /api/extension/create-plan - chat_id={data.get('chat_id')}, film_id={data.get('film_id')}")
         from moviebot.database.db_connection import get_db_connection, get_db_cursor
         from datetime import datetime
         import pytz
+        
+        if not request.is_json:
+            resp = jsonify({"success": False, "error": "JSON required"})
+            return add_cors_headers(resp), 400
         
         data = request.get_json()
         chat_id = data.get('chat_id', type=int)
