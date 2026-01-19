@@ -1588,7 +1588,9 @@ def handle_rate_list_reply(message):
                 logger.info(f"[HANDLE RATE LIST REPLY] Пропуск — пользователь в планировании, но не на step=3")
                 return
         
-        # Остальные состояния — пропускаем
+        # Остальные состояния — пропускаем (НО НЕ для оценок!)
+        # Для оценок (is_rating=True) мы уже обработали выше и вернулись
+        # Сюда попадаем только если is_rating=False
         if (user_id in user_ticket_state or
             user_id in user_settings_state or
             user_id in user_edit_state or
@@ -1607,6 +1609,13 @@ def handle_rate_list_reply(message):
         
         reply_msg_id = message.reply_to_message.message_id if message.reply_to_message else None
         from moviebot.states import rating_messages
+        
+        # Логируем информацию о rating_messages для отладки
+        if reply_msg_id:
+            rating_msg_value = rating_messages.get(reply_msg_id)
+            logger.info(f"[HANDLE RATE LIST REPLY] reply_msg_id={reply_msg_id}, rating_messages содержит: {rating_msg_value}")
+        else:
+            logger.warning(f"[HANDLE RATE LIST REPLY] Нет reply_msg_id, но is_rating=True")
         
         try:
             from moviebot.bot.handlers.rate import handle_rating_internal

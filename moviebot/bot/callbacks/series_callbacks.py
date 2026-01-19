@@ -1825,19 +1825,27 @@ def rate_film_callback(call):
             )
 
             try:
-                bot.reply_to(
+                msg = bot.reply_to(
                     call.message,
                     text_already,
                     parse_mode='MarkdownV2'
                 )
+                # Регистрируем сообщение для обработки ответов (изменение оценки)
+                from moviebot.states import rating_messages
+                rating_messages[msg.message_id] = film_id
+                logger.info(f"[RATE FILM] rating_messages обновлено (изменение оценки): msg_id={msg.message_id} → film_id={film_id}")
             except telebot.apihelper.ApiTelegramException as api_err:
                 if "can't parse entities" in str(api_err):
                     logger.warning(f"[RATE FILM] MarkdownV2 сломался (уже оценено), fallback на plain")
-                    bot.reply_to(
+                    msg = bot.reply_to(
                         call.message,
                         text_already.replace('\\', ''),
                         parse_mode=None
                     )
+                    # Регистрируем сообщение для обработки ответов (изменение оценки)
+                    from moviebot.states import rating_messages
+                    rating_messages[msg.message_id] = film_id
+                    logger.info(f"[RATE FILM] rating_messages обновлено (изменение оценки, fallback): msg_id={msg.message_id} → film_id={film_id}")
                 else:
                     raise
         else:

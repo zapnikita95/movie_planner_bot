@@ -644,17 +644,32 @@ def edit_rating_callback(call):
         
         # Сохраняем from_settings, если он был установлен
         from_settings = user_edit_state.get(user_id, {}).get('from_settings', False)
+        
+        # Редактируем сообщение и сохраняем message_id для обработки ответов
+        try:
+            bot.edit_message_text(
+                "⭐ <b>Введите новую оценку (1-10):</b>\n\n"
+                "Ответьте на это сообщение числом от 1 до 10.",
+                chat_id, call.message.message_id, parse_mode='HTML'
+            )
+            prompt_message_id = call.message.message_id
+        except Exception as e:
+            logger.warning(f"[EDIT RATING] Не удалось отредактировать сообщение: {e}, отправляем новое")
+            prompt_msg = bot.send_message(
+                chat_id,
+                "⭐ <b>Введите новую оценку (1-10):</b>\n\n"
+                "Ответьте на это сообщение числом от 1 до 10.",
+                parse_mode='HTML'
+            )
+            prompt_message_id = prompt_msg.message_id
+        
         user_edit_state[user_id] = {
             'action': 'edit_rating',
             'film_id': film_id,
-            'from_settings': from_settings
+            'from_settings': from_settings,
+            'prompt_message_id': prompt_message_id
         }
-        
-        bot.edit_message_text(
-            "⭐ <b>Введите новую оценку (1-10):</b>\n\n"
-            "Ответьте на это сообщение числом от 1 до 10.",
-            chat_id, call.message.message_id, parse_mode='HTML'
-        )
+        logger.info(f"[EDIT RATING] Сохранено состояние: user_id={user_id}, film_id={film_id}, prompt_message_id={prompt_message_id}")
     except Exception as e:
         logger.error(f"[EDIT RATING] Ошибка: {e}", exc_info=True)
         try:
