@@ -186,8 +186,17 @@ async function handleBind() {
       userId = json.user_id;
       statusEl.textContent = '✅ Привязано!';
       statusEl.className = 'status success';
-      setTimeout(() => {
+      setTimeout(async () => {
         showMainScreen();
+        // После привязки автоматически загружаем фильм с текущей страницы
+        try {
+          const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+          if (tabs && tabs[0] && tabs[0].url) {
+            await detectAndLoadFilm(tabs[0].url);
+          }
+        } catch (error) {
+          console.error('Ошибка загрузки фильма после привязки:', error);
+        }
       }, 1000);
     } else {
       statusEl.textContent = json.error || 'Неверный код';
@@ -208,18 +217,30 @@ async function handleLogout() {
 }
 
 async function loadFilmByImdbId(imdbId) {
+  if (!imdbId || !chatId) return;
+  
   try {
+    // Показываем индикатор загрузки
+    document.getElementById('film-info').classList.remove('hidden');
+    document.getElementById('film-title').textContent = 'Загрузка...';
+    document.getElementById('film-year').textContent = '';
+    document.getElementById('film-status').innerHTML = '';
+    document.getElementById('film-actions').innerHTML = '';
+    
     const response = await fetch(`${API_BASE_URL}/api/extension/film-info?imdb_id=${imdbId}&chat_id=${chatId}`);
     const json = await response.json();
     
     if (json.success) {
       displayFilmInfo(json.film, json);
     } else {
-      alert('Фильм не найден');
+      document.getElementById('film-title').textContent = 'Фильм не найден';
+      document.getElementById('film-year').textContent = json.error || 'Попробуйте другую ссылку';
     }
   } catch (err) {
     console.error('Ошибка загрузки фильма:', err);
-    alert('Ошибка загрузки фильма');
+    document.getElementById('film-info').classList.remove('hidden');
+    document.getElementById('film-title').textContent = 'Ошибка загрузки';
+    document.getElementById('film-year').textContent = 'Проверьте подключение к интернету';
   }
 }
 
@@ -313,18 +334,30 @@ async function addFilmToDatabase(kpId) {
 }
 
 async function loadFilmByKpId(kpId) {
+  if (!kpId || !chatId) return;
+  
   try {
+    // Показываем индикатор загрузки
+    document.getElementById('film-info').classList.remove('hidden');
+    document.getElementById('film-title').textContent = 'Загрузка...';
+    document.getElementById('film-year').textContent = '';
+    document.getElementById('film-status').innerHTML = '';
+    document.getElementById('film-actions').innerHTML = '';
+    
     const response = await fetch(`${API_BASE_URL}/api/extension/film-info?kp_id=${kpId}&chat_id=${chatId}`);
     const json = await response.json();
     
     if (json.success) {
       displayFilmInfo(json.film, json);
     } else {
-      alert('Фильм не найден');
+      document.getElementById('film-title').textContent = 'Фильм не найден';
+      document.getElementById('film-year').textContent = json.error || 'Попробуйте другую ссылку';
     }
   } catch (err) {
     console.error('Ошибка загрузки фильма:', err);
-    alert('Ошибка загрузки фильма');
+    document.getElementById('film-info').classList.remove('hidden');
+    document.getElementById('film-title').textContent = 'Ошибка загрузки';
+    document.getElementById('film-year').textContent = 'Проверьте подключение к интернету';
   }
 }
 
