@@ -1547,25 +1547,27 @@ def create_web_app(bot):
     # API endpoints для браузерного расширения
     # ========================================================================
     
-    def add_cors_headers(response):
-        """Добавляет CORS заголовки к ответу"""
-        if response is None:
-            response = jsonify({'status': 'ok'})
-        response.headers.add('Access-Control-Allow-Origin', '*')
-        response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-        response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
-        response.headers.add('Access-Control-Allow-Credentials', 'true')
-        return response
-    
     # Добавляем after_request hook для автоматического добавления CORS заголовков
+    # ВАЖНО: Используем только after_request, чтобы избежать дублирования заголовков
     @app.after_request
     def after_request(response):
         """Автоматически добавляет CORS заголовки ко всем ответам от extension API"""
         if request.path.startswith('/api/extension/'):
-            response.headers.add('Access-Control-Allow-Origin', '*')
-            response.headers.add('Access-Control-Allow-Headers', 'Content-Type,Authorization')
-            response.headers.add('Access-Control-Allow-Methods', 'GET,POST,OPTIONS')
-            response.headers.add('Access-Control-Allow-Credentials', 'true')
+            # Используем set вместо add, чтобы избежать дублирования
+            # Если заголовок уже есть, он будет заменен, а не добавлен повторно
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+            response.headers['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'
+            response.headers['Access-Control-Allow-Credentials'] = 'true'
+        return response
+    
+    def add_cors_headers(response):
+        """Добавляет CORS заголовки к ответу (используется для явного добавления, если нужно)"""
+        # После after_request заголовки уже добавлены, но на всякий случай проверяем
+        if response is None:
+            response = jsonify({'status': 'ok'})
+        # Не добавляем заголовки здесь, так как after_request уже это делает
+        # Это предотвращает дублирование заголовков
         return response
     
     @app.route('/api/extension/verify', methods=['GET', 'OPTIONS'])
@@ -1575,7 +1577,8 @@ def create_web_app(bot):
         if request.method == 'OPTIONS':
             logger.info("[EXTENSION API] OPTIONS preflight request for /api/extension/verify")
             response = jsonify({'status': 'ok'})
-            return add_cors_headers(response)
+            # after_request hook автоматически добавит CORS заголовки
+            return response
         
         logger.info(f"[EXTENSION API] GET /api/extension/verify - code={request.args.get('code', 'NOT_PROVIDED')[:10]}")
         from moviebot.database.db_connection import get_db_connection, get_db_cursor
@@ -1583,7 +1586,8 @@ def create_web_app(bot):
         code = request.args.get('code')
         if not code:
             resp = jsonify({"success": False, "error": "code required"})
-            return add_cors_headers(resp), 400
+            # after_request hook автоматически добавит CORS заголовки
+            return resp, 400
 
         conn = get_db_connection()
         cursor = get_db_cursor()
@@ -1600,13 +1604,16 @@ def create_web_app(bot):
                 cursor.execute("UPDATE extension_links SET used = TRUE WHERE code = %s", (code,))
                 conn.commit()
                 resp = jsonify({"success": True, "chat_id": chat_id, "user_id": user_id})
-                return add_cors_headers(resp)
+                # after_request hook автоматически добавит CORS заголовки
+                return resp
             resp = jsonify({"success": False, "error": "invalid or expired code"})
-            return add_cors_headers(resp), 400
+            # after_request hook автоматически добавит CORS заголовки
+            return resp, 400
         except Exception as e:
             logger.error("Ошибка проверки кода расширения", exc_info=True)
             resp = jsonify({"success": False, "error": "server error"})
-            return add_cors_headers(resp), 500
+            # after_request hook автоматически добавит CORS заголовки
+            return resp, 500
         finally:
             try:
                 cursor.close()
@@ -1624,7 +1631,8 @@ def create_web_app(bot):
         if request.method == 'OPTIONS':
             logger.info("[EXTENSION API] OPTIONS preflight request for /api/extension/film-info")
             response = jsonify({'status': 'ok'})
-            return add_cors_headers(response)
+            # after_request hook автоматически добавит CORS заголовки
+            return response
         
         logger.info(f"[EXTENSION API] GET /api/extension/film-info - kp_id={request.args.get('kp_id')}, imdb_id={request.args.get('imdb_id')}, chat_id={request.args.get('chat_id')}")
         from moviebot.api.kinopoisk_api import extract_movie_info, get_film_by_imdb_id
@@ -1638,11 +1646,13 @@ def create_web_app(bot):
         
         if not kp_id and not imdb_id:
             resp = jsonify({"success": False, "error": "kp_id or imdb_id required"})
-            return add_cors_headers(resp), 400
+            # after_request hook автоматически добавит CORS заголовки
+            return resp, 400
         
         if not chat_id:
             resp = jsonify({"success": False, "error": "chat_id required"})
-            return add_cors_headers(resp), 400
+            # after_request hook автоматически добавит CORS заголовки
+            return resp, 400
         
         try:
             # Если передан imdb_id, конвертируем в kp_id
@@ -1650,7 +1660,8 @@ def create_web_app(bot):
                 film_info = get_film_by_imdb_id(imdb_id)
                 if not film_info or not film_info.get('kp_id'):
                     resp = jsonify({"success": False, "error": "film not found"})
-                    return add_cors_headers(resp), 404
+                    # after_request hook автоматически добавит CORS заголовки
+            return resp, 404
                 kp_id = film_info.get('kp_id')
             
             # Получаем информацию о фильме через API для определения типа
@@ -1730,11 +1741,13 @@ def create_web_app(bot):
                 "watched": watched,
                 "has_plan": has_plan
             })
-            return add_cors_headers(resp)
+            # after_request hook автоматически добавит CORS заголовки
+            return resp
         except Exception as e:
             logger.error("Ошибка получения информации о фильме", exc_info=True)
             resp = jsonify({"success": False, "error": "server error"})
-            return add_cors_headers(resp), 500
+            # after_request hook автоматически добавит CORS заголовки
+            return resp, 500
     
     @app.route('/api/extension/add-film', methods=['POST', 'OPTIONS'])
     def add_film_to_database():
@@ -1743,7 +1756,8 @@ def create_web_app(bot):
         if request.method == 'OPTIONS':
             logger.info("[EXTENSION API] OPTIONS preflight request for /api/extension/add-film")
             response = jsonify({'status': 'ok'})
-            return add_cors_headers(response)
+            # after_request hook автоматически добавит CORS заголовки
+            return response
         
         data = request.get_json() if request.is_json else {}
         logger.info(f"[EXTENSION API] POST /api/extension/add-film - kp_id={data.get('kp_id')}, chat_id={data.get('chat_id')}")
@@ -1752,7 +1766,8 @@ def create_web_app(bot):
         
         if not request.is_json:
             resp = jsonify({"success": False, "error": "JSON required"})
-            return add_cors_headers(resp), 400
+            # after_request hook автоматически добавит CORS заголовки
+            return resp, 400
         
         data = request.get_json()
         kp_id = data.get('kp_id')
@@ -1760,7 +1775,8 @@ def create_web_app(bot):
         
         if not kp_id or not chat_id:
             resp = jsonify({"success": False, "error": "kp_id and chat_id required"})
-            return add_cors_headers(resp), 400
+            # after_request hook автоматически добавит CORS заголовки
+            return resp, 400
         
         try:
             # Используем extract_movie_info для получения информации, включая is_series
@@ -1768,7 +1784,8 @@ def create_web_app(bot):
             
             if not info:
                 resp = jsonify({"success": False, "error": "film not found"})
-                return add_cors_headers(resp), 404
+                # after_request hook автоматически добавит CORS заголовки
+            return resp, 404
             
             # Определяем правильную ссылку на основе is_series
             is_series = info.get('is_series', False)
@@ -1803,7 +1820,8 @@ def create_web_app(bot):
                 conn.commit()
                 
                 resp = jsonify({"success": True, "film_id": film_id})
-                return add_cors_headers(resp)
+                # after_request hook автоматически добавит CORS заголовки
+                return resp
             finally:
                 try:
                     cursor.close()
@@ -1816,7 +1834,8 @@ def create_web_app(bot):
         except Exception as e:
             logger.error("Ошибка добавления фильма в базу", exc_info=True)
             resp = jsonify({"success": False, "error": "server error"})
-            return add_cors_headers(resp), 500
+            # after_request hook автоматически добавит CORS заголовки
+            return resp, 500
     
     @app.route('/api/extension/delete-film', methods=['POST', 'OPTIONS'])
     def delete_film():
@@ -1825,11 +1844,13 @@ def create_web_app(bot):
         if request.method == 'OPTIONS':
             logger.info("[EXTENSION API] OPTIONS preflight request for /api/extension/delete-film")
             response = jsonify({'status': 'ok'})
-            return add_cors_headers(response)
+            # after_request hook автоматически добавит CORS заголовки
+            return response
         
         if not request.is_json:
             resp = jsonify({"success": False, "error": "JSON required"})
-            return add_cors_headers(resp), 400
+            # after_request hook автоматически добавит CORS заголовки
+            return resp, 400
         
         data = request.get_json()
         kp_id = data.get('kp_id')
@@ -1837,7 +1858,8 @@ def create_web_app(bot):
         
         if not kp_id or not chat_id:
             resp = jsonify({"success": False, "error": "kp_id and chat_id required"})
-            return add_cors_headers(resp), 400
+            # after_request hook автоматически добавит CORS заголовки
+            return resp, 400
         
         try:
             from moviebot.database.db_connection import get_db_connection, get_db_cursor
@@ -1850,7 +1872,8 @@ def create_web_app(bot):
                 film_row = cursor.fetchone()
                 if not film_row:
                     resp = jsonify({"success": False, "error": "film not found"})
-                    return add_cors_headers(resp), 404
+                    # after_request hook автоматически добавит CORS заголовки
+            return resp, 404
                 
                 film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
                 
@@ -1861,7 +1884,8 @@ def create_web_app(bot):
                 conn.commit()
                 
                 resp = jsonify({"success": True})
-                return add_cors_headers(resp)
+                # after_request hook автоматически добавит CORS заголовки
+                return resp
             finally:
                 try:
                     cursor.close()
@@ -1874,7 +1898,8 @@ def create_web_app(bot):
         except Exception as e:
             logger.error("Ошибка удаления фильма из базы", exc_info=True)
             resp = jsonify({"success": False, "error": "server error"})
-            return add_cors_headers(resp), 500
+            # after_request hook автоматически добавит CORS заголовки
+            return resp, 500
     
     @app.route('/api/extension/parse-time', methods=['POST', 'OPTIONS'])
     def parse_time():
@@ -1883,11 +1908,13 @@ def create_web_app(bot):
         if request.method == 'OPTIONS':
             logger.info("[EXTENSION API] OPTIONS preflight request for /api/extension/parse-time")
             response = jsonify({'status': 'ok'})
-            return add_cors_headers(response)
+            # after_request hook автоматически добавит CORS заголовки
+            return response
         
         if not request.is_json:
             resp = jsonify({"success": False, "error": "JSON required"})
-            return add_cors_headers(resp), 400
+            # after_request hook автоматически добавит CORS заголовки
+            return resp, 400
         
         data = request.get_json()
         time_text = data.get('time_text')
@@ -1895,7 +1922,8 @@ def create_web_app(bot):
         
         if not time_text:
             resp = jsonify({"success": False, "error": "time_text required"})
-            return add_cors_headers(resp), 400
+            # after_request hook автоматически добавит CORS заголовки
+            return resp, 400
         
         try:
             from moviebot.utils.parsing import parse_plan_date_text
@@ -1904,14 +1932,17 @@ def create_web_app(bot):
             if parsed_dt:
                 # Конвертируем в ISO формат
                 resp = jsonify({"success": True, "datetime": parsed_dt.isoformat()})
-                return add_cors_headers(resp)
+                # after_request hook автоматически добавит CORS заголовки
+                return resp
             else:
                 resp = jsonify({"success": False, "error": "Could not parse time"})
-                return add_cors_headers(resp), 400
+                # after_request hook автоматически добавит CORS заголовки
+            return resp, 400
         except Exception as e:
             logger.error("Ошибка парсинга времени", exc_info=True)
             resp = jsonify({"success": False, "error": "server error"})
-            return add_cors_headers(resp), 500
+            # after_request hook автоматически добавит CORS заголовки
+            return resp, 500
     
     @app.route('/api/extension/create-plan', methods=['POST', 'OPTIONS'])
     def create_plan():
@@ -1920,7 +1951,8 @@ def create_web_app(bot):
         if request.method == 'OPTIONS':
             logger.info("[EXTENSION API] OPTIONS preflight request for /api/extension/create-plan")
             response = jsonify({'status': 'ok'})
-            return add_cors_headers(response)
+            # after_request hook автоматически добавит CORS заголовки
+            return response
         
         data = request.get_json() if request.is_json else {}
         logger.info(f"[EXTENSION API] POST /api/extension/create-plan - chat_id={data.get('chat_id')}, film_id={data.get('film_id')}")
@@ -1930,7 +1962,8 @@ def create_web_app(bot):
         
         if not request.is_json:
             resp = jsonify({"success": False, "error": "JSON required"})
-            return add_cors_headers(resp), 400
+            # after_request hook автоматически добавит CORS заголовки
+            return resp, 400
         
         data = request.get_json()
         chat_id = data.get('chat_id', type=int)
@@ -1943,7 +1976,8 @@ def create_web_app(bot):
         
         if not all([chat_id, film_id, plan_type, plan_datetime, user_id]):
             resp = jsonify({"success": False, "error": "missing required fields"})
-            return add_cors_headers(resp), 400
+            # after_request hook автоматически добавит CORS заголовки
+            return resp, 400
         
         try:
             # Парсим datetime
@@ -1984,7 +2018,8 @@ def create_web_app(bot):
                 
                 conn.commit()
                 resp = jsonify({"success": True, "plan_id": plan_id})
-                return add_cors_headers(resp)
+                # after_request hook автоматически добавит CORS заголовки
+                return resp
             finally:
                 try:
                     cursor.close()
@@ -1997,7 +2032,8 @@ def create_web_app(bot):
         except Exception as e:
             logger.error("Ошибка создания плана", exc_info=True)
             resp = jsonify({"success": False, "error": "server error"})
-            return add_cors_headers(resp), 500
+            # after_request hook автоматически добавит CORS заголовки
+            return resp, 500
     
     logger.info(f"[WEB APP] ===== FLASK ПРИЛОЖЕНИЕ СОЗДАНО =====")
     logger.info(f"[WEB APP] Зарегистрированные роуты: {[str(rule) for rule in app.url_map.iter_rules()]}")
