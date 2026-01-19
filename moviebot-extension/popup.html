@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Movie Planner Bot</title>
+    <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Экран авторизации -->
+        <div id="auth-screen" class="screen">
+            <div class="container">
+                <h1>Movie Planner Bot</h1>
+                <p class="subtitle">Введи код из бота (/code)</p>
+                <div class="form-group">
+                    <input type="text" id="code-input" placeholder="XXXXXX" maxlength="10" class="input">
+                    <button id="bind-btn" class="btn btn-primary">Привязать</button>
+                </div>
+                <p id="status" class="status"></p>
+            </div>
+        </div>
+
+        <!-- Экран главного меню -->
+        <div id="main-screen" class="screen hidden">
+            <div class="container">
+                <h1>Movie Planner Bot</h1>
+                <div id="film-info" class="film-info hidden">
+                    <h2 id="film-title"></h2>
+                    <p id="film-year"></p>
+                    <div id="film-status" class="film-status"></div>
+                    <div id="film-actions" class="film-actions"></div>
+                </div>
+                <div id="planning-form" class="planning-form hidden">
+                    <h3>Запланировать просмотр</h3>
+                    <div class="form-group">
+                        <label>Где смотреть:</label>
+                        <select id="plan-type" class="input">
+                            <option value="home">Дома</option>
+                            <option value="cinema">В кино</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Дата и время:</label>
+                        <input type="datetime-local" id="plan-datetime" class="input">
+                    </div>
+                    <div id="streaming-services" class="streaming-services hidden">
+                        <label>Онлайн-кинотеатр:</label>
+                        <select id="streaming-service" class="input">
+                            <option value="">Выберите сервис</option>
+                        </select>
+                    </div>
+                    <button id="create-plan-btn" class="btn btn-primary">Создать план</button>
+                </div>
+                <button id="logout-btn" class="btn btn-secondary">Отвязать</button>
+            </div>
+        </div>
+    </div>
+    <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,78 @@
+{
+  "manifest_version": 3,
+  "name": "Movie Planner Bot",
+  "description": "Добавляй фильмы с Kinopoisk, IMDb, Letterboxd и билеты прямо в @movie_planner_bot",
+  "version": "0.1.0",
+  "author": "Nikita Zaporozhets",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "contextMenus",
+    "downloads",
+    "notifications"
+  ],
+  "host_permissions": [
+    "*://*.kinopoisk.ru/*",
+    "*://*.imdb.com/*",
+    "*://letterboxd.com/*",
+    "*://*.afisha.yandex.ru/*",
+    "*://*.afisha.ru/*",
+    "*://*.kinoafisha.info/*",
+    "*://kinoteatr.ru/*",
+    "*://karofilm.ru/*",
+    "https://api.telegram.org/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.kinopoisk.ru/film/*",
+        "*://*.kinopoisk.ru/series/*",
+        "*://www.kinopoisk.ru/film/*",
+        "*://www.kinopoisk.ru/series/*"
+      ],
+      "js": ["content/content-kp.js"],
+      "run_at": "document_end"
+    },
+    {
+      "matches": ["*://*.imdb.com/title/*"],
+      "js": ["content/content-imdb.js"],
+      "run_at": "document_end"
+    },
+    {
+      "matches": ["*://letterboxd.com/film/*"],
+      "js": ["content/content-letterboxd.js"],
+      "run_at": "document_end"
+    },
+    {
+      "matches": [
+        "*://afisha.yandex.ru/moscow/selections/cinema-today*",
+        "*://afisha.yandex.ru/*/selections/cinema-today*",
+        "*://www.afisha.ru/msk/cinema/*",
+        "*://www.afisha.ru/*/cinema/*",
+        "*://www.kinopoisk.ru/lists/movies/movies-in-cinema/*",
+        "*://kinoteatr.ru/kinoafisha/*",
+        "*://msk.kinoafisha.info/*",
+        "*://karofilm.ru/*"
+      ],
+      "js": ["content/content-tickets.js"],
+      "run_at": "document_end"
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
