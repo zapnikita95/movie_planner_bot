@@ -1692,6 +1692,7 @@ def handle_season_all_toggle(call):
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rate_film:"))
 def rate_film_callback(call):
     """Обработчик кнопки 'Оценить'"""
+    from moviebot.states import rating_messages
     try:
         try:
             bot.answer_callback_query(call.id)
@@ -1831,7 +1832,6 @@ def rate_film_callback(call):
                     parse_mode='MarkdownV2'
                 )
                 # Регистрируем сообщение для обработки ответов (изменение оценки)
-                from moviebot.states import rating_messages
                 rating_messages[msg.message_id] = film_id
                 logger.info(f"[RATE FILM] rating_messages обновлено (изменение оценки): msg_id={msg.message_id} → film_id={film_id}")
             except telebot.apihelper.ApiTelegramException as api_err:
@@ -1843,7 +1843,6 @@ def rate_film_callback(call):
                         parse_mode=None
                     )
                     # Регистрируем сообщение для обработки ответов (изменение оценки)
-                    from moviebot.states import rating_messages
                     rating_messages[msg.message_id] = film_id
                     logger.info(f"[RATE FILM] rating_messages обновлено (изменение оценки, fallback): msg_id={msg.message_id} → film_id={film_id}")
                 else:
