@@ -8,7 +8,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from moviebot.database.db_operations import log_request
 
-from moviebot.states import user_list_state, list_messages, user_view_film_state, user_plan_state
+from moviebot.states import user_list_state, list_messages, user_view_film_state, user_plan_state, user_mark_watched_state
 
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 
@@ -135,7 +135,7 @@ def register_list_handlers(bot):
     
     @bot.callback_query_handler(func=lambda call: call.data == "view_film_from_list")
     def view_film_from_list_callback(call):
-        """Обработчик кнопки 'Посмотреть страницу фильма' из /list"""
+        """Обработчик кнопки 'Перейти к описанию' из /list"""
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         
@@ -172,6 +172,82 @@ def register_list_handlers(bot):
             logger.error(f"[VIEW FILM FROM LIST] Ошибка: {e}", exc_info=True)
             try:
                 bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            except:
+                pass
+    
+    @bot.callback_query_handler(func=lambda call: call.data == "mark_watched_from_list")
+    def mark_watched_from_list_callback(call):
+        """Обработчик кнопки 'Отметить просмотренным' из /list"""
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        # КРИТИЧЕСКИ ВАЖНО: Проверяем, не устарел ли callback query ДО начала операций
+        callback_is_old = False
+        try:
+            bot.answer_callback_query(call.id)
+        except Exception as answer_error:
+            error_str = str(answer_error)
+            if "query is too old" in error_str or "query ID is invalid" in error_str or "timeout expired" in error_str:
+                callback_is_old = True
+                logger.warning(f"[MARK WATCHED FROM LIST] Callback query устарел, ПРОПУСКАЕМ обработку: {answer_error}")
+            else:
+                logger.error(f"[MARK WATCHED FROM LIST] Ошибка answer_callback_query: {answer_error}", exc_info=True)
+        
+        # Если callback устарел - СРАЗУ выходим
+        if callback_is_old:
+            logger.info(f"[MARK WATCHED FROM LIST] ⚠️ Пропущен устаревший callback, выходим БЕЗ обработки")
+            return
+        
+        try:
+            logger.info(f"[MARK WATCHED FROM LIST] Пользователь {user_id} хочет отметить фильм просмотренным из /list")
+            
+            # Устанавливаем состояние для отметки просмотренным
+            user_mark_watched_state[user_id] = {
+                'chat_id': chat_id
+            }
+            
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("◀️ Назад к списку", callback_data="back_to_list"))
+            
+            prompt_msg = bot.send_message(
+                chat_id, 
+                "👁️ Отметить просмотренным\n\nПришлите ID фильма из списка или ссылку на фильм, который хотите отметить просмотренным. Фильм автоматически отметится просмотренным.",
+                reply_markup=markup
+            )
+            # Сохраняем message_id промпта в состояние
+            user_mark_watched_state[user_id]['prompt_message_id'] = prompt_msg.message_id
+            logger.info(f"[MARK WATCHED FROM LIST] Состояние установлено для пользователя {user_id}, prompt_message_id={prompt_msg.message_id}")
+        except Exception as e:
+            logger.error(f"[MARK WATCHED FROM LIST] Ошибка: {e}", exc_info=True)
+            try:
+                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+            except:
+                pass
+    
+    @bot.callback_query_handler(func=lambda call: call.data == "back_to_list")
+    def back_to_list_callback(call):
+        """Обработчик кнопки 'Назад к списку'"""
+        try:
+            bot.answer_callback_query(call.id)
+            user_id = call.from_user.id
+            chat_id = call.message.chat.id
+            
+            # Очищаем состояние отметки просмотренным
+            if user_id in user_mark_watched_state:
+                del user_mark_watched_state[user_id]
+            
+            # Получаем текущую страницу из состояния
+            state = user_list_state.get(user_id)
+            if state:
+                page = state.get('page', 1)
+                show_list_page(bot, chat_id, user_id, page, call.message.message_id)
+            else:
+                # Если состояния нет, показываем первую страницу
+                show_list_page(bot, chat_id, user_id, 1, call.message.message_id)
+        except Exception as e:
+            logger.error(f"[BACK TO LIST] Ошибка: {e}", exc_info=True)
+            try:
+                bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
             except:
                 pass
 
@@ -246,51 +322,52 @@ def show_list_page(bot, chat_id, user_id, page=1, message_id=None):
             # Создаем кнопки пагинации
             markup = InlineKeyboardMarkup()
             
-            # Добавляем кнопки действий
+            # Добавляем кнопки действий (три кнопки в ряд)
             markup.row(
                 InlineKeyboardButton("📅 Запланировать просмотр", callback_data="plan_from_list"),
-                InlineKeyboardButton("👁️ Посмотреть страницу фильма", callback_data="view_film_from_list")
+                InlineKeyboardButton("◀️ Перейти к описанию", callback_data="view_film_from_list"),
+                InlineKeyboardButton("👁️ Отметить просмотренным", callback_data="mark_watched_from_list")
             )
             
-            # Если страниц немного (<= 20), показываем все
-            if total_pages <= 20:
-                buttons = []
-                for p in range(1, total_pages + 1):
-                    label = f"•{p}" if p == page else str(p)
-                    buttons.append(InlineKeyboardButton(label, callback_data=f"list_page:{p}"))
-                # Разбиваем кнопки на строки по 10 штук
-                for i in range(0, len(buttons), 10):
-                    markup.row(*buttons[i:i+10])
-            else:
-                # Для большого количества страниц используем умную пагинацию
-                buttons = []
+            # Пагинация (только если больше одной страницы)
+            if total_pages > 1:
+                pagination_buttons = []
                 
-                # Показываем страницы вокруг текущей
-                start_page = max(1, page - 2)
-                end_page = min(total_pages, page + 2)
-                
-                # Если текущая страница далеко от начала, показываем первую страницу и "..."
-                if start_page > 2:
-                    buttons.append(InlineKeyboardButton("1", callback_data="list_page:1"))
-                    buttons.append(InlineKeyboardButton("...", callback_data="noop"))
-                elif start_page == 2:
-                    buttons.append(InlineKeyboardButton("1", callback_data="list_page:1"))
-                
-                # Добавляем страницы вокруг текущей
-                for p in range(start_page, end_page + 1):
-                    label = f"•{p}" if p == page else str(p)
-                    buttons.append(InlineKeyboardButton(label, callback_data=f"list_page:{p}"))
-                
-                # Если текущая страница далеко от конца, показываем "..." и последнюю страницу
-                if end_page < total_pages - 1:
-                    buttons.append(InlineKeyboardButton("...", callback_data="noop"))
-                    buttons.append(InlineKeyboardButton(str(total_pages), callback_data=f"list_page:{total_pages}"))
-                elif end_page < total_pages:
-                    buttons.append(InlineKeyboardButton(str(total_pages), callback_data=f"list_page:{total_pages}"))
-                
-                # Разбиваем на строки по 10 кнопок
-                for i in range(0, len(buttons), 10):
-                    markup.row(*buttons[i:i+10])
+                # Если страниц немного (<= 20), показываем все
+                if total_pages <= 20:
+                    for p in range(1, total_pages + 1):
+                        label = f"•{p}" if p == page else str(p)
+                        pagination_buttons.append(InlineKeyboardButton(label, callback_data=f"list_page:{p}"))
+                    # Разбиваем кнопки на строки по 10 штук
+                    for i in range(0, len(pagination_buttons), 10):
+                        markup.row(*pagination_buttons[i:i+10])
+                else:
+                    # Для большого количества страниц используем умную пагинацию
+                    start_page = max(1, page - 2)
+                    end_page = min(total_pages, page + 2)
+                    
+                    # Если текущая страница далеко от начала, показываем первую страницу и "..."
+                    if start_page > 2:
+                        pagination_buttons.append(InlineKeyboardButton("1", callback_data="list_page:1"))
+                        pagination_buttons.append(InlineKeyboardButton("...", callback_data="noop"))
+                    elif start_page == 2:
+                        pagination_buttons.append(InlineKeyboardButton("1", callback_data="list_page:1"))
+                    
+                    # Добавляем страницы вокруг текущей
+                    for p in range(start_page, end_page + 1):
+                        label = f"•{p}" if p == page else str(p)
+                        pagination_buttons.append(InlineKeyboardButton(label, callback_data=f"list_page:{p}"))
+                    
+                    # Если текущая страница далеко от конца, показываем "..." и последнюю страницу
+                    if end_page < total_pages - 1:
+                        pagination_buttons.append(InlineKeyboardButton("...", callback_data="noop"))
+                        pagination_buttons.append(InlineKeyboardButton(str(total_pages), callback_data=f"list_page:{total_pages}"))
+                    elif end_page < total_pages:
+                        pagination_buttons.append(InlineKeyboardButton(str(total_pages), callback_data=f"list_page:{total_pages}"))
+                    
+                    # Разбиваем на строки по 10 кнопок
+                    for i in range(0, len(pagination_buttons), 10):
+                        markup.row(*pagination_buttons[i:i+10])
                 
                 # Добавляем кнопки навигации
                 nav_buttons = []
@@ -303,7 +380,7 @@ def show_list_page(bot, chat_id, user_id, page=1, message_id=None):
                     markup.row(*nav_buttons)
             
             # Добавляем кнопку "Назад в меню"
-            markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+            markup.add(InlineKeyboardButton("◀️ Назад в меню", callback_data="back_to_start_menu"))
             
             # Сохраняем состояние
             user_list_state[user_id] = {

@@ -30,7 +30,7 @@ from moviebot.states import (
     user_unsubscribe_state, user_add_admin_state,
     bot_messages, plan_error_messages, list_messages, added_movie_messages,
     rating_messages, plan_notification_messages, settings_messages,
-    user_expected_text
+    user_expected_text, user_mark_watched_state
 )
 from moviebot.utils.parsing import parse_session_time, extract_kp_id_from_text
 from moviebot.bot.handlers.list import handle_view_film_reply_internal
@@ -251,6 +251,117 @@ def handle_list_mark_watched_reply(message):
         logger.info(f"[LIST MARK WATCHED REPLY] ✅ Завершено: отмечено {marked_count} фильмов")
     except Exception as e:
         logger.error(f"[LIST MARK WATCHED REPLY] ❌ Ошибка: {e}", exc_info=True)
+        try:
+            bot.reply_to(message, "❌ Произошла ошибка при обработке")
+        except:
+            pass
+
+
+def check_mark_watched_reply(message):
+    """Проверка для handler ответа на сообщение об отметке просмотренным из /list"""
+    if not message.reply_to_message:
+        return False
+    if not message.reply_to_message.from_user or message.reply_to_message.from_user.id != BOT_ID:
+        return False
+    reply_text = message.reply_to_message.text or ""
+    if "Пришлите ID фильма из списка или ссылку на фильм, который хотите отметить просмотренным" not in reply_text:
+        return False
+    if not message.text or not message.text.strip():
+        return False
+    return True
+
+
+@bot.message_handler(func=check_mark_watched_reply)
+def handle_mark_watched_reply(message):
+    """Обработчик ответа на сообщение об отметке просмотренным из /list"""
+    logger.info(f"[MARK WATCHED REPLY] ===== START: message_id={message.message_id}, user_id={message.from_user.id}")
+    try:
+        user_id = message.from_user.id
+        chat_id = message.chat.id
+        text = message.text.strip()
+        
+        # Проверяем состояние
+        state = user_mark_watched_state.get(user_id)
+        if not state:
+            logger.warning(f"[MARK WATCHED REPLY] Состояние не найдено для user_id={user_id}")
+            bot.reply_to(message, "❌ Сессия устарела. Используйте /list заново.")
+            return
+        
+        prompt_message_id = state.get('prompt_message_id')
+        if prompt_message_id and message.reply_to_message.message_id != prompt_message_id:
+            logger.info(f"[MARK WATCHED REPLY] Сообщение не является ответом на нужное сообщение")
+            return
+        
+        # Извлекаем kp_id из текста
+        from moviebot.utils.parsing import extract_kp_id_from_text
+        kp_id = extract_kp_id_from_text(text)
+        
+        if not kp_id:
+            bot.reply_to(message, "❌ Не удалось найти ссылку или ID фильма в сообщении. Попробуйте еще раз.")
+            return
+        
+        # Отмечаем фильм как просмотренный
+        from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+        conn_local = get_db_connection()
+        cursor_local = None
+        film_title = None
+        marked = False
+        
+        try:
+            with db_lock:
+                cursor_local = conn_local.cursor()
+                # Получаем название фильма
+                cursor_local.execute('SELECT title FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
+                film_row = cursor_local.fetchone()
+                if film_row:
+                    film_title = film_row.get('title') if isinstance(film_row, dict) else film_row[0]
+                
+                # Отмечаем фильм как просмотренный
+                cursor_local.execute('''
+                    UPDATE movies 
+                    SET watched = 1 
+                    WHERE chat_id = %s AND kp_id = %s AND watched = 0
+                ''', (chat_id, str(kp_id)))
+                if cursor_local.rowcount > 0:
+                    marked = True
+                    conn_local.commit()
+                    logger.info(f"[MARK WATCHED REPLY] Фильм {kp_id} отмечен просмотренным")
+        finally:
+            if cursor_local:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+            try:
+                conn_local.close()
+            except:
+                pass
+        
+        # Очищаем состояние
+        if user_id in user_mark_watched_state:
+            del user_mark_watched_state[user_id]
+        
+        if not marked:
+            bot.reply_to(message, f"❌ Фильм с ID {kp_id} не найден или уже отмечен как просмотренный.")
+            return
+        
+        # Формируем сообщение подтверждения
+        title_text = f" <b>{film_title}</b>" if film_title else ""
+        confirmation_text = f"✅ Фильм{title_text} отмечен просмотренным!"
+        
+        # Создаем кнопки
+        markup = InlineKeyboardMarkup()
+        try:
+            kp_id_int = int(kp_id)
+            markup.add(InlineKeyboardButton("📌 Перейти к описанию", callback_data=f"back_to_film:{kp_id_int}"))
+        except (ValueError, TypeError):
+            pass
+        markup.add(InlineKeyboardButton("◀️ Назад к списку", callback_data="back_to_list"))
+        
+        bot.reply_to(message, confirmation_text, reply_markup=markup, parse_mode='HTML')
+        logger.info(f"[MARK WATCHED REPLY] ✅ Завершено: фильм {kp_id} отмечен просмотренным")
+    except Exception as e:
+        logger.error(f"[MARK WATCHED REPLY] ❌ Ошибка: {e}", exc_info=True)
         try:
             bot.reply_to(message, "❌ Произошла ошибка при обработке")
         except:
