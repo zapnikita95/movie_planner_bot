@@ -1760,8 +1760,9 @@ def create_web_app(bot):
             # after_request hook автоматически добавит CORS заголовки
             return response
         
+        logger.info(f"[EXTENSION API] POST /api/extension/add-film - method={request.method}, is_json={request.is_json}, content_type={request.content_type}")
         data = request.get_json() if request.is_json else {}
-        logger.info(f"[EXTENSION API] POST /api/extension/add-film - kp_id={data.get('kp_id')}, chat_id={data.get('chat_id')}")
+        logger.info(f"[EXTENSION API] POST /api/extension/add-film - raw_data={data}, kp_id={data.get('kp_id')}, chat_id={data.get('chat_id')}")
         from moviebot.api.kinopoisk_api import extract_movie_info
         from moviebot.database.db_connection import get_db_connection, get_db_cursor
         
