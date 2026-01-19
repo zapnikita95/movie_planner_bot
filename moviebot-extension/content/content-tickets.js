@@ -1,79 +1,147 @@
-// content/content-tickets.js - Обработка сайтов с билетами
+// content-tickets.js
+// Content script для билетных сайтов: добавляет кнопку "Добавить билеты к плану" рядом с кнопками скачивания билетов
 
-// Определяем, что мы на сайте с билетами
-const ticketSites = [
-  'afisha.yandex.ru',
-  'www.afisha.ru',
-  'www.kinopoisk.ru',
-  'kinoteatr.ru',
-  'kinoafisha.info',
-  'karofilm.ru'
-];
-
-const currentHost = window.location.hostname;
-const isTicketSite = ticketSites.some(site => currentHost.includes(site));
-
-if (isTicketSite) {
-  // Уведомляем background script
-  chrome.runtime.sendMessage({
-    action: "found_ticket_site",
-    url: window.location.href
-  });
+(function() {
+  'use strict';
   
-  // Добавляем кнопку на страницу
-  addMoviePlannerButton();
-}
-
-function addMoviePlannerButton() {
-  // Проверяем, не добавлена ли уже кнопка
-  if (document.getElementById('movie-planner-btn')) {
-    return;
-  }
-  
-  // Создаем кнопку
-  const button = document.createElement('button');
-  button.id = 'movie-planner-btn';
-  button.textContent = '🎫 Отправить в Movie Planner';
-  button.style.cssText = `
-    position: fixed;
-    bottom: 20px;
-    right: 20px;
-    z-index: 10000;
-    padding: 12px 20px;
-    background: #007bff;
-    color: white;
-    border: none;
-    border-radius: 8px;
-    font-size: 14px;
-    font-weight: 500;
-    cursor: pointer;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    transition: background 0.2s;
-  `;
-  
-  button.addEventListener('mouseenter', () => {
-    button.style.background = '#0056b3';
-  });
-  
-  button.addEventListener('mouseleave', () => {
-    button.style.background = '#007bff';
-  });
-  
-  button.addEventListener('click', async () => {
-    // Проверяем авторизацию
-    const data = await chrome.storage.local.get(['linked_chat_id']);
-    if (!data.linked_chat_id) {
-      alert('Сначала авторизуйтесь в расширении!');
-      chrome.runtime.sendMessage({ action: 'open_popup' });
-      return;
+  // Функция создания кнопки добавления билетов
+  function createAddTicketsButton(downloadButton) {
+    // Проверяем, не создана ли уже кнопка
+    if (downloadButton.nextElementSibling && 
+        downloadButton.nextElementSibling.classList && 
+        downloadButton.nextElementSibling.classList.contains('movieplanner-add-tickets-btn')) {
+      return; // Кнопка уже существует
     }
     
-    // Открываем popup для загрузки билета
-    chrome.runtime.sendMessage({
-      action: 'open_ticket_upload',
-      url: window.location.href
+    const addTicketsBtn = document.createElement('button');
+    addTicketsBtn.textContent = '🎟️ Добавить билеты к плану';
+    addTicketsBtn.className = 'movieplanner-add-tickets-btn';
+    addTicketsBtn.style.cssText = `
+      margin-left: 10px;
+      padding: 8px 16px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      transition: all 0.3s;
+      box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+    `;
+    
+    addTicketsBtn.addEventListener('mouseenter', () => {
+      addTicketsBtn.style.transform = 'translateY(-2px)';
+      addTicketsBtn.style.boxShadow = '0 4px 12px rgba(102, 126, 234, 0.4)';
     });
-  });
+    
+    addTicketsBtn.addEventListener('mouseleave', () => {
+      addTicketsBtn.style.transform = 'translateY(0)';
+      addTicketsBtn.style.boxShadow = '0 2px 8px rgba(102, 126, 234, 0.3)';
+    });
+    
+    addTicketsBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      // Получаем информацию о билете (изображение, ссылка и т.д.)
+      try {
+        // Ищем изображение билета или ссылку на скачивание
+        const ticketImage = document.querySelector('img[alt*="билет" i], img[alt*="ticket" i], .ticket-image img, .bilet img');
+        const ticketLink = downloadButton.href || downloadButton.getAttribute('data-href') || window.location.href;
+        
+        // Отправляем сообщение в background script
+        chrome.runtime.sendMessage({
+          action: 'add_tickets_to_plan',
+          ticket_url: ticketLink,
+          ticket_image_url: ticketImage ? ticketImage.src : null,
+          page_url: window.location.href
+        }, (response) => {
+          if (chrome.runtime.lastError) {
+            console.error('Ошибка отправки сообщения:', chrome.runtime.lastError);
+            alert('Ошибка: Расширение не подключено. Пожалуйста, проверьте подключение к боту.');
+            return;
+          }
+          
+          if (response && response.success) {
+            alert('✅ Билет добавлен к плану! Проверьте чат с ботом.');
+          } else {
+            alert('❌ Не удалось добавить билет. Убедитесь, что вы:\n1. Привязали расширение через /code в боте\n2. Запланировали просмотр фильма');
+          }
+        });
+      } catch (error) {
+        console.error('Ошибка при добавлении билета:', error);
+        alert('Ошибка при добавлении билета. Попробуйте скопировать изображение билета и вставить в чат с ботом.');
+      }
+    });
+    
+    // Вставляем кнопку после кнопки скачивания
+    downloadButton.parentNode.insertBefore(addTicketsBtn, downloadButton.nextSibling);
+  }
   
-  document.body.appendChild(button);
-}
+  // Функция поиска кнопок скачивания билетов
+  function findDownloadButtons() {
+    // Различные селекторы для разных сайтов
+    const selectors = [
+      // Яндекс Афиша
+      'a[href*="download"], a[href*="скачать"], button[aria-label*="скачать" i], button[aria-label*="download" i]',
+      // Афиша.ру
+      '.download-ticket, .download-btn, a.ticket-download',
+      // Кинопоиск
+      '.ticket-download, .download-bilet',
+      // Общие паттерны
+      'button:contains("Скачать"), a:contains("Скачать"), button:contains("Download"), a:contains("Download")',
+      '[data-action="download"], [data-download]'
+    ];
+    
+    const buttons = [];
+    
+    // Ищем по тексту (fallback)
+    const allButtons = document.querySelectorAll('button, a');
+    allButtons.forEach(btn => {
+      const text = (btn.textContent || '').toLowerCase();
+      if (text.includes('скачать') || text.includes('download') || 
+          text.includes('билет') || text.includes('ticket')) {
+        // Проверяем, что это не наша кнопка
+        if (!btn.classList.contains('movieplanner-add-tickets-btn')) {
+          buttons.push(btn);
+        }
+      }
+    });
+    
+    return buttons;
+  }
+  
+  // Функция инициализации
+  function init() {
+    // Ждем загрузки страницы
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', () => {
+        setTimeout(addButtons, 1000); // Даем время на загрузку динамического контента
+      });
+    } else {
+      setTimeout(addButtons, 1000);
+    }
+    
+    // Наблюдаем за изменениями DOM (для динамического контента)
+    const observer = new MutationObserver(() => {
+      addButtons();
+    });
+    
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+  }
+  
+  // Функция добавления кнопок
+  function addButtons() {
+    const downloadButtons = findDownloadButtons();
+    downloadButtons.forEach(btn => {
+      createAddTicketsButton(btn);
+    });
+  }
+  
+  // Запускаем инициализацию
+  init();
+})();

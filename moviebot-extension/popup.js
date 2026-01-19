@@ -32,6 +32,9 @@ function resetExtensionState() {
   // Скрываем результаты поиска
   const searchResults = document.getElementById('search-results');
   if (searchResults) searchResults.classList.add('hidden');
+  // Скрываем секцию поиска (она показывается только если фильм не опознался)
+  const searchSection = document.getElementById('search-section');
+  if (searchSection) searchSection.classList.add('hidden');
   // Очищаем поле поиска
   const searchInput = document.getElementById('search-input');
   if (searchInput) searchInput.value = '';
@@ -46,11 +49,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (logoImgAuth) logoImgAuth.src = chrome.runtime.getURL('icons/icon48.png');
   
   // Проверяем авторизацию
-  const data = await chrome.storage.local.get(['linked_chat_id', 'linked_user_id']);
+  const data = await chrome.storage.local.get(['linked_chat_id', 'linked_user_id', 'has_tickets_access']);
   if (data.linked_chat_id) {
     chatId = data.linked_chat_id;
     userId = data.linked_user_id;
+    // Восстанавливаем статус подписки из кэша
+    hasTicketsAccess = data.has_tickets_access || false;
     showMainScreen();
+    
+    // Проверяем подписку один раз при подключении
+    const ticketsAccess = await checkTicketsSubscription();
+    await chrome.storage.local.set({ has_tickets_access: ticketsAccess });
+    hasTicketsAccess = ticketsAccess;
     
     // Получаем текущую активную вкладку и автоматически загружаем фильм
     try {
@@ -138,6 +148,40 @@ document.addEventListener('DOMContentLoaded', async () => {
     searchInput.addEventListener('keypress', (e) => {
       if (e.key === 'Enter') {
         performSearch();
+      }
+    });
+  }
+  
+  // Обработчик галочки календаря
+  const calendarCheckbox = document.getElementById('use-calendar-checkbox');
+  const planDatetime = document.getElementById('plan-datetime');
+  const planTimeText = document.getElementById('plan-time-text');
+  if (calendarCheckbox && planDatetime && planTimeText) {
+    calendarCheckbox.addEventListener('change', (e) => {
+      if (e.target.checked) {
+        // Галочка включена - календарь активен, текстовое поле неактивно
+        planDatetime.disabled = false;
+        planDatetime.style.backgroundColor = '';
+        planTimeText.disabled = true;
+        planTimeText.style.backgroundColor = '#f0f0f0';
+        planTimeText.value = ''; // Очищаем текстовое поле
+      } else {
+        // Галочка выключена - текстовое поле активно, календарь неактивен
+        planDatetime.disabled = true;
+        planDatetime.style.backgroundColor = '#f0f0f0';
+        planDatetime.value = ''; // Очищаем календарь
+        planTimeText.disabled = false;
+        planTimeText.style.backgroundColor = '';
+      }
+    });
+  }
+  
+  // Обработчик кнопки добавления билетов
+  const addTicketsBtn = document.getElementById('add-tickets-btn');
+  if (addTicketsBtn) {
+    addTicketsBtn.addEventListener('click', () => {
+      if (!addTicketsBtn.disabled) {
+        alert('🎟️ Для добавления билетов:\n\n1. Скопируйте изображение билета (Ctrl+C или Cmd+C)\n2. Вставьте его в чат с ботом (Ctrl+V или Cmd+V)\n3. Бот автоматически распознает билет и добавит его к плану');
       }
     });
   }
@@ -283,10 +327,20 @@ async function detectAndLoadFilm(url) {
     }
     
     // Если не распознан - скрываем информацию о фильме
-    document.getElementById('film-info').classList.add('hidden');
+    const filmInfo = document.getElementById('film-info');
+    if (filmInfo) filmInfo.classList.add('hidden');
+    
+    // Если фильм не опознался - показываем поиск
+    const searchSection = document.getElementById('search-section');
+    if (searchSection) searchSection.classList.remove('hidden');
   } catch (error) {
     console.error('Ошибка определения фильма:', error);
-    document.getElementById('film-info').classList.add('hidden');
+    const filmInfo = document.getElementById('film-info');
+    if (filmInfo) filmInfo.classList.add('hidden');
+    
+    // Если фильм не опознался - показываем поиск
+    const searchSection = document.getElementById('search-section');
+    if (searchSection) searchSection.classList.remove('hidden');
   }
 }
 
@@ -301,8 +355,15 @@ function showMainScreen() {
 }
 
 async function handleBind() {
-  const code = document.getElementById('code-input').value.trim().toUpperCase();
+  const codeInput = document.getElementById('code-input');
   const statusEl = document.getElementById('status');
+  
+  if (!codeInput || !statusEl) {
+    console.error('Элементы формы авторизации не найдены');
+    return;
+  }
+  
+  const code = codeInput.value.trim().toUpperCase();
   
   if (!code) {
     statusEl.textContent = 'Введите код';
@@ -318,12 +379,19 @@ async function handleBind() {
     const json = await response.json();
     
     if (json.success && json.chat_id) {
-      await chrome.storage.local.set({ 
-        linked_chat_id: json.chat_id,
-        linked_user_id: json.user_id 
-      });
       chatId = json.chat_id;
       userId = json.user_id;
+      
+      // Проверяем подписку один раз при подключении
+      const ticketsAccess = await checkTicketsSubscription();
+      
+      await chrome.storage.local.set({ 
+        linked_chat_id: json.chat_id,
+        linked_user_id: json.user_id,
+        has_tickets_access: ticketsAccess
+      });
+      hasTicketsAccess = ticketsAccess;
+      
       statusEl.textContent = '✅ Привязано!';
       statusEl.className = 'status success';
       setTimeout(async () => {
@@ -437,6 +505,10 @@ async function loadFilmByUrl(url) {
 function displayFilmInfo(film, data) {
   console.log('[DISPLAY FILM] displayFilmInfo вызвана, film:', film, 'data:', data);
   
+  // Скрываем поиск, если фильм опознался
+  const searchSection = document.getElementById('search-section');
+  if (searchSection) searchSection.classList.add('hidden');
+  
   // Очищаем предыдущее состояние
   currentFilm = null;
   
@@ -446,8 +518,10 @@ function displayFilmInfo(film, data) {
   
   console.log('[DISPLAY FILM] currentFilm установлен:', currentFilm, 'kp_id:', currentFilm.kp_id);
   
-  document.getElementById('film-title').textContent = film.title;
-  document.getElementById('film-year').textContent = film.year || '';
+  const titleEl = document.getElementById('film-title');
+  const yearEl = document.getElementById('film-year');
+  if (titleEl) titleEl.textContent = film.title;
+  if (yearEl) yearEl.textContent = film.year || '';
   
   const statusEl = document.getElementById('film-status');
   statusEl.innerHTML = '';
@@ -732,20 +806,55 @@ function initializePlanningForm() {
   now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
   document.getElementById('plan-datetime').min = now.toISOString().slice(0, 16);
   
-  // Предустанавливаем текущий год (если не декабрь)
-  const currentMonth = now.getMonth() + 1; // 1-12
-  if (currentMonth !== 12) {
-    // Устанавливаем дату на сегодня с текущим годом
-    const defaultDate = new Date(now);
-    defaultDate.setHours(19, 0, 0, 0); // 19:00 по умолчанию
-    document.getElementById('plan-datetime').value = defaultDate.toISOString().slice(0, 16);
+  // Сбрасываем галочку календаря (по умолчанию используем текстовое поле)
+  const calendarCheckbox = document.getElementById('use-calendar-checkbox');
+  const planDatetime = document.getElementById('plan-datetime');
+  const planTimeText = document.getElementById('plan-time-text');
+  
+  if (calendarCheckbox) {
+    calendarCheckbox.checked = false;
   }
   
-  // Очищаем поле текстового времени
-  document.getElementById('plan-time-text').value = '';
+  // Настраиваем поля в зависимости от состояния галочки
+  if (planDatetime && planTimeText) {
+    planDatetime.disabled = true;
+    planDatetime.style.backgroundColor = '#f0f0f0';
+    planDatetime.value = ''; // Очищаем календарь
+    planTimeText.disabled = false;
+    planTimeText.style.backgroundColor = '';
+    planTimeText.value = ''; // Очищаем текстовое поле
+  }
+  
+  // Предустанавливаем текущий год в календаре (если не декабрь), даже если он неактивен
+  const currentMonth = now.getMonth() + 1; // 1-12
+  if (currentMonth !== 12 && planDatetime) {
+    const defaultDate = new Date(now);
+    defaultDate.setHours(19, 0, 0, 0); // 19:00 по умолчанию
+    planDatetime.min = defaultDate.toISOString().slice(0, 16);
+  }
 }
 
 let selectedPlanType = 'home'; // По умолчанию "Дома"
+let hasTicketsAccess = false; // Кэшируем статус подписки
+
+// Проверка подписки один раз при подключении
+async function checkTicketsSubscription() {
+  if (!chatId || !userId) return false;
+  
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/extension/check-subscription?chat_id=${chatId}&user_id=${userId}`);
+    if (response.ok) {
+      const json = await response.json();
+      if (json.success) {
+        hasTicketsAccess = json.has_tickets_access || false;
+        return hasTicketsAccess;
+      }
+    }
+  } catch (err) {
+    console.error('Ошибка проверки подписки:', err);
+  }
+  return false;
+}
 
 function setPlanType(type) {
   selectedPlanType = type;
@@ -754,27 +863,50 @@ function setPlanType(type) {
   const homeBtn = document.getElementById('plan-type-home');
   const cinemaBtn = document.getElementById('plan-type-cinema');
   const streamingEl = document.getElementById('streaming-services');
+  const addTicketsBtn = document.getElementById('add-tickets-btn');
   
   if (type === 'home') {
-    homeBtn.classList.remove('btn-secondary');
-    homeBtn.classList.add('btn-primary', 'active');
-    homeBtn.style.border = '2px solid #007bff';
-    cinemaBtn.classList.remove('btn-primary', 'active');
-    cinemaBtn.classList.add('btn-secondary');
-    cinemaBtn.style.border = '2px solid transparent';
-    streamingEl.classList.remove('hidden');
+    if (homeBtn) {
+      homeBtn.classList.remove('btn-secondary');
+      homeBtn.classList.add('btn-primary', 'active');
+      homeBtn.style.border = '2px solid #007bff';
+    }
+    if (cinemaBtn) {
+      cinemaBtn.classList.remove('btn-primary', 'active');
+      cinemaBtn.classList.add('btn-secondary');
+      cinemaBtn.style.border = '2px solid transparent';
+    }
+    if (streamingEl) streamingEl.classList.remove('hidden');
+    // Скрываем кнопку билетов при выборе "Дома"
+    if (addTicketsBtn) {
+      addTicketsBtn.classList.add('hidden');
+    }
     // Загружаем список онлайн-кинотеатров из API
     if (currentFilm && currentFilm.kp_id) {
       loadStreamingServices(currentFilm.kp_id);
     }
   } else {
-    cinemaBtn.classList.remove('btn-secondary');
-    cinemaBtn.classList.add('btn-primary', 'active');
-    cinemaBtn.style.border = '2px solid #007bff';
-    homeBtn.classList.remove('btn-primary', 'active');
-    homeBtn.classList.add('btn-secondary');
-    homeBtn.style.border = '2px solid transparent';
-    streamingEl.classList.add('hidden');
+    if (cinemaBtn) {
+      cinemaBtn.classList.remove('btn-secondary');
+      cinemaBtn.classList.add('btn-primary', 'active');
+      cinemaBtn.style.border = '2px solid #007bff';
+    }
+    if (homeBtn) {
+      homeBtn.classList.remove('btn-primary', 'active');
+      homeBtn.classList.add('btn-secondary');
+      homeBtn.style.border = '2px solid transparent';
+    }
+    if (streamingEl) streamingEl.classList.add('hidden');
+    // Показываем кнопку билетов при выборе "В кино"
+    if (addTicketsBtn) {
+      addTicketsBtn.classList.remove('hidden');
+      addTicketsBtn.disabled = !hasTicketsAccess;
+      if (!hasTicketsAccess) {
+        addTicketsBtn.title = 'Оформите подписку "Билеты" для загрузки билетов на мероприятия';
+      } else {
+        addTicketsBtn.title = '';
+      }
+    }
   }
 }
 
@@ -901,20 +1033,7 @@ async function handleCreatePlan() {
     if (json.success) {
       alert('✅ План создан!');
       
-      // Показываем кнопку добавления билетов, если есть доступ
-      const addTicketsBtn = document.getElementById('add-tickets-btn');
-      if (json.has_tickets_access) {
-        if (addTicketsBtn) {
-          addTicketsBtn.classList.remove('hidden');
-          addTicketsBtn.onclick = () => {
-            alert('🎟️ Для добавления билетов:\n\n1. Скопируйте изображение билета (Ctrl+C или Cmd+C)\n2. Вставьте его в чат с ботом (Ctrl+V или Cmd+V)\n3. Бот автоматически распознает билет и добавит его к плану');
-          };
-        }
-      } else {
-        if (addTicketsBtn) {
-          addTicketsBtn.classList.add('hidden');
-        }
-      }
+      // Кнопка билетов уже показывается/скрывается в setPlanType в зависимости от выбора "Дома"/"В кино"
       
       // Закрываем форму планирования через 2 секунды, чтобы пользователь мог нажать кнопку билетов
       setTimeout(() => {

@@ -59,8 +59,11 @@
                         <input type="text" id="plan-time-text" class="input" placeholder="завтра вечером, пятница, сб 20:00">
                     </div>
                     <div class="form-group">
-                        <label>Или выберите точную дату и время:</label>
-                        <input type="datetime-local" id="plan-datetime" class="input">
+                        <label style="display: flex; align-items: center; gap: 8px;">
+                            <input type="checkbox" id="use-calendar-checkbox" style="width: auto;">
+                            <span>Или выберите точную дату и время:</span>
+                        </label>
+                        <input type="datetime-local" id="plan-datetime" class="input" disabled style="background-color: #f0f0f0;">
                     </div>
                     <div id="streaming-services" class="streaming-services hidden">
                         <label>Онлайн-кинотеатр:</label>
@@ -70,9 +73,8 @@
                     </div>
                     <button id="create-plan-btn" class="btn btn-primary">Создать план</button>
                     <button id="cancel-plan-btn" class="btn btn-secondary">Отмена</button>
-                    <button id="add-tickets-btn" class="btn btn-secondary hidden" style="margin-top: 10px;">🎟️ Добавить билеты</button>
+                    <button id="add-tickets-btn" class="btn btn-secondary hidden" style="margin-top: 10px;" disabled>🎟️ Добавить билеты</button>
                 </div>
-                <button id="logout-btn" class="btn btn-secondary">Отвязать</button>
             </div>
         </div>
     </div>
