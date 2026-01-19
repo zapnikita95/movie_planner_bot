@@ -492,7 +492,7 @@ def register_plan_handlers(bot):
             # Если нет ссылки, отправляем новое сообщение
             if not link:
                 markup = InlineKeyboardMarkup()
-                markup.add(InlineKeyboardButton("❌ Выйти", callback_data="plan:cancel"))
+                markup.add(InlineKeyboardButton("◀️ Назад в меню", callback_data="back_to_start_menu"))
                 prompt_msg = bot.reply_to(message, "Пришлите ссылку или ID фильма в ответном сообщении и напишите, где (дома или в кино) и когда вы хотели бы его посмотреть!", reply_markup=markup)
                 user_plan_state[user_id] = {'step': 1, 'chat_id': chat_id, 'prompt_message_id': prompt_msg.message_id}
                 logger.info(f"[PLAN] Сохранен prompt_message_id={prompt_msg.message_id} для user_id={user_id}")
@@ -1033,7 +1033,7 @@ def plan_type_callback(call):
             
             bot.answer_callback_query(call.id, "Пришлите ссылку или ID фильма")
             markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton("❌ Выйти", callback_data="plan:cancel"))
+            markup.add(InlineKeyboardButton("◀️ Назад в меню", callback_data="back_to_start_menu"))
             prompt_msg = bot.send_message(chat_id, "Пришлите ссылку или ID фильма в ответном сообщении и напишите, где (дома или в кино) и когда вы хотели бы его посмотреть!", reply_markup=markup)
             # Сохраняем message_id промпта в состояние
             user_plan_state[user_id]['prompt_message_id'] = prompt_msg.message_id

@@ -11,6 +11,7 @@ from moviebot.database.db_operations import (
     log_request
 )
 from moviebot.utils.helpers import has_tickets_access, has_recommendations_access
+from moviebot.states import user_plan_state
 
 from moviebot.bot.bot_init import safe_answer_callback_query
 
@@ -353,6 +354,11 @@ def register_start_handlers(bot):
             user_id = call.from_user.id
             chat_id = call.message.chat.id
             message_id = call.message.message_id
+            
+            # Очищаем состояние планирования, если оно есть
+            if user_id in user_plan_state:
+                del user_plan_state[user_id]
+                logger.info(f"[BACK TO MENU] Очищено состояние планирования для user_id={user_id}")
 
             # Та же логика подписки, что и в /start (теперь с группой)
             subscription_info = ""
