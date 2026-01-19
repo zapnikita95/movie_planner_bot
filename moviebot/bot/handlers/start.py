@@ -357,10 +357,11 @@ logger.info("[START.PY] Callback handlers для start_menu и back_to_start_men
 
 def register_start_handlers(bot):
     """Регистрация всех обработчиков из этого модуля"""
+    logger.info("[REGISTER START HANDLERS] ===== НАЧАЛО РЕГИСТРАЦИИ =====")
 
     @bot.message_handler(commands=['start', 'menu'])
     def send_welcome(message):
-        logger.info(f"[START] СРАБОТАЛ /start от user_id={message.from_user.id}, chat_id={message.chat.id}")
+        logger.info(f"[START HANDLER] ===== СРАБОТАЛ /start от user_id={message.from_user.id}, chat_id={message.chat.id} =====")
         
         # Логируем полный текст сообщения для отладки
         message_text = message.text or ""
