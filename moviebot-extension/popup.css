@@ -38,6 +38,8 @@ body {
     object-fit: cover;
     border: 3px solid #667eea;
     box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+    background: white;
+    padding: 2px;
 }
 
 .logout-btn {
