@@ -1773,7 +1773,15 @@ def create_web_app(bot):
         
         data = request.get_json()
         kp_id = data.get('kp_id')
-        chat_id = data.get('chat_id', type=int)
+        chat_id = data.get('chat_id')
+        
+        # Конвертируем chat_id в int, если он строка
+        if chat_id:
+            try:
+                chat_id = int(chat_id)
+            except (ValueError, TypeError):
+                resp = jsonify({"success": False, "error": "chat_id must be a number"})
+                return resp, 400
         
         if not kp_id or not chat_id:
             resp = jsonify({"success": False, "error": "kp_id and chat_id required"})
@@ -1856,7 +1864,15 @@ def create_web_app(bot):
         
         data = request.get_json()
         kp_id = data.get('kp_id')
-        chat_id = data.get('chat_id', type=int)
+        chat_id = data.get('chat_id')
+        
+        # Конвертируем chat_id в int, если он строка
+        if chat_id:
+            try:
+                chat_id = int(chat_id)
+            except (ValueError, TypeError):
+                resp = jsonify({"success": False, "error": "chat_id must be a number"})
+                return resp, 400
         
         if not kp_id or not chat_id:
             resp = jsonify({"success": False, "error": "kp_id and chat_id required"})
@@ -1968,10 +1984,24 @@ def create_web_app(bot):
             return resp, 400
         
         data = request.get_json()
-        chat_id = data.get('chat_id', type=int)
-        film_id = data.get('film_id', type=int)
+        chat_id = data.get('chat_id')
+        film_id = data.get('film_id')
         plan_type = data.get('plan_type')  # 'home' or 'cinema'
         plan_datetime = data.get('plan_datetime')  # ISO format
+        
+        # Конвертируем в int, если они строки
+        if chat_id:
+            try:
+                chat_id = int(chat_id)
+            except (ValueError, TypeError):
+                resp = jsonify({"success": False, "error": "chat_id must be a number"})
+                return resp, 400
+        if film_id:
+            try:
+                film_id = int(film_id)
+            except (ValueError, TypeError):
+                resp = jsonify({"success": False, "error": "film_id must be a number"})
+                return resp, 400
         user_id = data.get('user_id', type=int)
         streaming_service = data.get('streaming_service')
         streaming_url = data.get('streaming_url')
