@@ -41,7 +41,11 @@
                         </select>
                     </div>
                     <div class="form-group">
-                        <label>Дата и время:</label>
+                        <label>Дата и время (можно указать "завтра вечером", "пятница", "сб" и т.д.):</label>
+                        <input type="text" id="plan-time-text" class="input" placeholder="завтра вечером, пятница, сб 20:00">
+                    </div>
+                    <div class="form-group">
+                        <label>Или выберите точную дату и время:</label>
                         <input type="datetime-local" id="plan-datetime" class="input">
                     </div>
                     <div id="streaming-services" class="streaming-services hidden">
@@ -51,6 +55,7 @@
                         </select>
                     </div>
                     <button id="create-plan-btn" class="btn btn-primary">Создать план</button>
+                    <button id="cancel-plan-btn" class="btn btn-secondary">Отмена</button>
                 </div>
                 <button id="logout-btn" class="btn btn-secondary">Отвязать</button>
             </div>

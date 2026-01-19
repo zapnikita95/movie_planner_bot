@@ -1749,12 +1749,17 @@ def create_web_app(bot):
             return add_cors_headers(resp), 400
         
         try:
-            link = f"https://kinopoisk.ru/film/{kp_id}"
-            info = extract_movie_info(link)
+            # Используем extract_movie_info для получения информации, включая is_series
+            info = extract_movie_info(str(kp_id))
             
             if not info:
                 resp = jsonify({"success": False, "error": "film not found"})
                 return add_cors_headers(resp), 404
+            
+            # Определяем правильную ссылку на основе is_series
+            is_series = info.get('is_series', False)
+            link_type = 'series' if is_series else 'film'
+            link = f"https://kinopoisk.ru/{link_type}/{kp_id}"
             
             conn = get_db_connection()
             cursor = get_db_cursor()
@@ -1777,7 +1782,7 @@ def create_web_app(bot):
                     chat_id, link, str(kp_id), info.get('title'), info.get('year'),
                     info.get('genres', '—'), info.get('description', 'Нет описания'),
                     info.get('director', 'Не указан'), info.get('actors', '—'),
-                    1 if info.get('is_series') else 0
+                    1 if is_series else 0
                 ))
                 result = cursor.fetchone()
                 film_id = result.get('id') if isinstance(result, dict) else result[0]
@@ -1799,9 +1804,104 @@ def create_web_app(bot):
             resp = jsonify({"success": False, "error": "server error"})
             return add_cors_headers(resp), 500
     
+    @app.route('/api/extension/delete-film', methods=['POST', 'OPTIONS'])
+    def delete_film():
+        """Удаление фильма из базы данных"""
+        # Обработка preflight запроса
+        if request.method == 'OPTIONS':
+            logger.info("[EXTENSION API] OPTIONS preflight request for /api/extension/delete-film")
+            response = jsonify({'status': 'ok'})
+            return add_cors_headers(response)
+        
+        if not request.is_json:
+            resp = jsonify({"success": False, "error": "JSON required"})
+            return add_cors_headers(resp), 400
+        
+        data = request.get_json()
+        kp_id = data.get('kp_id')
+        chat_id = data.get('chat_id', type=int)
+        
+        if not kp_id or not chat_id:
+            resp = jsonify({"success": False, "error": "kp_id and chat_id required"})
+            return add_cors_headers(resp), 400
+        
+        try:
+            from moviebot.database.db_connection import get_db_connection, get_db_cursor
+            conn = get_db_connection()
+            cursor = get_db_cursor()
+            try:
+                # Без db_lock как просил пользователь
+                # Сначала получаем film_id
+                cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, str(kp_id)))
+                film_row = cursor.fetchone()
+                if not film_row:
+                    resp = jsonify({"success": False, "error": "film not found"})
+                    return add_cors_headers(resp), 404
+                
+                film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
+                
+                # Удаляем связанные данные
+                cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+                cursor.execute('DELETE FROM plans WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+                cursor.execute('DELETE FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                conn.commit()
+                
+                resp = jsonify({"success": True})
+                return add_cors_headers(resp)
+            finally:
+                try:
+                    cursor.close()
+                except:
+                    pass
+                try:
+                    conn.close()
+                except:
+                    pass
+        except Exception as e:
+            logger.error("Ошибка удаления фильма из базы", exc_info=True)
+            resp = jsonify({"success": False, "error": "server error"})
+            return add_cors_headers(resp), 500
+    
+    @app.route('/api/extension/parse-time', methods=['POST', 'OPTIONS'])
+    def parse_time():
+        """Парсинг 'человеческого' времени (завтра вечером, пятница и т.д.)"""
+        # Обработка preflight запроса
+        if request.method == 'OPTIONS':
+            logger.info("[EXTENSION API] OPTIONS preflight request for /api/extension/parse-time")
+            response = jsonify({'status': 'ok'})
+            return add_cors_headers(response)
+        
+        if not request.is_json:
+            resp = jsonify({"success": False, "error": "JSON required"})
+            return add_cors_headers(resp), 400
+        
+        data = request.get_json()
+        time_text = data.get('time_text')
+        user_id = data.get('user_id', type=int)
+        
+        if not time_text:
+            resp = jsonify({"success": False, "error": "time_text required"})
+            return add_cors_headers(resp), 400
+        
+        try:
+            from moviebot.utils.parsing import parse_plan_date_text
+            parsed_dt = parse_plan_date_text(time_text, user_id)
+            
+            if parsed_dt:
+                # Конвертируем в ISO формат
+                resp = jsonify({"success": True, "datetime": parsed_dt.isoformat()})
+                return add_cors_headers(resp)
+            else:
+                resp = jsonify({"success": False, "error": "Could not parse time"})
+                return add_cors_headers(resp), 400
+        except Exception as e:
+            logger.error("Ошибка парсинга времени", exc_info=True)
+            resp = jsonify({"success": False, "error": "server error"})
+            return add_cors_headers(resp), 500
+    
     @app.route('/api/extension/create-plan', methods=['POST', 'OPTIONS'])
     def create_plan():
-        """Создание плана просмотра"""
+        """Создание или обновление плана просмотра"""
         # Обработка preflight запроса
         if request.method == 'OPTIONS':
             logger.info("[EXTENSION API] OPTIONS preflight request for /api/extension/create-plan")

@@ -53,6 +53,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('bind-btn').addEventListener('click', handleBind);
   document.getElementById('logout-btn').addEventListener('click', handleLogout);
   document.getElementById('create-plan-btn').addEventListener('click', handleCreatePlan);
+  document.getElementById('cancel-plan-btn').addEventListener('click', () => {
+    document.getElementById('planning-form').classList.add('hidden');
+  });
   document.getElementById('plan-type').addEventListener('change', handlePlanTypeChange);
 });
 
@@ -63,7 +66,7 @@ async function detectAndLoadFilm(url) {
   try {
     // Показываем индикатор загрузки
     document.getElementById('film-info').classList.remove('hidden');
-    document.getElementById('film-title').textContent = 'Загрузка...';
+    document.getElementById('film-title').textContent = 'Загружаем информацию о фильме';
     document.getElementById('film-year').textContent = '';
     document.getElementById('film-status').innerHTML = '';
     document.getElementById('film-actions').innerHTML = '';
@@ -222,7 +225,7 @@ async function loadFilmByImdbId(imdbId) {
   try {
     // Показываем индикатор загрузки
     document.getElementById('film-info').classList.remove('hidden');
-    document.getElementById('film-title').textContent = 'Загрузка...';
+    document.getElementById('film-title').textContent = 'Загружаем информацию о фильме';
     document.getElementById('film-year').textContent = '';
     document.getElementById('film-status').innerHTML = '';
     document.getElementById('film-actions').innerHTML = '';
@@ -289,19 +292,60 @@ function displayFilmInfo(film, data) {
   const actionsEl = document.getElementById('film-actions');
   actionsEl.innerHTML = '';
   
+  // Логика кнопок как в боте:
+  // 1. Если фильм НЕ в базе - показываем "Добавить в базу" и "Запланировать просмотр"
+  // 2. Если фильм в базе - показываем "Удалить из базы" и "Запланировать просмотр" (или "Изменить в расписании" если уже запланирован)
+  
   if (!data.in_database) {
+    // Фильм не в базе - две кнопки
     const addBtn = document.createElement('button');
     addBtn.textContent = '➕ Добавить в базу';
     addBtn.className = 'btn btn-primary';
-    addBtn.addEventListener('click', () => addFilmToDatabase(film.kp_id));
+    addBtn.addEventListener('click', async () => {
+      await addFilmToDatabase(film.kp_id);
+    });
     actionsEl.appendChild(addBtn);
+    
+    const planBtn = document.createElement('button');
+    planBtn.textContent = '📅 Запланировать просмотр';
+    planBtn.className = 'btn btn-primary';
+    planBtn.addEventListener('click', async () => {
+      // Автоматически добавляем в базу, если еще не добавлен
+      if (!data.in_database) {
+        await addFilmToDatabase(film.kp_id);
+      }
+      showPlanningForm();
+    });
+    actionsEl.appendChild(planBtn);
+  } else {
+    // Фильм в базе
+    if (data.has_plan) {
+      // Просмотр уже запланирован - кнопка "Изменить в расписании"
+      const editPlanBtn = document.createElement('button');
+      editPlanBtn.textContent = '✏️ Изменить в расписании';
+      editPlanBtn.className = 'btn btn-primary';
+      editPlanBtn.addEventListener('click', () => showPlanningForm());
+      actionsEl.appendChild(editPlanBtn);
+    } else {
+      // Просмотр не запланирован - кнопка "Запланировать просмотр"
+      const planBtn = document.createElement('button');
+      planBtn.textContent = '📅 Запланировать просмотр';
+      planBtn.className = 'btn btn-primary';
+      planBtn.addEventListener('click', () => showPlanningForm());
+      actionsEl.appendChild(planBtn);
+    }
+    
+    // Кнопка "Удалить из базы"
+    const deleteBtn = document.createElement('button');
+    deleteBtn.textContent = '🗑️ Удалить из базы';
+    deleteBtn.className = 'btn btn-secondary';
+    deleteBtn.addEventListener('click', async () => {
+      if (confirm('Вы уверены, что хотите удалить фильм из базы?')) {
+        await deleteFilmFromDatabase(film.kp_id);
+      }
+    });
+    actionsEl.appendChild(deleteBtn);
   }
-  
-  const planBtn = document.createElement('button');
-  planBtn.textContent = '📅 Запланировать просмотр';
-  planBtn.className = 'btn btn-primary';
-  planBtn.addEventListener('click', () => showPlanningForm());
-  actionsEl.appendChild(planBtn);
   
   document.getElementById('film-info').classList.remove('hidden');
 }
@@ -317,7 +361,16 @@ async function addFilmToDatabase(kpId) {
     const json = await response.json();
     if (json.success) {
       currentFilm.film_id = json.film_id;
-      alert('✅ Фильм добавлен в базу!');
+      // Показываем сообщение
+      const statusEl = document.getElementById('status');
+      if (statusEl) {
+        statusEl.textContent = '✅ Добавлено в базу!';
+        statusEl.className = 'status success';
+        setTimeout(() => {
+          statusEl.textContent = '';
+          statusEl.className = 'status';
+        }, 3000);
+      }
       // Перезагружаем информацию по kp_id
       if (currentFilm.kp_id) {
         await loadFilmByKpId(currentFilm.kp_id);
@@ -333,13 +386,38 @@ async function addFilmToDatabase(kpId) {
   }
 }
 
+async function deleteFilmFromDatabase(kpId) {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/extension/delete-film`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ kp_id: kpId, chat_id: chatId })
+    });
+    
+    const json = await response.json();
+    if (json.success) {
+      // Перезагружаем информацию
+      if (currentFilm.kp_id) {
+        await loadFilmByKpId(currentFilm.kp_id);
+      } else if (currentFilm.imdb_id) {
+        await loadFilmByImdbId(currentFilm.imdb_id);
+      }
+    } else {
+      alert('Ошибка удаления фильма: ' + (json.error || 'неизвестная ошибка'));
+    }
+  } catch (err) {
+    console.error('Ошибка удаления фильма:', err);
+    alert('Ошибка удаления фильма');
+  }
+}
+
 async function loadFilmByKpId(kpId) {
   if (!kpId || !chatId) return;
   
   try {
     // Показываем индикатор загрузки
     document.getElementById('film-info').classList.remove('hidden');
-    document.getElementById('film-title').textContent = 'Загрузка...';
+    document.getElementById('film-title').textContent = 'Загружаем информацию о фильме';
     document.getElementById('film-year').textContent = '';
     document.getElementById('film-status').innerHTML = '';
     document.getElementById('film-actions').innerHTML = '';
@@ -369,10 +447,22 @@ function showPlanningForm() {
   
   document.getElementById('planning-form').classList.remove('hidden');
   
-  // Устанавливаем минимальную дату (сегодня)
+  // Устанавливаем минимальную дату (сегодня) и предустанавливаем текущий год
   const now = new Date();
   now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
   document.getElementById('plan-datetime').min = now.toISOString().slice(0, 16);
+  
+  // Предустанавливаем текущий год (если не декабрь)
+  const currentMonth = now.getMonth() + 1; // 1-12
+  if (currentMonth !== 12) {
+    // Устанавливаем дату на сегодня с текущим годом
+    const defaultDate = new Date(now);
+    defaultDate.setHours(19, 0, 0, 0); // 19:00 по умолчанию
+    document.getElementById('plan-datetime').value = defaultDate.toISOString().slice(0, 16);
+  }
+  
+  // Очищаем поле текстового времени
+  document.getElementById('plan-time-text').value = '';
 }
 
 function handlePlanTypeChange() {
@@ -394,11 +484,40 @@ async function handleCreatePlan() {
   }
   
   const planType = document.getElementById('plan-type').value;
+  const planTimeText = document.getElementById('plan-time-text').value.trim();
   const planDatetime = document.getElementById('plan-datetime').value;
   const streamingService = document.getElementById('streaming-service').value;
   
-  if (!planDatetime) {
-    alert('Выберите дату и время');
+  let planDatetimeISO = null;
+  
+  // Если указано текстовое время - парсим его
+  if (planTimeText) {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/extension/parse-time`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          time_text: planTimeText,
+          user_id: userId
+        })
+      });
+      
+      const json = await response.json();
+      if (json.success && json.datetime) {
+        planDatetimeISO = json.datetime;
+      } else {
+        alert('Не удалось распознать время: ' + (json.error || 'неизвестная ошибка'));
+        return;
+      }
+    } catch (err) {
+      console.error('Ошибка парсинга времени:', err);
+      alert('Ошибка парсинга времени');
+      return;
+    }
+  } else if (planDatetime) {
+    planDatetimeISO = new Date(planDatetime).toISOString();
+  } else {
+    alert('Укажите дату и время');
     return;
   }
   
@@ -410,7 +529,7 @@ async function handleCreatePlan() {
         chat_id: chatId,
         film_id: currentFilm.film_id,
         plan_type: planType,
-        plan_datetime: new Date(planDatetime).toISOString(),
+        plan_datetime: planDatetimeISO,
         user_id: userId,
         streaming_service: streamingService || null,
         streaming_url: null
@@ -421,6 +540,12 @@ async function handleCreatePlan() {
     if (json.success) {
       alert('✅ План создан!');
       document.getElementById('planning-form').classList.add('hidden');
+      // Перезагружаем информацию о фильме
+      if (currentFilm.kp_id) {
+        await loadFilmByKpId(currentFilm.kp_id);
+      } else if (currentFilm.imdb_id) {
+        await loadFilmByImdbId(currentFilm.imdb_id);
+      }
     } else {
       alert('Ошибка создания плана: ' + (json.error || 'неизвестная ошибка'));
     }

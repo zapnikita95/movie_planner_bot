@@ -35,11 +35,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     handleTicketSite(sender.tab);
     sendResponse({ success: true });
   } else if (message.action === "open_popup") {
-    chrome.action.openPopup();
+    // Не открываем popup автоматически - только при клике на иконку
     sendResponse({ success: true });
   } else if (message.action === "open_ticket_upload") {
-    chrome.action.setPopup({ popup: `popup.html?ticket_url=${encodeURIComponent(message.url)}` });
-    chrome.action.openPopup();
+    // Не открываем popup автоматически - только при клике на иконку
     sendResponse({ success: true });
   }
   return true; // Для асинхронного ответа
@@ -47,52 +46,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // Обработка найденного kp_id
 async function handleKpId(kpId, isSeries, tab) {
-  try {
-    const data = await chrome.storage.local.get(['linked_chat_id']);
-    if (!data.linked_chat_id) {
-      return;
-    }
-    
-    // Открываем popup с информацией о фильме
-    chrome.action.setPopup({ popup: `popup.html?kp_id=${kpId}&is_series=${isSeries}` });
-    chrome.action.openPopup();
-  } catch (error) {
-    console.error('Ошибка обработки kp_id:', error);
-  }
+  // Не открываем popup автоматически - только при клике на иконку
+  // Popup сам определит фильм из текущей вкладки
 }
 
 // Обработка ссылки на фильм
 async function handleLink(url, tab) {
-  try {
-    // Получаем chat_id из storage
-    const data = await chrome.storage.local.get(['linked_chat_id']);
-    if (!data.linked_chat_id) {
-      chrome.tabs.create({ url: chrome.runtime.getURL('popup.html') });
-      return;
-    }
-    
-    // Открываем popup с информацией о фильме
-    chrome.action.setPopup({ popup: 'popup.html?url=' + encodeURIComponent(url) });
-    chrome.action.openPopup();
-  } catch (error) {
-    console.error('Ошибка обработки ссылки:', error);
-  }
+  // Не открываем popup автоматически - только при клике на иконку
+  // Popup сам определит фильм из текущей вкладки
 }
 
 // Обработка найденного imdb_id
 async function handleImdbId(imdbId, tab) {
-  try {
-    const data = await chrome.storage.local.get(['linked_chat_id']);
-    if (!data.linked_chat_id) {
-      return;
-    }
-    
-    // Открываем popup с информацией о фильме
-    chrome.action.setPopup({ popup: `popup.html?imdb_id=${imdbId}` });
-    chrome.action.openPopup();
-  } catch (error) {
-    console.error('Ошибка обработки imdb_id:', error);
-  }
+  // Не открываем popup автоматически - только при клике на иконку
+  // Popup сам определит фильм из текущей вкладки
 }
 
 // Обработка сайта с билетами
