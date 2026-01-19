@@ -872,7 +872,7 @@ def clean_home_plans():
                     FROM plans p
                     JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
                     WHERE p.plan_type = 'home' 
-                    AND DATE(p.plan_datetime AT TIME ZONE 'Europe/Moscow') IN (%s, %s)
+                    AND DATE((p.plan_datetime AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/Moscow') IN (%s, %s)
                 ''', (saturday, sunday))
 
                 weekend_rows = cursor_local.fetchall()
