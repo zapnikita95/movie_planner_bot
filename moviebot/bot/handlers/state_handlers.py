@@ -1556,13 +1556,13 @@ def check_admin_message(message):
         return False
     
     # Команды должны обрабатываться своими обработчиками, не админским
-    if not message.text or not text:
-        logger.debug(f"[CHECK ADMIN MESSAGE] Нет текста: text='{text}'")
+    # ВАЖНО: Проверяем команды ПЕРВЫМ делом, до всех остальных проверок
+    if message.text and message.text.strip().startswith('/'):
+        logger.info(f"[CHECK ADMIN MESSAGE] ❌ Это команда, НЕ обрабатываем админским хендлером: text='{text[:50]}'")
         return False
     
-    # Если это команда (начинается с /), не обрабатываем админским хендлером
-    if message.text.strip().startswith('/'):
-        logger.debug(f"[CHECK ADMIN MESSAGE] Это команда, пропускаем: text='{text}'")
+    if not message.text or not text:
+        logger.debug(f"[CHECK ADMIN MESSAGE] Нет текста: text='{text}'")
         return False
     
     # В личных чатах принимаем следующее сообщение (как в is_expected_text_in_private)
@@ -1588,6 +1588,7 @@ def check_admin_message(message):
 
 # Обработчик должен быть зарегистрирован ДО main_text_handler
 # Используем более высокий приоритет через content_types
+# ВАЖНО: check_admin_message возвращает False для команд, поэтому команды не будут перехвачены
 @bot.message_handler(content_types=['text'], func=check_admin_message)
 def handle_admin(message):
     """Обработчик для админских функций (промокоды, админы, unsubscribe)"""
