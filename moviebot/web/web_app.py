@@ -1829,6 +1829,23 @@ def create_web_app(bot):
                 film_id = result.get('id') if isinstance(result, dict) else result[0]
                 conn.commit()
                 
+                # Отправляем сообщение в Telegram о добавлении фильма
+                try:
+                    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+                    title = info.get('title', 'Неизвестный фильм')
+                    year = info.get('year', '')
+                    type_emoji = "📺" if is_series else "🎬"
+                    text = f"{type_emoji} <b>{title}</b> ({year})\n\n✅ Фильм добавлен в базу через расширение браузера"
+                    
+                    markup = InlineKeyboardMarkup()
+                    markup.add(InlineKeyboardButton("📖 К описанию", callback_data=f"show_film:{kp_id}"))
+                    
+                    bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup)
+                    logger.info(f"[EXTENSION API] Сообщение о добавлении фильма отправлено в chat_id={chat_id}")
+                except Exception as e:
+                    logger.error(f"[EXTENSION API] Ошибка отправки сообщения о добавлении фильма: {e}", exc_info=True)
+                    # Не прерываем выполнение, если не удалось отправить сообщение
+                
                 resp = jsonify({"success": True, "film_id": film_id})
                 # after_request hook автоматически добавит CORS заголовки
                 return resp
@@ -1936,11 +1953,23 @@ def create_web_app(bot):
         
         data = request.get_json()
         time_text = data.get('time_text')
-        user_id = data.get('user_id', type=int)
+        user_id = data.get('user_id')
+        
+        # Конвертируем user_id в int, если он строка
+        if user_id:
+            try:
+                user_id = int(user_id)
+            except (ValueError, TypeError):
+                resp = jsonify({"success": False, "error": "user_id must be a number"})
+                return resp, 400
         
         if not time_text:
             resp = jsonify({"success": False, "error": "time_text required"})
             # after_request hook автоматически добавит CORS заголовки
+            return resp, 400
+        
+        if not user_id:
+            resp = jsonify({"success": False, "error": "user_id required"})
             return resp, 400
         
         try:
@@ -1955,7 +1984,7 @@ def create_web_app(bot):
             else:
                 resp = jsonify({"success": False, "error": "Could not parse time"})
                 # after_request hook автоматически добавит CORS заголовки
-            return resp, 400
+                return resp, 400
         except Exception as e:
             logger.error("Ошибка парсинга времени", exc_info=True)
             resp = jsonify({"success": False, "error": "server error"})
@@ -2002,7 +2031,15 @@ def create_web_app(bot):
             except (ValueError, TypeError):
                 resp = jsonify({"success": False, "error": "film_id must be a number"})
                 return resp, 400
-        user_id = data.get('user_id', type=int)
+        
+        user_id = data.get('user_id')
+        if user_id:
+            try:
+                user_id = int(user_id)
+            except (ValueError, TypeError):
+                resp = jsonify({"success": False, "error": "user_id must be a number"})
+                return resp, 400
+        
         streaming_service = data.get('streaming_service')
         streaming_url = data.get('streaming_url')
         
@@ -2049,6 +2086,45 @@ def create_web_app(bot):
                     logger.info(f"[EXTENSION API] План создан: plan_id={plan_id}")
                 
                 conn.commit()
+                
+                # Отправляем сообщение в Telegram о создании/обновлении плана
+                try:
+                    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+                    from datetime import datetime
+                    import pytz
+                    
+                    # Получаем информацию о фильме
+                    cursor.execute("SELECT title, kp_id, link FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
+                    film_row = cursor.fetchone()
+                    if film_row:
+                        title = film_row.get('title') if isinstance(film_row, dict) else film_row[0]
+                        kp_id_plan = film_row.get('kp_id') if isinstance(film_row, dict) else film_row[1]
+                        link = film_row.get('link') if isinstance(film_row, dict) else film_row[2]
+                        
+                        # Определяем тип
+                        is_series_plan = '/series/' in link if link else False
+                        type_emoji = "📺" if is_series_plan else "🎬"
+                        
+                        # Форматируем дату и время
+                        moscow_tz = pytz.timezone('Europe/Moscow')
+                        dt_moscow = dt.astimezone(moscow_tz)
+                        date_str = dt_moscow.strftime('%d.%m.%Y')
+                        time_str = dt_moscow.strftime('%H:%M')
+                        
+                        plan_type_text = "дома" if plan_type == 'home' else "в кино"
+                        action_text = "обновлен" if existing_plan else "создан"
+                        
+                        text = f"{type_emoji} <b>{title}</b>\n\n📅 План просмотра {action_text}:\n• {plan_type_text}\n• {date_str} в {time_str}"
+                        
+                        markup = InlineKeyboardMarkup()
+                        markup.add(InlineKeyboardButton("📖 К описанию", callback_data=f"show_film:{kp_id_plan}"))
+                        
+                        bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup)
+                        logger.info(f"[EXTENSION API] Сообщение о создании/обновлении плана отправлено в chat_id={chat_id}")
+                except Exception as e:
+                    logger.error(f"[EXTENSION API] Ошибка отправки сообщения о плане: {e}", exc_info=True)
+                    # Не прерываем выполнение, если не удалось отправить сообщение
+                
                 resp = jsonify({"success": True, "plan_id": plan_id})
                 # after_request hook автоматически добавит CORS заголовки
                 return resp

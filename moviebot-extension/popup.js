@@ -56,7 +56,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('cancel-plan-btn').addEventListener('click', () => {
     document.getElementById('planning-form').classList.add('hidden');
   });
-  document.getElementById('plan-type').addEventListener('change', handlePlanTypeChange);
+  
+  // Обработчики для кнопок "Дома/В кино"
+  document.getElementById('plan-type-home').addEventListener('click', () => {
+    setPlanType('home');
+  });
+  document.getElementById('plan-type-cinema').addEventListener('click', () => {
+    setPlanType('cinema');
+  });
 });
 
 // Автоматическое определение и загрузка фильма с текущей страницы
@@ -322,58 +329,33 @@ function displayFilmInfo(film, data) {
   // 1. Если фильм НЕ в базе - показываем "Добавить в базу" и "Запланировать просмотр"
   // 2. Если фильм в базе - показываем "Удалить из базы" и "Запланировать просмотр" (или "Изменить в расписании" если уже запланирован)
   
+  // Всегда показываем две кнопки
+  // Если фильм не в базе - "Добавить в базу", если в базе - "Удалить из базы"
+  const dbBtn = document.createElement('button');
   if (!data.in_database) {
-    // Фильм не в базе - две кнопки
-    console.log('[DISPLAY FILM] Создание кнопки "Добавить в базу", film:', film, 'film.kp_id:', film.kp_id);
-    const addBtn = document.createElement('button');
-    addBtn.textContent = '➕ Добавить в базу';
-    addBtn.className = 'btn btn-primary';
-    addBtn.addEventListener('click', async () => {
+    dbBtn.textContent = '➕ Добавить в базу';
+    dbBtn.className = 'btn btn-primary';
+    dbBtn.addEventListener('click', async () => {
       console.log('[BUTTON CLICK] Клик по "Добавить в базу", film.kp_id:', film.kp_id);
       await addFilmToDatabase(film.kp_id);
     });
-    actionsEl.appendChild(addBtn);
-    
-    const planBtn = document.createElement('button');
-    planBtn.textContent = '📅 Запланировать просмотр';
-    planBtn.className = 'btn btn-primary';
-    planBtn.addEventListener('click', async () => {
-      // Автоматически добавляем в базу, если еще не добавлен
-      if (!data.in_database) {
-        await addFilmToDatabase(film.kp_id);
-      }
-      showPlanningForm();
-    });
-    actionsEl.appendChild(planBtn);
   } else {
-    // Фильм в базе
-    if (data.has_plan) {
-      // Просмотр уже запланирован - кнопка "Изменить в расписании"
-      const editPlanBtn = document.createElement('button');
-      editPlanBtn.textContent = '✏️ Изменить в расписании';
-      editPlanBtn.className = 'btn btn-primary';
-      editPlanBtn.addEventListener('click', () => showPlanningForm());
-      actionsEl.appendChild(editPlanBtn);
-    } else {
-      // Просмотр не запланирован - кнопка "Запланировать просмотр"
-      const planBtn = document.createElement('button');
-      planBtn.textContent = '📅 Запланировать просмотр';
-      planBtn.className = 'btn btn-primary';
-      planBtn.addEventListener('click', () => showPlanningForm());
-      actionsEl.appendChild(planBtn);
-    }
-    
-    // Кнопка "Удалить из базы"
-    const deleteBtn = document.createElement('button');
-    deleteBtn.textContent = '🗑️ Удалить из базы';
-    deleteBtn.className = 'btn btn-secondary';
-    deleteBtn.addEventListener('click', async () => {
+    dbBtn.textContent = '🗑️ Удалить из базы';
+    dbBtn.className = 'btn btn-secondary';
+    dbBtn.addEventListener('click', async () => {
       if (confirm('Вы уверены, что хотите удалить фильм из базы?')) {
         await deleteFilmFromDatabase(film.kp_id);
       }
     });
-    actionsEl.appendChild(deleteBtn);
   }
+  actionsEl.appendChild(dbBtn);
+  
+  // Кнопка "Запланировать просмотр"
+  const planBtn = document.createElement('button');
+  planBtn.textContent = data.has_plan ? '✏️ Изменить в расписании' : '📅 Запланировать просмотр';
+  planBtn.className = 'btn btn-primary';
+  planBtn.addEventListener('click', () => showPlanningForm());
+  actionsEl.appendChild(planBtn);
   
   document.getElementById('film-info').classList.remove('hidden');
 }
@@ -513,12 +495,31 @@ async function loadFilmByKpId(kpId) {
 }
 
 function showPlanningForm() {
+  // Если фильм не в базе, сначала добавляем его
   if (!currentFilm || !currentFilm.film_id) {
-    alert('Сначала добавьте фильм в базу');
-    return;
+    if (currentFilm && currentFilm.kp_id) {
+      // Автоматически добавляем в базу, если еще не добавлен
+      addFilmToDatabase(currentFilm.kp_id).then(() => {
+        // После добавления показываем форму
+        if (currentFilm && currentFilm.film_id) {
+          document.getElementById('planning-form').classList.remove('hidden');
+          initializePlanningForm();
+        }
+      });
+      return;
+    } else {
+      alert('Сначала добавьте фильм в базу');
+      return;
+    }
   }
   
   document.getElementById('planning-form').classList.remove('hidden');
+  initializePlanningForm();
+}
+
+function initializePlanningForm() {
+  // Сбрасываем выбор типа плана на "Дома"
+  setPlanType('home');
   
   // Устанавливаем минимальную дату (сегодня) и предустанавливаем текущий год
   const now = new Date();
@@ -538,14 +539,28 @@ function showPlanningForm() {
   document.getElementById('plan-time-text').value = '';
 }
 
-function handlePlanTypeChange() {
-  const planType = document.getElementById('plan-type').value;
+let selectedPlanType = 'home'; // По умолчанию "Дома"
+
+function setPlanType(type) {
+  selectedPlanType = type;
+  
+  // Обновляем классы кнопок
+  const homeBtn = document.getElementById('plan-type-home');
+  const cinemaBtn = document.getElementById('plan-type-cinema');
   const streamingEl = document.getElementById('streaming-services');
   
-  if (planType === 'home') {
+  if (type === 'home') {
+    homeBtn.classList.remove('btn-secondary');
+    homeBtn.classList.add('btn-primary', 'active');
+    cinemaBtn.classList.remove('btn-primary', 'active');
+    cinemaBtn.classList.add('btn-secondary');
     streamingEl.classList.remove('hidden');
     // TODO: загрузить список онлайн-кинотеатров из API
   } else {
+    cinemaBtn.classList.remove('btn-secondary');
+    cinemaBtn.classList.add('btn-primary', 'active');
+    homeBtn.classList.remove('btn-primary', 'active');
+    homeBtn.classList.add('btn-secondary');
     streamingEl.classList.add('hidden');
   }
 }
@@ -556,7 +571,7 @@ async function handleCreatePlan() {
     return;
   }
   
-  const planType = document.getElementById('plan-type').value;
+  const planType = selectedPlanType;
   const planTimeText = document.getElementById('plan-time-text').value.trim();
   const planDatetime = document.getElementById('plan-datetime').value;
   const streamingService = document.getElementById('streaming-service').value;
@@ -575,6 +590,17 @@ async function handleCreatePlan() {
         })
       });
       
+      if (!response.ok) {
+        let errorText = '';
+        try {
+          const errorJson = await response.json();
+          errorText = errorJson.error || 'неизвестная ошибка';
+        } catch (e) {
+          errorText = await response.text();
+        }
+        throw new Error(`HTTP error! status: ${response.status}, error: ${errorText}`);
+      }
+      
       const json = await response.json();
       if (json.success && json.datetime) {
         planDatetimeISO = json.datetime;
@@ -584,7 +610,7 @@ async function handleCreatePlan() {
       }
     } catch (err) {
       console.error('Ошибка парсинга времени:', err);
-      alert('Ошибка парсинга времени');
+      alert('Ошибка парсинга времени: ' + (err.message || 'Проверьте подключение к интернету'));
       return;
     }
   } else if (planDatetime) {
@@ -609,6 +635,17 @@ async function handleCreatePlan() {
       })
     });
     
+    if (!response.ok) {
+      let errorText = '';
+      try {
+        const errorJson = await response.json();
+        errorText = errorJson.error || 'неизвестная ошибка';
+      } catch (e) {
+        errorText = await response.text();
+      }
+      throw new Error(`HTTP error! status: ${response.status}, error: ${errorText}`);
+    }
+    
     const json = await response.json();
     if (json.success) {
       alert('✅ План создан!');
@@ -624,7 +661,7 @@ async function handleCreatePlan() {
     }
   } catch (err) {
     console.error('Ошибка создания плана:', err);
-    alert('Ошибка создания плана');
+    alert('Ошибка создания плана: ' + (err.message || 'Проверьте подключение к интернету'));
   }
 }
 

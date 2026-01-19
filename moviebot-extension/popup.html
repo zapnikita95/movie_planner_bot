@@ -35,10 +35,10 @@
                     <h3>Запланировать просмотр</h3>
                     <div class="form-group">
                         <label>Где смотреть:</label>
-                        <select id="plan-type" class="input">
-                            <option value="home">Дома</option>
-                            <option value="cinema">В кино</option>
-                        </select>
+                        <div class="plan-type-buttons" style="display: flex; gap: 10px;">
+                            <button id="plan-type-home" class="btn btn-primary plan-type-btn active" data-type="home">🏠 Дома</button>
+                            <button id="plan-type-cinema" class="btn btn-secondary plan-type-btn" data-type="cinema">🎬 В кино</button>
+                        </div>
                     </div>
                     <div class="form-group">
                         <label>Дата и время (можно указать "завтра вечером", "пятница", "сб" и т.д.):</label>
