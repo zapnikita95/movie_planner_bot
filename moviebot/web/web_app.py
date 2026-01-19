@@ -1874,7 +1874,7 @@ def create_web_app(bot):
                 if not film_row:
                     resp = jsonify({"success": False, "error": "film not found"})
                     # after_request hook автоматически добавит CORS заголовки
-            return resp, 404
+                    return resp, 404
                 
                 film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
                 
