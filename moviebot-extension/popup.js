@@ -7,6 +7,35 @@ let userId = null;
 let currentFilm = null;
 let lastDetectedUrl = null; // Для отслеживания изменений URL
 let isProcessing = false; // Флаг для защиты от двойных кликов
+let urlRequestHistory = []; // История запросов для защиты от спама
+
+// Функция сброса состояния расширения
+function resetExtensionState() {
+  currentFilm = null;
+  isProcessing = false;
+  // Очищаем форму планирования
+  const planningForm = document.getElementById('planning-form');
+  if (planningForm) planningForm.classList.add('hidden');
+  // Очищаем информацию о фильме
+  const filmInfo = document.getElementById('film-info');
+  if (filmInfo) {
+    filmInfo.classList.add('hidden');
+    const titleEl = document.getElementById('film-title');
+    const yearEl = document.getElementById('film-year');
+    const statusEl = document.getElementById('film-status');
+    const actionsEl = document.getElementById('film-actions');
+    if (titleEl) titleEl.textContent = '';
+    if (yearEl) yearEl.textContent = '';
+    if (statusEl) statusEl.innerHTML = '';
+    if (actionsEl) actionsEl.innerHTML = '';
+  }
+  // Скрываем результаты поиска
+  const searchResults = document.getElementById('search-results');
+  if (searchResults) searchResults.classList.add('hidden');
+  // Очищаем поле поиска
+  const searchInput = document.getElementById('search-input');
+  if (searchInput) searchInput.value = '';
+}
 
 // Инициализация
 document.addEventListener('DOMContentLoaded', async () => {
@@ -57,30 +86,97 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   
   // Обработчики событий
-  document.getElementById('bind-btn').addEventListener('click', handleBind);
-  const logoutBtn = document.getElementById('logout-btn');
-  logoutBtn.addEventListener('click', handleLogout);
-  logoutBtn.title = 'Нажмите, чтобы отвязать аккаунт';
-  document.getElementById('create-plan-btn').addEventListener('click', handleCreatePlan);
-  document.getElementById('cancel-plan-btn').addEventListener('click', () => {
-    document.getElementById('planning-form').classList.add('hidden');
-  });
+  const bindBtn = document.getElementById('bind-btn');
+  if (bindBtn) bindBtn.addEventListener('click', handleBind);
   
-  // Обработчики для кнопок "Дома/В кино"
-  document.getElementById('plan-type-home').addEventListener('click', () => {
-    setPlanType('home');
-  });
-  document.getElementById('plan-type-cinema').addEventListener('click', () => {
-    setPlanType('cinema');
-  });
+  const logoutBtn = document.getElementById('logout-btn');
+  if (logoutBtn) {
+    logoutBtn.addEventListener('click', handleLogout);
+    logoutBtn.title = 'Нажмите, чтобы отвязать аккаунт';
+  }
+  
+  const createPlanBtn = document.getElementById('create-plan-btn');
+  if (createPlanBtn) createPlanBtn.addEventListener('click', handleCreatePlan);
+  
+  const cancelPlanBtn = document.getElementById('cancel-plan-btn');
+  if (cancelPlanBtn) {
+    cancelPlanBtn.addEventListener('click', () => {
+      const planningForm = document.getElementById('planning-form');
+      if (planningForm) planningForm.classList.add('hidden');
+      // Завершаем процесс работы с фильмом - очищаем состояние
+      resetExtensionState();
+    });
+  }
+  
+  // Обработчики для кнопок "Дома/В кино" (могут быть в скрытой форме)
+  const planTypeHome = document.getElementById('plan-type-home');
+  if (planTypeHome) {
+    planTypeHome.addEventListener('click', () => {
+      setPlanType('home');
+    });
+  }
+  
+  const planTypeCinema = document.getElementById('plan-type-cinema');
+  if (planTypeCinema) {
+    planTypeCinema.addEventListener('click', () => {
+      setPlanType('cinema');
+    });
+  }
   
   // Убеждаемся, что форма планирования скрыта изначально
-  document.getElementById('planning-form').classList.add('hidden');
+  const planningForm = document.getElementById('planning-form');
+  if (planningForm) planningForm.classList.add('hidden');
+  
+  // Очищаем состояние при каждом открытии
+  resetExtensionState();
+  
+  // Обработчик поиска
+  const searchBtn = document.getElementById('search-btn');
+  const searchInput = document.getElementById('search-input');
+  if (searchBtn && searchInput) {
+    searchBtn.addEventListener('click', () => performSearch());
+    searchInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        performSearch();
+      }
+    });
+  }
 });
+
+// Проверка защиты от спама
+function checkSpamProtection(url) {
+  const now = Date.now();
+  const COOLDOWN_MS = 60 * 1000; // 1 минута
+  const MAX_REPEATED_REQUESTS = 5; // Максимум 5 одинаковых запросов подряд
+  
+  // Удаляем старые записи (старше минуты)
+  urlRequestHistory = urlRequestHistory.filter(entry => now - entry.timestamp < COOLDOWN_MS);
+  
+  // Считаем количество одинаковых URL за последнюю минуту
+  const recentSameUrls = urlRequestHistory.filter(entry => entry.url === url);
+  
+  if (recentSameUrls.length >= MAX_REPEATED_REQUESTS) {
+    const oldestRequest = recentSameUrls[0];
+    const timeLeft = COOLDOWN_MS - (now - oldestRequest.timestamp);
+    const secondsLeft = Math.ceil(timeLeft / 1000);
+    
+    alert(`⏸️ Включился кулдаун на ${secondsLeft} секунд. Пожалуйста, подождите перед следующим запросом.`);
+    return false;
+  }
+  
+  // Добавляем текущий запрос в историю
+  urlRequestHistory.push({ url, timestamp: now });
+  return true;
+}
 
 // Автоматическое определение и загрузка фильма с текущей страницы
 async function detectAndLoadFilm(url) {
   if (!url || !chatId) return;
+  
+  // Проверяем защиту от спама
+  if (!checkSpamProtection(url)) {
+    return;
+  }
   
   try {
     // Показываем индикатор загрузки
@@ -266,27 +362,57 @@ async function loadFilmByImdbId(imdbId) {
   if (!imdbId || !chatId) return;
   
   try {
+    // Скрываем результаты поиска
+    const searchResults = document.getElementById('search-results');
+    if (searchResults) searchResults.classList.add('hidden');
+    
     // Показываем индикатор загрузки
-    document.getElementById('film-info').classList.remove('hidden');
-    document.getElementById('film-title').textContent = 'Загружаем информацию о фильме';
-    document.getElementById('film-year').textContent = '';
-    document.getElementById('film-status').innerHTML = '';
-    document.getElementById('film-actions').innerHTML = '';
+    const filmInfo = document.getElementById('film-info');
+    if (filmInfo) {
+      filmInfo.classList.remove('hidden');
+      const titleEl = document.getElementById('film-title');
+      const yearEl = document.getElementById('film-year');
+      const statusEl = document.getElementById('film-status');
+      const actionsEl = document.getElementById('film-actions');
+      if (titleEl) titleEl.textContent = 'Загружаем информацию о фильме';
+      if (yearEl) yearEl.textContent = '';
+      if (statusEl) statusEl.innerHTML = '';
+      if (actionsEl) actionsEl.innerHTML = '';
+    }
     
     const response = await fetch(`${API_BASE_URL}/api/extension/film-info?imdb_id=${imdbId}&chat_id=${chatId}`);
+    
+    if (!response.ok) {
+      let errorText = '';
+      try {
+        const errorJson = await response.json();
+        errorText = errorJson.error || 'неизвестная ошибка';
+      } catch (e) {
+        errorText = await response.text();
+      }
+      throw new Error(`HTTP error! status: ${response.status}, error: ${errorText}`);
+    }
+    
     const json = await response.json();
     
     if (json.success) {
       displayFilmInfo(json.film, json);
     } else {
-      document.getElementById('film-title').textContent = 'Фильм не найден';
-      document.getElementById('film-year').textContent = json.error || 'Попробуйте другую ссылку';
+      const titleEl = document.getElementById('film-title');
+      const yearEl = document.getElementById('film-year');
+      if (titleEl) titleEl.textContent = 'Фильм не найден';
+      if (yearEl) yearEl.textContent = json.error || 'Попробуйте другую ссылку';
     }
   } catch (err) {
     console.error('Ошибка загрузки фильма:', err);
-    document.getElementById('film-info').classList.remove('hidden');
-    document.getElementById('film-title').textContent = 'Ошибка загрузки';
-    document.getElementById('film-year').textContent = 'Проверьте подключение к интернету';
+    const filmInfo = document.getElementById('film-info');
+    if (filmInfo) {
+      filmInfo.classList.remove('hidden');
+      const titleEl = document.getElementById('film-title');
+      const yearEl = document.getElementById('film-year');
+      if (titleEl) titleEl.textContent = 'Ошибка загрузки';
+      if (yearEl) yearEl.textContent = 'Проверьте подключение к интернету';
+    }
   }
 }
 
@@ -466,6 +592,7 @@ async function addFilmToDatabase(kpId) {
       }
     } else {
       alert('Ошибка добавления фильма: ' + (json.error || 'неизвестная ошибка'));
+      isProcessing = false;
     }
   } catch (err) {
     console.error('[ADD FILM] Ошибка в catch блоке:', err);
@@ -473,7 +600,6 @@ async function addFilmToDatabase(kpId) {
     const errorMessage = err.message || 'Проверьте подключение к интернету';
     console.error('[ADD FILM] Показываем alert с ошибкой:', errorMessage);
     alert('Ошибка добавления фильма: ' + errorMessage);
-  } finally {
     isProcessing = false;
   }
 }
@@ -520,27 +646,57 @@ async function loadFilmByKpId(kpId) {
   if (!kpId || !chatId) return;
   
   try {
+    // Скрываем результаты поиска
+    const searchResults = document.getElementById('search-results');
+    if (searchResults) searchResults.classList.add('hidden');
+    
     // Показываем индикатор загрузки
-    document.getElementById('film-info').classList.remove('hidden');
-    document.getElementById('film-title').textContent = 'Загружаем информацию о фильме';
-    document.getElementById('film-year').textContent = '';
-    document.getElementById('film-status').innerHTML = '';
-    document.getElementById('film-actions').innerHTML = '';
+    const filmInfo = document.getElementById('film-info');
+    if (filmInfo) {
+      filmInfo.classList.remove('hidden');
+      const titleEl = document.getElementById('film-title');
+      const yearEl = document.getElementById('film-year');
+      const statusEl = document.getElementById('film-status');
+      const actionsEl = document.getElementById('film-actions');
+      if (titleEl) titleEl.textContent = 'Загружаем информацию о фильме';
+      if (yearEl) yearEl.textContent = '';
+      if (statusEl) statusEl.innerHTML = '';
+      if (actionsEl) actionsEl.innerHTML = '';
+    }
     
     const response = await fetch(`${API_BASE_URL}/api/extension/film-info?kp_id=${kpId}&chat_id=${chatId}`);
+    
+    if (!response.ok) {
+      let errorText = '';
+      try {
+        const errorJson = await response.json();
+        errorText = errorJson.error || 'неизвестная ошибка';
+      } catch (e) {
+        errorText = await response.text();
+      }
+      throw new Error(`HTTP error! status: ${response.status}, error: ${errorText}`);
+    }
+    
     const json = await response.json();
     
     if (json.success) {
       displayFilmInfo(json.film, json);
     } else {
-      document.getElementById('film-title').textContent = 'Фильм не найден';
-      document.getElementById('film-year').textContent = json.error || 'Попробуйте другую ссылку';
+      const titleEl = document.getElementById('film-title');
+      const yearEl = document.getElementById('film-year');
+      if (titleEl) titleEl.textContent = 'Фильм не найден';
+      if (yearEl) yearEl.textContent = json.error || 'Попробуйте другую ссылку';
     }
   } catch (err) {
     console.error('Ошибка загрузки фильма:', err);
-    document.getElementById('film-info').classList.remove('hidden');
-    document.getElementById('film-title').textContent = 'Ошибка загрузки';
-    document.getElementById('film-year').textContent = 'Проверьте подключение к интернету';
+    const filmInfo = document.getElementById('film-info');
+    if (filmInfo) {
+      filmInfo.classList.remove('hidden');
+      const titleEl = document.getElementById('film-title');
+      const yearEl = document.getElementById('film-year');
+      if (titleEl) titleEl.textContent = 'Ошибка загрузки';
+      if (yearEl) yearEl.textContent = 'Проверьте подключение к интернету';
+    }
   }
 }
 
@@ -744,13 +900,33 @@ async function handleCreatePlan() {
     const json = await response.json();
     if (json.success) {
       alert('✅ План создан!');
-      document.getElementById('planning-form').classList.add('hidden');
-      // Перезагружаем информацию о фильме
-      if (currentFilm.kp_id) {
-        await loadFilmByKpId(currentFilm.kp_id);
-      } else if (currentFilm.imdb_id) {
-        await loadFilmByImdbId(currentFilm.imdb_id);
+      
+      // Показываем кнопку добавления билетов, если есть доступ
+      const addTicketsBtn = document.getElementById('add-tickets-btn');
+      if (json.has_tickets_access) {
+        if (addTicketsBtn) {
+          addTicketsBtn.classList.remove('hidden');
+          addTicketsBtn.onclick = () => {
+            alert('🎟️ Для добавления билетов:\n\n1. Скопируйте изображение билета (Ctrl+C или Cmd+C)\n2. Вставьте его в чат с ботом (Ctrl+V или Cmd+V)\n3. Бот автоматически распознает билет и добавит его к плану');
+          };
+        }
+      } else {
+        if (addTicketsBtn) {
+          addTicketsBtn.classList.add('hidden');
+        }
       }
+      
+      // Закрываем форму планирования через 2 секунды, чтобы пользователь мог нажать кнопку билетов
+      setTimeout(() => {
+        document.getElementById('planning-form').classList.add('hidden');
+        // Завершаем процесс работы с фильмом - очищаем состояние
+        resetExtensionState();
+        // Очищаем информацию о фильме
+        const filmInfo = document.getElementById('film-info');
+        if (filmInfo) {
+          filmInfo.classList.add('hidden');
+        }
+      }, 2000);
     } else {
       alert('Ошибка создания плана: ' + (json.error || 'неизвестная ошибка'));
     }
@@ -764,6 +940,93 @@ async function handleCreatePlan() {
   }
 }
 
+async function performSearch() {
+  const query = document.getElementById('search-input').value.trim();
+  if (!query) {
+    alert('Введите название фильма или сериала');
+    return;
+  }
+  
+  const resultsEl = document.getElementById('search-results');
+  const searchBtn = document.getElementById('search-btn');
+  
+  if (resultsEl) {
+    resultsEl.classList.remove('hidden');
+    resultsEl.innerHTML = '<p>🔍 Ищем...</p>';
+  }
+  
+  if (searchBtn) {
+    searchBtn.disabled = true;
+    searchBtn.textContent = '⏳ Поиск...';
+  }
+  
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/extension/search?query=${encodeURIComponent(query)}&page=1`);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    const json = await response.json();
+    
+    if (searchBtn) {
+      searchBtn.disabled = false;
+      searchBtn.textContent = '🔍 Найти';
+    }
+    
+    if (json.success && json.results && json.results.length > 0) {
+      // Скрываем информацию о фильме и показываем результаты поиска
+      const filmInfo = document.getElementById('film-info');
+      if (filmInfo) filmInfo.classList.add('hidden');
+      
+      if (resultsEl) {
+        let html = '<div class="search-results-list">';
+        json.results.forEach((film, idx) => {
+          const typeEmoji = film.is_series ? '📺' : '🎬';
+          const yearText = film.year ? ` (${film.year})` : '';
+          html += `
+            <div class="search-result-item" data-kp-id="${film.kp_id}">
+              <div class="search-result-title">${typeEmoji} ${film.title}${yearText}</div>
+            </div>
+          `;
+        });
+        html += '</div>';
+        
+        if (json.total_pages > 1) {
+          html += `<p class="search-more">Показано ${json.results.length} результатов. Используйте /search в боте для полного поиска.</p>`;
+        }
+        
+        resultsEl.innerHTML = html;
+        
+        // Добавляем обработчики кликов на результаты
+        resultsEl.querySelectorAll('.search-result-item').forEach(item => {
+          item.addEventListener('click', async () => {
+            const kpId = item.getAttribute('data-kp-id');
+            if (kpId) {
+              // Скрываем результаты поиска
+              resultsEl.classList.add('hidden');
+              // Загружаем фильм
+              await loadFilmByKpId(kpId);
+            }
+          });
+        });
+      }
+    } else {
+      if (resultsEl) {
+        resultsEl.innerHTML = '<p>😔 Фильмы не найдены. Попробуйте другой запрос или используйте /search в боте.</p>';
+      }
+    }
+  } catch (err) {
+    console.error('Ошибка поиска:', err);
+    if (resultsEl) {
+      resultsEl.innerHTML = '<p class="error">Ошибка поиска. Проверьте подключение к интернету.</p>';
+    }
+    if (searchBtn) {
+      searchBtn.disabled = false;
+      searchBtn.textContent = '🔍 Найти';
+    }
+  }
+}
+
 function showTicketUpload(url) {
   // Показываем форму для загрузки билета
   const container = document.querySelector('.container');
@@ -774,7 +1037,10 @@ function showTicketUpload(url) {
     <button id="back-btn" class="btn btn-secondary">Назад</button>
   `;
   
-  document.getElementById('back-btn').addEventListener('click', () => {
-    window.location.href = 'popup.html';
-  });
+  const backBtn = document.getElementById('back-btn');
+  if (backBtn) {
+    backBtn.addEventListener('click', () => {
+      window.location.href = 'popup.html';
+    });
+  }
 }

@@ -32,6 +32,13 @@
                     <h1>Movie Planner Bot</h1>
                     <button id="logout-btn" class="logout-btn" title="Нажмите, чтобы отвязать аккаунт">❌</button>
                 </div>
+                <div id="search-section" class="search-section">
+                    <div class="form-group">
+                        <input type="text" id="search-input" class="input" placeholder="Поиск фильмов и сериалов...">
+                        <button id="search-btn" class="btn btn-secondary" style="margin-top: 10px;">🔍 Найти</button>
+                    </div>
+                    <div id="search-results" class="search-results hidden"></div>
+                </div>
                 <div id="film-info" class="film-info hidden">
                     <h2 id="film-title"></h2>
                     <p id="film-year"></p>
@@ -63,6 +70,7 @@
                     </div>
                     <button id="create-plan-btn" class="btn btn-primary">Создать план</button>
                     <button id="cancel-plan-btn" class="btn btn-secondary">Отмена</button>
+                    <button id="add-tickets-btn" class="btn btn-secondary hidden" style="margin-top: 10px;">🎟️ Добавить билеты</button>
                 </div>
                 <button id="logout-btn" class="btn btn-secondary">Отвязать</button>
             </div>

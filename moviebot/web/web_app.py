@@ -1660,10 +1660,12 @@ def create_web_app(bot):
             if imdb_id and not kp_id:
                 film_info = get_film_by_imdb_id(imdb_id)
                 if not film_info or not film_info.get('kp_id'):
-                    resp = jsonify({"success": False, "error": "film not found"})
+                    logger.warning(f"[EXTENSION API] Фильм с IMDB ID {imdb_id} не найден в Kinopoisk")
+                    resp = jsonify({"success": False, "error": f"Фильм с IMDB ID {imdb_id} не найден в базе Kinopoisk. Возможно, фильм еще не добавлен на Kinopoisk."})
                     # after_request hook автоматически добавит CORS заголовки
                     return resp, 404
                 kp_id = film_info.get('kp_id')
+                logger.info(f"[EXTENSION API] Конвертирован imdb_id={imdb_id} в kp_id={kp_id}")
             
             # Получаем информацию о фильме через API для определения типа
             headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
@@ -2170,6 +2172,86 @@ def create_web_app(bot):
             logger.error("Ошибка создания плана", exc_info=True)
             resp = jsonify({"success": False, "error": "server error"})
             # after_request hook автоматически добавит CORS заголовки
+            return resp, 500
+    
+    @app.route('/api/extension/search', methods=['GET', 'OPTIONS'])
+    def search_films_endpoint():
+        """Поиск фильмов для расширения"""
+        # Обработка preflight запроса
+        if request.method == 'OPTIONS':
+            logger.info("[EXTENSION API] OPTIONS preflight request for /api/extension/search")
+            response = jsonify({'status': 'ok'})
+            return response
+        
+        query = request.args.get('query')
+        page = request.args.get('page', 1, type=int)
+        
+        if not query:
+            resp = jsonify({"success": False, "error": "query required"})
+            return resp, 400
+        
+        try:
+            from moviebot.api.kinopoisk_api import search_films
+            items, total_pages = search_films(query, page)
+            
+            # Форматируем результаты
+            results = []
+            for item in items:
+                kp_id = item.get('kinopoiskId') or item.get('filmId')
+                name_ru = item.get('nameRu') or ''
+                name_en = item.get('nameEn') or ''
+                year = item.get('year')
+                type_film = item.get('type', 'FILM').upper()
+                is_series = type_film == 'TV_SERIES'
+                
+                results.append({
+                    'kp_id': str(kp_id) if kp_id else None,
+                    'title': name_ru or name_en,
+                    'title_en': name_en if name_ru else None,
+                    'year': year,
+                    'is_series': is_series
+                })
+            
+            resp = jsonify({
+                "success": True,
+                "results": results,
+                "page": page,
+                "total_pages": total_pages
+            })
+            return resp
+        except Exception as e:
+            logger.error(f"Ошибка поиска фильмов: {e}", exc_info=True)
+            resp = jsonify({"success": False, "error": "server error"})
+            return resp, 500
+    
+    @app.route('/api/extension/check-subscription', methods=['GET', 'OPTIONS'])
+    def check_subscription():
+        """Проверка подписки пользователя/группы"""
+        # Обработка preflight запроса
+        if request.method == 'OPTIONS':
+            logger.info("[EXTENSION API] OPTIONS preflight request for /api/extension/check-subscription")
+            response = jsonify({'status': 'ok'})
+            return response
+        
+        chat_id = request.args.get('chat_id', type=int)
+        user_id = request.args.get('user_id', type=int)
+        
+        if not chat_id or not user_id:
+            resp = jsonify({"success": False, "error": "chat_id and user_id required"})
+            return resp, 400
+        
+        try:
+            from moviebot.utils.helpers import has_tickets_access
+            has_access = has_tickets_access(chat_id, user_id)
+            
+            resp = jsonify({
+                "success": True,
+                "has_tickets_access": has_access
+            })
+            return resp
+        except Exception as e:
+            logger.error(f"Ошибка проверки подписки: {e}", exc_info=True)
+            resp = jsonify({"success": False, "error": "server error"})
             return resp, 500
     
     @app.route('/api/extension/streaming-services', methods=['GET', 'OPTIONS'])

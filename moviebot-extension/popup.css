@@ -281,3 +281,51 @@ h3 {
 .btn:disabled {
     cursor: not-allowed;
 }
+
+.search-section {
+    background: white;
+    padding: 15px;
+    border-radius: 12px;
+    margin-bottom: 15px;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+    border: 1px solid #e0e0e0;
+}
+
+.search-results {
+    margin-top: 15px;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.search-results-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.search-result-item {
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    background: #f8f9fa;
+}
+
+.search-result-item:hover {
+    background: #e9ecef;
+    border-color: #667eea;
+    transform: translateX(2px);
+}
+
+.search-result-title {
+    font-weight: 500;
+    color: #333;
+}
+
+.search-more {
+    margin-top: 10px;
+    font-size: 12px;
+    color: #666;
+    text-align: center;
+}
