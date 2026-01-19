@@ -1559,9 +1559,11 @@ def create_web_app(bot):
         """Проверка кода расширения и возврат chat_id"""
         # Обработка preflight запроса
         if request.method == 'OPTIONS':
+            logger.info("[EXTENSION API] OPTIONS preflight request for /api/extension/verify")
             response = jsonify({'status': 'ok'})
             return add_cors_headers(response)
         
+        logger.info(f"[EXTENSION API] GET /api/extension/verify - code={request.args.get('code', 'NOT_PROVIDED')[:10]}")
         from moviebot.database.db_connection import get_db_connection, get_db_cursor
         
         code = request.args.get('code')
