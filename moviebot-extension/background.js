@@ -41,6 +41,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     } else if (message.action === "open_ticket_upload") {
       // Не открываем popup автоматически - только при клике на иконку
       sendResponse({ success: true });
+    } else if (message.action === "add_tickets_to_plan") {
+      // Обработка добавления билетов к плану
+      handleAddTicketsToPlan(message, sender.tab, sendResponse);
+      return true; // Асинхронный ответ
     }
   } catch (error) {
     console.error('Ошибка обработки сообщения:', error);
@@ -53,6 +57,49 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   return true; // Для асинхронного ответа
 });
+
+// Обработка добавления билетов к плану
+async function handleAddTicketsToPlan(message, tab, sendResponse) {
+  try {
+    // Проверяем, привязан ли аккаунт
+    const data = await chrome.storage.local.get(['linked_chat_id', 'has_tickets_access']);
+    if (!data.linked_chat_id) {
+      sendResponse({ 
+        success: false, 
+        error: 'Необходимо привязать аккаунт через /code в боте' 
+      });
+      return;
+    }
+    
+    if (!data.has_tickets_access) {
+      sendResponse({ 
+        success: false, 
+        error: 'Необходима подписка "Билеты" для добавления билетов' 
+      });
+      return;
+    }
+    
+    // Отправляем билет в бота через API
+    // Пока просто показываем инструкцию, так как нужен API endpoint для загрузки изображений
+    // В будущем можно добавить API endpoint /api/extension/add-ticket для загрузки билетов
+    
+    sendResponse({ 
+      success: true, 
+      message: 'Для добавления билетов скопируйте изображение билета и вставьте его в чат с ботом. Бот автоматически распознает билет и добавит его к плану.' 
+    });
+    
+    // Показываем уведомление
+    chrome.notifications.create({
+      type: 'basic',
+      iconUrl: 'icons/icon48.png',
+      title: 'Movie Planner Bot',
+      message: 'Скопируйте изображение билета и вставьте его в чат с ботом'
+    });
+  } catch (error) {
+    console.error('Ошибка обработки билета:', error);
+    sendResponse({ success: false, error: error.message });
+  }
+}
 
 // Обработка найденного kp_id
 async function handleKpId(kpId, isSeries, tab) {
