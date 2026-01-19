@@ -649,14 +649,44 @@ def handle_edit_rating_internal(message, state):
                 del user_edit_state[user_id]
             return
         
+        # Получаем kp_id для кнопки "К описанию"
+        kp_id = None
+        conn_kp = get_db_connection()
+        cursor_kp = None
+        try:
+            with db_lock:
+                cursor_kp = conn_kp.cursor()
+                cursor_kp.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                kp_row = cursor_kp.fetchone()
+                if kp_row:
+                    kp_id = str(kp_row.get('kp_id') if isinstance(kp_row, dict) else kp_row[0])
+        except Exception as e:
+            logger.warning(f"[EDIT RATING INTERNAL] Ошибка получения kp_id: {e}")
+        finally:
+            if cursor_kp:
+                try:
+                    cursor_kp.close()
+                except:
+                    pass
+            try:
+                conn_kp.close()
+            except:
+                pass
+        
+        # Создаем кнопки для сообщений об ошибке
+        markup_error = InlineKeyboardMarkup(row_width=1)
+        if kp_id:
+            markup_error.add(InlineKeyboardButton("📌 К описанию", callback_data=f"back_to_film:{int(kp_id)}"))
+        markup_error.add(InlineKeyboardButton("❌ Отменить", callback_data="edit:cancel"))
+        
         # Парсим оценку
         try:
             rating = int(text)
             if not (1 <= rating <= 10):
-                bot.reply_to(message, "❌ Оценка должна быть от 1 до 10")
+                bot.reply_to(message, "❌ Оценка должна быть от 1 до 10", reply_markup=markup_error)
                 return
         except ValueError:
-            bot.reply_to(message, "❌ Неверный формат оценки. Используйте число от 1 до 10")
+            bot.reply_to(message, "❌ Неверный формат оценки. Используйте число от 1 до 10", reply_markup=markup_error)
             return
         
         # Используем локальные соединение и курсор
