@@ -1526,6 +1526,12 @@ def handle_clean(message):
 
 def check_admin_message(message):
     """Проверяет, является ли сообщение ответом в админском состоянии"""
+    # КРИТИЧНО: Проверяем команды САМЫМ ПЕРВЫМ делом, ДО всех остальных проверок
+    # Это гарантирует, что команды никогда не будут обработаны админским хендлером
+    if message.text and message.text.strip().startswith('/'):
+        logger.info(f"[CHECK ADMIN MESSAGE] ❌ Это команда, НЕ обрабатываем админским хендлером: text='{message.text[:50]}'")
+        return False
+    
     from moviebot.states import (
         user_cancel_subscription_state, user_refund_state,
         user_unsubscribe_state, user_add_admin_state, user_promo_admin_state
@@ -1553,12 +1559,6 @@ def check_admin_message(message):
     
     if not (has_unsubscribe or has_add_admin or has_promo_admin or has_refund or has_cancel_sub):
         logger.debug(f"[CHECK ADMIN MESSAGE] Нет админских состояний для user_id={user_id}")
-        return False
-    
-    # Команды должны обрабатываться своими обработчиками, не админским
-    # ВАЖНО: Проверяем команды ПЕРВЫМ делом, до всех остальных проверок
-    if message.text and message.text.strip().startswith('/'):
-        logger.info(f"[CHECK ADMIN MESSAGE] ❌ Это команда, НЕ обрабатываем админским хендлером: text='{text[:50]}'")
         return False
     
     if not message.text or not text:
