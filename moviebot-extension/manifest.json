@@ -20,7 +20,8 @@
     "*://*.afisha.ru/*",
     "*://*.kinoafisha.info/*",
     "*://kinoteatr.ru/*",
-    "*://karofilm.ru/*"
+    "*://karofilm.ru/*",
+    "*://web-production-3921c.up.railway.app/*"
   ],
   "background": {
     "service_worker": "background.js"
