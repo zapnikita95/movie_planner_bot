@@ -1853,18 +1853,34 @@ def create_web_app(bot):
             return resp, 400
         
         try:
+            # Сначала определяем тип через API, чтобы правильно сформировать ссылку
+            headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
+            url_api = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}"
+            response = requests.get(url_api, headers=headers, timeout=15)
+            
+            is_series = False
+            if response.status_code == 200:
+                data = response.json()
+                api_type = data.get('type', '').upper()
+                if api_type in ['TV_SERIES', 'MINI_SERIES']:
+                    is_series = True
+            
+            # Формируем правильную ссылку на основе типа
+            link_type = 'series' if is_series else 'film'
+            link = f"https://www.kinopoisk.ru/{link_type}/{kp_id}/"
+            
             # Используем extract_movie_info для получения информации, включая is_series
-            info = extract_movie_info(str(kp_id))
+            info = extract_movie_info(link)
             
             if not info:
                 resp = jsonify({"success": False, "error": "film not found"})
                 # after_request hook автоматически добавит CORS заголовки
                 return resp, 404
             
-            # Определяем правильную ссылку на основе is_series
-            is_series = info.get('is_series', False)
-            link_type = 'series' if is_series else 'film'
-            link = f"https://kinopoisk.ru/{link_type}/{kp_id}"
+            # Используем is_series из API, а не из extract_movie_info (более надежно)
+            # Но если extract_movie_info тоже определил, используем его значение
+            if info.get('is_series') is not None:
+                is_series = info.get('is_series', False)
             
             conn = get_db_connection()
             cursor = get_db_cursor()
@@ -2469,6 +2485,11 @@ def create_web_app(bot):
                     kp_id = film.get('filmId')
                     type_film = film.get('type', 'FILM').upper()
                     is_series = type_film in ['TV_SERIES', 'MINI_SERIES']
+                    
+                    # Формируем правильную ссылку
+                    link_type = 'series' if is_series else 'film'
+                    link = f"https://www.kinopoisk.ru/{link_type}/{kp_id}/"
+                    
                     resp = jsonify({
                         "success": True,
                         "kp_id": str(kp_id) if kp_id else None,
@@ -2479,7 +2500,8 @@ def create_web_app(bot):
                             "nameOriginal": film.get('nameEn') or film.get('nameRu'),
                             "year": film.get('year'),
                             "type": type_film,
-                            "is_series": is_series
+                            "is_series": is_series,
+                            "link": link
                         }
                     })
                     return resp

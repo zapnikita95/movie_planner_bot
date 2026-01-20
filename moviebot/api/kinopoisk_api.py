@@ -110,7 +110,7 @@ def extract_movie_info(link_or_id):
 
         # Проверяем поле type в ответе API (более надежный способ определения типа)
         api_type = data_main.get('type', '').upper()
-        if api_type == 'TV_SERIES':
+        if api_type in ['TV_SERIES', 'MINI_SERIES']:
             is_series = True
         elif api_type == 'FILM':
             is_series = False
