@@ -14,14 +14,18 @@ function resetExtensionState() {
   currentFilm = null;
   isProcessing = false;
   
-  // Скрываем форму планирования (ОБЯЗАТЕЛЬНО!)
+  // Скрываем форму планирования (ОБЯЗАТЕЛЬНО!) с !important
   const planningForm = document.getElementById('planning-form');
-  if (planningForm) planningForm.classList.add('hidden');
+  if (planningForm) {
+    planningForm.classList.add('hidden');
+    planningForm.style.display = 'none';
+  }
   
   // Очищаем информацию о фильме
   const filmInfo = document.getElementById('film-info');
   if (filmInfo) {
     filmInfo.classList.add('hidden');
+    filmInfo.style.display = 'none';
     const titleEl = document.getElementById('film-title');
     const yearEl = document.getElementById('film-year');
     const statusEl = document.getElementById('film-status');
@@ -38,7 +42,10 @@ function resetExtensionState() {
   
   // Скрываем секцию поиска (она показывается ТОЛЬКО после определения, что фильм не опознался)
   const searchSection = document.getElementById('search-section');
-  if (searchSection) searchSection.classList.add('hidden');
+  if (searchSection) {
+    searchSection.classList.add('hidden');
+    searchSection.style.display = 'none';
+  }
   
   // Очищаем поле поиска
   const searchInput = document.getElementById('search-input');
@@ -116,7 +123,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (cancelPlanBtn) {
     cancelPlanBtn.addEventListener('click', () => {
       const planningForm = document.getElementById('planning-form');
-      if (planningForm) planningForm.classList.add('hidden');
+      if (planningForm) {
+        planningForm.classList.add('hidden');
+        planningForm.style.display = 'none';
+      }
       // Завершаем процесс работы с фильмом - очищаем состояние
       resetExtensionState();
     });
@@ -137,13 +147,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
   
-  // ОБЯЗАТЕЛЬНО скрываем форму планирования изначально
+  // ОБЯЗАТЕЛЬНО скрываем форму планирования изначально (с !important стилем)
   const planningForm = document.getElementById('planning-form');
-  if (planningForm) planningForm.classList.add('hidden');
+  if (planningForm) {
+    planningForm.classList.add('hidden');
+    planningForm.style.display = 'none';
+  }
   
-  // ОБЯЗАТЕЛЬНО скрываем поиск изначально
+  // ОБЯЗАТЕЛЬНО скрываем поиск изначально (с !important стилем)
   const searchSection = document.getElementById('search-section');
-  if (searchSection) searchSection.classList.add('hidden');
+  if (searchSection) {
+    searchSection.classList.add('hidden');
+    searchSection.style.display = 'none';
+  }
   
   // Очищаем состояние при каждом открытии
   resetExtensionState();
@@ -230,12 +246,18 @@ async function detectAndLoadFilm(url) {
     return;
   }
   
-  // ОБЯЗАТЕЛЬНО скрываем поиск и форму планирования ПЕРЕД началом загрузки
+  // ОБЯЗАТЕЛЬНО скрываем поиск и форму планирования ПЕРЕД началом загрузки (с !important)
   const searchSection = document.getElementById('search-section');
-  if (searchSection) searchSection.classList.add('hidden');
+  if (searchSection) {
+    searchSection.classList.add('hidden');
+    searchSection.style.display = 'none';
+  }
   
   const planningForm = document.getElementById('planning-form');
-  if (planningForm) planningForm.classList.add('hidden');
+  if (planningForm) {
+    planningForm.classList.add('hidden');
+    planningForm.style.display = 'none';
+  }
   
   // Получаем элемент filmInfo один раз для всей функции
   const filmInfo = document.getElementById('film-info');
@@ -351,23 +373,35 @@ async function detectAndLoadFilm(url) {
     }
     
     // Если не распознан - скрываем информацию о фильме
-    if (filmInfo) filmInfo.classList.add('hidden');
+    if (filmInfo) {
+      filmInfo.classList.add('hidden');
+      filmInfo.style.display = 'none';
+    }
     
     // Показываем поиск ТОЛЬКО после того, как стало понятно, что фильм не опознался
-    // Даем небольшую задержку, чтобы пользователь увидел, что загрузка завершена
+    // Даем задержку, чтобы пользователь увидел, что загрузка завершена
     setTimeout(() => {
       const searchSection = document.getElementById('search-section');
-      if (searchSection) searchSection.classList.remove('hidden');
-    }, 300);
+      if (searchSection) {
+        searchSection.classList.remove('hidden');
+        searchSection.style.display = '';
+      }
+    }, 500); // Увеличил задержку до 500ms для надежности
   } catch (error) {
     console.error('Ошибка определения фильма:', error);
-    if (filmInfo) filmInfo.classList.add('hidden');
+    if (filmInfo) {
+      filmInfo.classList.add('hidden');
+      filmInfo.style.display = 'none';
+    }
     
     // Показываем поиск ТОЛЬКО после того, как стало понятно, что фильм не опознался
     setTimeout(() => {
       const searchSection = document.getElementById('search-section');
-      if (searchSection) searchSection.classList.remove('hidden');
-    }, 300);
+      if (searchSection) {
+        searchSection.classList.remove('hidden');
+        searchSection.style.display = '';
+      }
+    }, 500);
   }
 }
 
@@ -562,11 +596,17 @@ function displayFilmInfo(film, data) {
   
   // ОБЯЗАТЕЛЬНО скрываем поиск, если фильм опознался
   const searchSection = document.getElementById('search-section');
-  if (searchSection) searchSection.classList.add('hidden');
+  if (searchSection) {
+    searchSection.classList.add('hidden');
+    searchSection.style.display = 'none';
+  }
   
   // ОБЯЗАТЕЛЬНО скрываем форму планирования (она показывается ТОЛЬКО при клике на кнопку)
   const planningForm = document.getElementById('planning-form');
-  if (planningForm) planningForm.classList.add('hidden');
+  if (planningForm) {
+    planningForm.classList.add('hidden');
+    planningForm.style.display = 'none';
+  }
   
   // Очищаем предыдущее состояние
   currentFilm = null;
@@ -851,6 +891,7 @@ async function showPlanningForm() {
           const planningForm = document.getElementById('planning-form');
           if (planningForm) {
             planningForm.classList.remove('hidden');
+            planningForm.style.display = '';
             initializePlanningForm();
           }
         }
@@ -865,9 +906,11 @@ async function showPlanningForm() {
     }
   }
   
+  // Показываем форму планирования ТОЛЬКО когда пользователь явно нажал кнопку
   const planningForm = document.getElementById('planning-form');
   if (planningForm) {
     planningForm.classList.remove('hidden');
+    planningForm.style.display = '';
     initializePlanningForm();
   }
 }
@@ -1170,13 +1213,17 @@ async function handleCreatePlan() {
       // Закрываем форму планирования через 3 секунды, чтобы пользователь мог нажать кнопку билетов
       setTimeout(() => {
         const planningForm = document.getElementById('planning-form');
-        if (planningForm) planningForm.classList.add('hidden');
+        if (planningForm) {
+          planningForm.classList.add('hidden');
+          planningForm.style.display = 'none';
+        }
         // Завершаем процесс работы с фильмом - очищаем состояние
         resetExtensionState();
         // Очищаем информацию о фильме
         const filmInfo = document.getElementById('film-info');
         if (filmInfo) {
           filmInfo.classList.add('hidden');
+          filmInfo.style.display = 'none';
         }
       }, 3000);
     } else {
