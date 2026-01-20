@@ -1075,6 +1075,7 @@ async function loadStreamingServices(kpId) {
         const option = document.createElement('option');
         option.value = service.name;
         option.textContent = service.name;
+        option.setAttribute('data-url', service.url || ''); // Сохраняем URL в data-атрибуте
         select.appendChild(option);
       });
       // Показываем поле только если есть сервисы
@@ -1117,6 +1118,10 @@ async function handleCreatePlan() {
     const planTimeText = planTimeTextEl ? planTimeTextEl.value.trim() : '';
     const planDatetime = planDatetimeEl ? planDatetimeEl.value : '';
     const streamingService = streamingServiceEl ? streamingServiceEl.value : '';
+    // Получаем URL из выбранной опции
+    const streamingUrl = streamingServiceEl && streamingServiceEl.selectedOptions[0] 
+      ? streamingServiceEl.selectedOptions[0].getAttribute('data-url') || null 
+      : null;
   
   let planDatetimeISO = null;
   
@@ -1173,7 +1178,7 @@ async function handleCreatePlan() {
         plan_datetime: planDatetimeISO,
         user_id: userId,
         streaming_service: streamingService || null,
-        streaming_url: null
+        streaming_url: streamingUrl || null
       })
     });
     
