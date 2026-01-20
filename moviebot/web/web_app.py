@@ -1552,6 +1552,7 @@ def create_web_app(bot):
     @app.after_request
     def after_request(response):
         """Автоматически добавляет CORS заголовки ко всем ответам от extension API"""
+        # Добавляем CORS заголовки для всех запросов к extension API
         if request.path.startswith('/api/extension/'):
             # Используем set вместо add, чтобы избежать дублирования
             # Если заголовок уже есть, он будет заменен, а не добавлен повторно
@@ -1559,6 +1560,7 @@ def create_web_app(bot):
             response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
             response.headers['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'
             response.headers['Access-Control-Allow-Credentials'] = 'true'
+            logger.debug(f"[CORS] Добавлены заголовки для пути: {request.path}, метод: {request.method}")
         return response
     
     # Функция add_cors_headers больше не используется
@@ -1679,7 +1681,11 @@ def create_web_app(bot):
         if request.method == 'OPTIONS':
             logger.info("[EXTENSION API] OPTIONS preflight request for /api/extension/film-info")
             response = jsonify({'status': 'ok'})
-            # after_request hook автоматически добавит CORS заголовки
+            # Явно добавляем CORS заголовки для OPTIONS
+            response.headers['Access-Control-Allow-Origin'] = '*'
+            response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+            response.headers['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'
+            response.headers['Access-Control-Allow-Credentials'] = 'true'
             return response
         
         logger.info(f"[EXTENSION API] GET /api/extension/film-info - kp_id={request.args.get('kp_id')}, imdb_id={request.args.get('imdb_id')}, chat_id={request.args.get('chat_id')}")
