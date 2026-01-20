@@ -54,6 +54,13 @@ function resetExtensionState() {
 
 // Инициализация
 document.addEventListener('DOMContentLoaded', async () => {
+  // Скрываем блок подтверждения при инициализации
+  const confirmationEl = document.getElementById('film-confirmation');
+  if (confirmationEl) {
+    confirmationEl.classList.add('hidden');
+    confirmationEl.style.display = 'none';
+  }
+  
   // Устанавливаем правильные пути к логотипам
   const logoImg = document.getElementById('logo-img');
   const logoImgAuth = document.getElementById('logo-img-auth');
@@ -565,7 +572,10 @@ async function loadFilmByImdbId(imdbId, source = 'imdb') {
       if (yearEl) yearEl.textContent = '';
       if (statusEl) statusEl.innerHTML = '';
       if (actionsEl) actionsEl.innerHTML = '';
-      if (confirmationEl) confirmationEl.classList.add('hidden');
+      if (confirmationEl) {
+        confirmationEl.classList.add('hidden');
+        confirmationEl.style.display = 'none';
+      }
     }
     
     const response = await fetch(`${API_BASE_URL}/api/extension/film-info?imdb_id=${imdbId}&chat_id=${chatId}`);
@@ -721,10 +731,11 @@ async function loadFilmByUrl(url) {
 function displayFilmInfo(film, data, showConfirmation = false) {
   console.log('[DISPLAY FILM] displayFilmInfo вызвана, film:', film, 'data:', data, 'showConfirmation:', showConfirmation);
   
-  // ВСЕГДА сначала скрываем блок подтверждения, если это не fallback поиск
+  // ВСЕГДА сначала скрываем блок подтверждения - он показывается ТОЛЬКО при фолбек-поиске
   const confirmationEl = document.getElementById('film-confirmation');
-  if (confirmationEl && !showConfirmation) {
+  if (confirmationEl) {
     confirmationEl.classList.add('hidden');
+    confirmationEl.style.display = 'none';
   }
   
   // Если открыт режим auto_plan_cinema, автоматически открываем форму планирования
@@ -891,9 +902,10 @@ function displayFilmInfo(film, data, showConfirmation = false) {
     actionsEl.appendChild(ticketsBtn);
   }
   
-  // Показываем подтверждение ТОЛЬКО если это fallback поиск
-  if (showConfirmation && confirmationEl) {
+  // Показываем подтверждение ТОЛЬКО если это fallback поиск (showConfirmation === true)
+  if (showConfirmation === true && confirmationEl) {
     confirmationEl.classList.remove('hidden');
+    confirmationEl.style.display = '';
     
     // Обработчики кнопок подтверждения
     const confirmYesBtn = document.getElementById('confirm-film-yes');
@@ -902,7 +914,10 @@ function displayFilmInfo(film, data, showConfirmation = false) {
     if (confirmYesBtn) {
       confirmYesBtn.onclick = () => {
         // Подтверждаем - скрываем блок подтверждения
-        if (confirmationEl) confirmationEl.classList.add('hidden');
+        if (confirmationEl) {
+          confirmationEl.classList.add('hidden');
+          confirmationEl.style.display = 'none';
+        }
         fallbackFilmData = null;
       };
     }
@@ -910,7 +925,10 @@ function displayFilmInfo(film, data, showConfirmation = false) {
     if (confirmNoBtn) {
       confirmNoBtn.onclick = () => {
         // Отклоняем - скрываем информацию о фильме
-        if (confirmationEl) confirmationEl.classList.add('hidden');
+        if (confirmationEl) {
+          confirmationEl.classList.add('hidden');
+          confirmationEl.style.display = 'none';
+        }
         const filmInfoEl = document.getElementById('film-info');
         if (filmInfoEl) {
           filmInfoEl.classList.add('hidden');
