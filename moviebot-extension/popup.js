@@ -148,10 +148,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Очищаем состояние при каждом открытии
   resetExtensionState();
   
-  // Поиск показывается только если фильм не опознался (уже скрыт по умолчанию в HTML)
-  
-  // Обработчик поиска (добавляем только если секция поиска видима)
-  const searchSection = document.getElementById('search-section');
+  // Обработчик поиска (добавляем обработчики для поиска)
   const searchBtn = document.getElementById('search-btn');
   const searchInput = document.getElementById('search-input');
   if (searchBtn && searchInput) {
