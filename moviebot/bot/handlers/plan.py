@@ -2514,11 +2514,13 @@ def stream_sel_callback(call):
 @bot.callback_query_handler(func=lambda call: call.data.startswith("plan:show_streaming:"))
 def show_streaming_list_callback(call):
     """Показывает список онлайн-кинотеатров для выбора"""
+    logger.info(f"[SHOW STREAMING] ===== START: callback_id={call.id}, callback_data={call.data}, user_id={call.from_user.id}")
     try:
         bot.answer_callback_query(call.id)
         
         parts = call.data.split(":")
         plan_id = int(parts[2])
+        logger.info(f"[SHOW STREAMING] plan_id={plan_id}")
         chat_id = call.message.chat.id
         message_id = call.message.message_id
         
@@ -2575,10 +2577,13 @@ def show_streaming_list_callback(call):
                 pass
         
         # Если источников нет в БД, пытаемся получить из API
+        logger.info(f"[SHOW STREAMING] Проверка источников: sources_dict={bool(sources_dict)}, kp_id={kp_id}")
         if not sources_dict and kp_id:
             try:
                 from moviebot.api.kinopoisk_api import get_external_sources
+                logger.info(f"[SHOW STREAMING] Запрос источников из API для kp_id={kp_id}")
                 sources = get_external_sources(kp_id)
+                logger.info(f"[SHOW STREAMING] Получено источников из API: {len(sources) if sources else 0}")
                 if sources:
                     sources_dict = {platform: url for platform, url in sources[:6]}
                     # Сохраняем в БД
@@ -2589,6 +2594,7 @@ def show_streaming_list_callback(call):
                         with db_lock:
                             cursor_save.execute('UPDATE plans SET ticket_file_id = %s WHERE id = %s AND chat_id = %s', (sources_json, plan_id, chat_id))
                             conn_save.commit()
+                            logger.info(f"[SHOW STREAMING] Источники сохранены в БД для plan_id={plan_id}")
                     finally:
                         try:
                             cursor_save.close()
@@ -2599,10 +2605,15 @@ def show_streaming_list_callback(call):
                         except:
                             pass
             except Exception as e:
-                logger.warning(f"[SHOW STREAMING] Ошибка получения sources: {e}")
+                logger.error(f"[SHOW STREAMING] Ошибка получения sources: {e}", exc_info=True)
         
+        logger.info(f"[SHOW STREAMING] Финальная проверка: sources_dict={bool(sources_dict)}, количество={len(sources_dict) if sources_dict else 0}")
         if not sources_dict:
-            bot.answer_callback_query(call.id, "❌ Онлайн-кинотеатры не найдены", show_alert=True)
+            logger.warning(f"[SHOW STREAMING] Источники не найдены для plan_id={plan_id}, kp_id={kp_id}")
+            try:
+                bot.answer_callback_query(call.id, "❌ Онлайн-кинотеатры не найдены", show_alert=True)
+            except Exception as alert_e:
+                logger.error(f"[SHOW STREAMING] Ошибка показа alert: {alert_e}")
             return
         
         # Формируем сообщение со списком кинотеатров
@@ -2640,11 +2651,16 @@ def show_streaming_list_callback(call):
         
         markup.add(InlineKeyboardButton("❌ Отмена", callback_data=f"plan:cancel_streaming:{plan_id}"))
         
+        logger.info(f"[SHOW STREAMING] Отправка списка кинотеатров: количество={len(platforms_list)}")
         bot.edit_message_text(text, chat_id, message_id, reply_markup=markup)
+        logger.info(f"[SHOW STREAMING] ===== END: успешно =====")
         
     except Exception as e:
         logger.error(f"[SHOW STREAMING] Ошибка: {e}", exc_info=True)
-        bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+        except:
+            pass
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("plan:select_streaming:"))
