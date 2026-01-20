@@ -266,6 +266,7 @@ async function detectAndLoadFilm(url) {
     // Показываем индикатор загрузки
     if (filmInfo) {
       filmInfo.classList.remove('hidden');
+      filmInfo.style.display = ''; // Убираем style.display = 'none'
       const titleEl = document.getElementById('film-title');
       if (titleEl) titleEl.textContent = 'Загружаем информацию о фильме';
       const yearEl = document.getElementById('film-year');
@@ -839,6 +840,7 @@ async function loadFilmByKpId(kpId) {
     const filmInfo = document.getElementById('film-info');
     if (filmInfo) {
       filmInfo.classList.remove('hidden');
+      filmInfo.style.display = ''; // Убираем style.display = 'none'
       const titleEl = document.getElementById('film-title');
       const yearEl = document.getElementById('film-year');
       const statusEl = document.getElementById('film-status');
