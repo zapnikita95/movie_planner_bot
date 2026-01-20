@@ -292,21 +292,60 @@ def process_plan(bot, user_id, chat_id, link, plan_type, day_or_date, message_da
     
     text = f"✅ <b>{title}</b> запланирован на {date_str} {type_text}"
     
-    # Для планов "дома" ВСЕГДА показываем кнопку выбора онлайн-кинотеатра
-    # Источники будут загружены при клике на кнопку, если их еще нет в БД
+    # Для планов "дома" показываем кнопку выбора онлайн-кинотеатра только если есть источники
     if plan_type == 'home' and plan_id and kp_id:
-        # Если кинотеатр уже выбран, показываем его с галкой
+        # Проверяем наличие источников
+        has_sources = False
+        sources_dict_check = {}
+        
+        # Проверяем источники в БД (из ticket_file_id)
+        if plan_id:
+            conn_sources = get_db_connection()
+            cursor_sources = get_db_cursor()
+            try:
+                with db_lock:
+                    cursor_sources.execute('SELECT ticket_file_id FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+                    row = cursor_sources.fetchone()
+                    if row:
+                        ticket_file_id = row.get('ticket_file_id') if isinstance(row, dict) else row[0]
+                        if ticket_file_id:
+                            try:
+                                sources_dict_check = json.loads(ticket_file_id)
+                                if sources_dict_check:
+                                    has_sources = True
+                            except:
+                                pass
+            finally:
+                try:
+                    cursor_sources.close()
+                except:
+                    pass
+                try:
+                    conn_sources.close()
+                except:
+                    pass
+        
+        # Если источников нет в БД, проверяем результат асинхронной загрузки
+        if not has_sources and sources:
+            sources_dict_check = {platform: url for platform, url in sources[:6]}
+            if sources_dict_check:
+                has_sources = True
+        
+        # Показываем кнопку только если есть источники или кинотеатр уже выбран
         if selected_streaming_service:
+            # Если кинотеатр уже выбран, показываем его с галкой (даже если источников сейчас нет)
             if not markup.keyboard:
                 markup = InlineKeyboardMarkup(row_width=1)
             markup.add(InlineKeyboardButton(f"✅ {selected_streaming_service}", callback_data=f"plan:show_streaming:{plan_id}"))
-        else:
-            # ВСЕГДА показываем кнопку для планов "дома"
+        elif has_sources:
+            # Показываем кнопку только если источники найдены
             text += "\n\nВы можете выбрать онлайн-кинотеатр для просмотра:"
             if not markup.keyboard:
                 markup = InlineKeyboardMarkup(row_width=1)
             markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"plan:show_streaming:{plan_id}"))
-            logger.info(f"[PROCESS PLAN] Добавлена кнопка 'Выбрать онлайн-кинотеатр' для plan_id={plan_id} (план 'дома')")
+            logger.info(f"[PROCESS PLAN] Добавлена кнопка 'Выбрать онлайн-кинотеатр' для plan_id={plan_id} (план 'дома', источники найдены)")
+        else:
+            logger.info(f"[PROCESS PLAN] Кнопка 'Выбрать онлайн-кинотеатр' не показана для plan_id={plan_id} (источники не найдены)")
     
     bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup if markup.keyboard else None)
     
