@@ -1548,7 +1548,7 @@ def create_web_app(bot):
     # ========================================================================
     
     # Добавляем after_request hook для автоматического добавления CORS заголовков
-    # ВАЖНО: Используем только after_request, чтобы избежать дублирования заголовков
+    # ВАЖНО: Регистрируем ПЕРЕД определением всех роутов extension API
     @app.after_request
     def after_request(response):
         """Автоматически добавляет CORS заголовки ко всем ответам от extension API"""
@@ -1560,7 +1560,7 @@ def create_web_app(bot):
             response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
             response.headers['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'
             response.headers['Access-Control-Allow-Credentials'] = 'true'
-            logger.debug(f"[CORS] Добавлены заголовки для пути: {request.path}, метод: {request.method}")
+            logger.info(f"[CORS] ✅ Добавлены заголовки для пути: {request.path}, метод: {request.method}, статус: {response.status_code}")
         return response
     
     # Функция add_cors_headers больше не используется
@@ -1681,11 +1681,12 @@ def create_web_app(bot):
         if request.method == 'OPTIONS':
             logger.info("[EXTENSION API] OPTIONS preflight request for /api/extension/film-info")
             response = jsonify({'status': 'ok'})
-            # Явно добавляем CORS заголовки для OPTIONS
+            # Явно добавляем CORS заголовки для OPTIONS (after_request тоже добавит, но для надежности делаем явно)
             response.headers['Access-Control-Allow-Origin'] = '*'
             response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
             response.headers['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'
             response.headers['Access-Control-Allow-Credentials'] = 'true'
+            logger.info("[CORS] ✅ Явно добавлены заголовки для OPTIONS запроса film-info")
             return response
         
         logger.info(f"[EXTENSION API] GET /api/extension/film-info - kp_id={request.args.get('kp_id')}, imdb_id={request.args.get('imdb_id')}, chat_id={request.args.get('chat_id')}")
