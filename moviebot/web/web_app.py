@@ -1832,6 +1832,12 @@ def create_web_app(bot):
         from moviebot.config import KP_TOKEN
         import requests
         
+        # Проверяем, что KP_TOKEN загружен
+        if not KP_TOKEN:
+            logger.error("[EXTENSION API] KP_TOKEN не установлен")
+            resp = jsonify({"success": False, "error": "server configuration error"})
+            return resp, 500
+        
         if not request.is_json:
             resp = jsonify({"success": False, "error": "JSON required"})
             # after_request hook автоматически добавит CORS заголовки
