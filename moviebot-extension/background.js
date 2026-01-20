@@ -38,6 +38,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     } else if (message.action === "open_popup") {
       // Не открываем popup автоматически - только при клике на иконку
       sendResponse({ success: true });
+    } else if (message.action === "open_popup_for_tickets") {
+      // Открываем popup с параметром для автоматического открытия формы планирования
+      chrome.action.openPopup();
+      sendResponse({ success: true });
     } else if (message.action === "open_ticket_upload") {
       // Не открываем popup автоматически - только при клике на иконку
       sendResponse({ success: true });

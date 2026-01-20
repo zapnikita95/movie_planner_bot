@@ -93,6 +93,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     const kpId = urlParams.get('kp_id');
     const url = urlParams.get('url');
     const ticketUrl = urlParams.get('ticket_url');
+    const autoPlanCinema = urlParams.get('auto_plan_cinema') === 'true';
+    
+    // Проверяем флаг auto_plan_cinema из storage (устанавливается из content script)
+    const storageData = await chrome.storage.local.get(['auto_plan_cinema']);
+    const shouldAutoPlanCinema = autoPlanCinema || storageData.auto_plan_cinema;
+    
+    // Если открыт для добавления билетов, показываем поиск
+    if (shouldAutoPlanCinema) {
+      // Удаляем флаг из storage
+      chrome.storage.local.remove(['auto_plan_cinema']);
+      const searchSection = document.getElementById('search-section');
+      if (searchSection) {
+        searchSection.classList.remove('hidden');
+        searchSection.style.display = '';
+      }
+      // Сохраняем флаг для автоматического открытия формы планирования после выбора фильма
+      window.autoPlanCinemaMode = true;
+    }
     
     if (ticketUrl) {
       showTicketUpload(ticketUrl);
@@ -703,11 +721,27 @@ async function loadFilmByUrl(url) {
 function displayFilmInfo(film, data, showConfirmation = false) {
   console.log('[DISPLAY FILM] displayFilmInfo вызвана, film:', film, 'data:', data, 'showConfirmation:', showConfirmation);
   
-  // ОБЯЗАТЕЛЬНО скрываем поиск, если фильм опознался
-  const searchSection = document.getElementById('search-section');
-  if (searchSection) {
-    searchSection.classList.add('hidden');
-    searchSection.style.display = 'none';
+  // Если открыт режим auto_plan_cinema, автоматически открываем форму планирования
+  if (window.autoPlanCinemaMode) {
+    window.autoPlanCinemaMode = false; // Сбрасываем флаг
+    // Скрываем поиск
+    const searchSection = document.getElementById('search-section');
+    if (searchSection) {
+      searchSection.classList.add('hidden');
+      searchSection.style.display = 'none';
+    }
+    // Автоматически открываем форму планирования с выбором "В кино"
+    setTimeout(() => {
+      setPlanType('cinema');
+      showPlanningForm();
+    }, 300);
+  } else {
+    // ОБЯЗАТЕЛЬНО скрываем поиск, если фильм опознался
+    const searchSection = document.getElementById('search-section');
+    if (searchSection) {
+      searchSection.classList.add('hidden');
+      searchSection.style.display = 'none';
+    }
   }
   
   // ОБЯЗАТЕЛЬНО скрываем форму планирования (она показывается ТОЛЬКО при клике на кнопку)
@@ -1380,7 +1414,36 @@ async function handleCreatePlan() {
     
     const json = await response.json();
     if (json.success) {
-      alert('✅ План создан!');
+      // Если план "в кино", автоматически активируем ожидание билета
+      if (selectedPlanType === 'cinema' && json.plan_id && hasTicketsAccess) {
+        try {
+          const ticketResponse = await fetch(`${API_BASE_URL}/api/extension/init-ticket-upload`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: chatId,
+              user_id: userId,
+              plan_id: json.plan_id
+            })
+          });
+          
+          if (ticketResponse.ok) {
+            const ticketResult = await ticketResponse.json();
+            if (ticketResult.success) {
+              alert('✅ План создан!\n\n🎟️ Для сохранения билетов отправьте скриншот в чат с ботом — он уже ждёт ваш билет.\n\n💡 Напоминание о событии вместе с билетами придёт незадолго до сеанса!');
+            } else {
+              alert('✅ План создан!\n\n🎟️ Для добавления билетов отправьте скриншот в чат с ботом.');
+            }
+          } else {
+            alert('✅ План создан!\n\n🎟️ Для добавления билетов отправьте скриншот в чат с ботом.');
+          }
+        } catch (err) {
+          console.error('Ошибка инициализации загрузки билетов:', err);
+          alert('✅ План создан!\n\n🎟️ Для добавления билетов отправьте скриншот в чат с ботом.');
+        }
+      } else {
+        alert('✅ План создан!');
+      }
       
       // Показываем кнопку "Добавить билеты" после успешного планирования, если выбрано "В кино"
       const addTicketsBtn = document.getElementById('add-tickets-btn');
@@ -1421,21 +1484,39 @@ async function handleCreatePlan() {
       }
       
       // Закрываем форму планирования через 3 секунды, чтобы пользователь мог нажать кнопку билетов
-      setTimeout(() => {
-        const planningForm = document.getElementById('planning-form');
-        if (planningForm) {
-          planningForm.classList.add('hidden');
-          planningForm.style.display = 'none';
-        }
-        // Завершаем процесс работы с фильмом - очищаем состояние
-        resetExtensionState();
-        // Очищаем информацию о фильме
-        const filmInfo = document.getElementById('film-info');
-        if (filmInfo) {
-          filmInfo.classList.add('hidden');
-          filmInfo.style.display = 'none';
-        }
-      }, 3000);
+      // Но только если не в режиме auto_plan_cinema (там уже показали сообщение)
+      if (!window.autoPlanCinemaMode) {
+        setTimeout(() => {
+          const planningForm = document.getElementById('planning-form');
+          if (planningForm) {
+            planningForm.classList.add('hidden');
+            planningForm.style.display = 'none';
+          }
+          // Завершаем процесс работы с фильмом - очищаем состояние
+          resetExtensionState();
+          // Очищаем информацию о фильме
+          const filmInfo = document.getElementById('film-info');
+          if (filmInfo) {
+            filmInfo.classList.add('hidden');
+            filmInfo.style.display = 'none';
+          }
+        }, 3000);
+      } else {
+        // В режиме auto_plan_cinema сразу закрываем форму после показа сообщения
+        setTimeout(() => {
+          const planningForm = document.getElementById('planning-form');
+          if (planningForm) {
+            planningForm.classList.add('hidden');
+            planningForm.style.display = 'none';
+          }
+          resetExtensionState();
+          const filmInfo = document.getElementById('film-info');
+          if (filmInfo) {
+            filmInfo.classList.add('hidden');
+            filmInfo.style.display = 'none';
+          }
+        }, 1000);
+      }
     } else {
       alert('Ошибка создания плана: ' + (json.error || 'неизвестная ошибка'));
     }

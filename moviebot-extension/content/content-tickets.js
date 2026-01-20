@@ -71,31 +71,17 @@
       e.stopPropagation();
       
       try {
-        // Отправляем сообщение в background script
-        chrome.runtime.sendMessage({
-          action: 'add_tickets_to_plan',
-          page_url: window.location.href
-        }, (response) => {
-          if (chrome.runtime.lastError) {
-            console.error('Ошибка отправки сообщения:', chrome.runtime.lastError);
-            alert('Ошибка: Расширение не подключено. Пожалуйста, проверьте подключение к боту.');
-            return;
-          }
-          
-          if (response && response.success) {
-            if (response.message) {
-              alert(response.message);
-            } else {
-              alert('✅ Для добавления билета:\n\n1. Скопируйте изображение билета (Ctrl+C или Cmd+C)\n2. Вставьте его в чат с ботом (Ctrl+V или Cmd+V)\n3. Бот автоматически распознает билет и добавит его к плану');
-            }
-          } else {
-            const errorMsg = response && response.error ? response.error : 'Не удалось добавить билет';
-            alert(`❌ ${errorMsg}\n\nУбедитесь, что вы:\n1. Привязали расширение через /code в боте\n2. Оформили подписку "Билеты"\n3. Запланировали просмотр фильма "В кино"`);
-          }
+        // Открываем popup расширения с параметром для автоматического открытия формы планирования
+        // Сохраняем флаг в storage, чтобы popup мог его прочитать
+        chrome.storage.local.set({ auto_plan_cinema: true }, () => {
+          // Открываем popup расширения
+          chrome.runtime.sendMessage({
+            action: 'open_popup_for_tickets'
+          });
         });
       } catch (error) {
-        console.error('Ошибка при добавлении билета:', error);
-        alert('Ошибка при добавлении билета. Попробуйте скопировать изображение билета и вставить в чат с ботом.');
+        console.error('Ошибка при открытии popup:', error);
+        alert('Пожалуйста, откройте расширение вручную и выберите фильм для планирования.');
       }
     });
     
