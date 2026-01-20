@@ -1829,6 +1829,8 @@ def create_web_app(bot):
         logger.info(f"[EXTENSION API] POST /api/extension/add-film - raw_data={data}, kp_id={data.get('kp_id')}, chat_id={data.get('chat_id')}")
         from moviebot.api.kinopoisk_api import extract_movie_info
         from moviebot.database.db_connection import get_db_connection, get_db_cursor
+        from moviebot.config import KP_TOKEN
+        import requests
         
         if not request.is_json:
             resp = jsonify({"success": False, "error": "JSON required"})
