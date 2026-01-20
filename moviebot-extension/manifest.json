@@ -21,6 +21,7 @@
     "*://*.kinoafisha.info/*",
     "*://kinoteatr.ru/*",
     "*://karofilm.ru/*",
+    "*://mos-kino.ru/*",
     "*://web-production-3921c.up.railway.app/*"
   ],
   "background": {
@@ -64,7 +65,9 @@
         "*://www.kinopoisk.ru/lists/movies/movies-in-cinema/*",
         "*://kinoteatr.ru/kinoafisha/*",
         "*://msk.kinoafisha.info/*",
-        "*://karofilm.ru/*"
+        "*://karofilm.ru/*",
+        "*://mos-kino.ru/schedule/*",
+        "*://mos-kino.ru/*/schedule/*"
       ],
       "js": ["content/content-tickets.js"],
       "run_at": "document_end"
