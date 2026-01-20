@@ -1763,14 +1763,20 @@ def create_web_app(bot):
                     film_id = row.get('id') if isinstance(row, dict) else row[0]
                     watched = bool(row.get('watched') if isinstance(row, dict) else row[1])
                 
-                # Проверяем наличие в расписании
+                # Проверяем наличие в расписании и тип плана
+                plan_type = None
+                plan_id = None
                 if film_id:
                     cursor.execute("""
-                        SELECT id FROM plans 
+                        SELECT id, plan_type FROM plans 
                         WHERE chat_id = %s AND film_id = %s
                         LIMIT 1
                     """, (chat_id, film_id))
-                    has_plan = cursor.fetchone() is not None
+                    plan_row = cursor.fetchone()
+                    if plan_row:
+                        has_plan = True
+                        plan_id = plan_row.get('id') if isinstance(plan_row, dict) else plan_row[0]
+                        plan_type = plan_row.get('plan_type') if isinstance(plan_row, dict) else plan_row[1]
             finally:
                 try:
                     cursor.close()
@@ -1796,7 +1802,9 @@ def create_web_app(bot):
                 "in_database": film_in_db,
                 "film_id": film_id,
                 "watched": watched,
-                "has_plan": has_plan
+                "has_plan": has_plan,
+                "plan_type": plan_type,
+                "plan_id": plan_id
             })
             # after_request hook автоматически добавит CORS заголовки
             return resp
@@ -2203,6 +2211,12 @@ def create_web_app(bot):
                         
                         markup = InlineKeyboardMarkup()
                         markup.add(InlineKeyboardButton("📖 К описанию", callback_data=f"show_film:{kp_id_plan}"))
+                        
+                        # Если план "в кино", добавляем кнопку "Добавить билеты"
+                        if plan_type == 'cinema':
+                            from moviebot.utils.helpers import has_tickets_access
+                            if has_tickets_access(chat_id, user_id):
+                                markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
                         
                         bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup)
                         logger.info(f"[EXTENSION API] Сообщение о создании/обновлении плана отправлено в chat_id={chat_id}")

@@ -704,6 +704,52 @@ function displayFilmInfo(film, data) {
   });
   actionsEl.appendChild(planBtn);
   
+  // Если есть план "в кино", добавляем кнопку "Добавить билеты"
+  if (data.has_plan && data.plan_type === 'cinema' && data.plan_id && hasTicketsAccess) {
+    const ticketsBtn = document.createElement('button');
+    ticketsBtn.textContent = '🎟️ Добавить билеты';
+    ticketsBtn.className = 'btn btn-secondary';
+    ticketsBtn.style.marginTop = '10px';
+    ticketsBtn.addEventListener('click', async () => {
+      if (isProcessing) return;
+      isProcessing = true;
+      ticketsBtn.disabled = true;
+      ticketsBtn.textContent = '⏳ Отправляем...';
+      
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/extension/init-ticket-upload`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            user_id: userId,
+            plan_id: data.plan_id
+          })
+        });
+        
+        if (response.ok) {
+          const result = await response.json();
+          if (result.success) {
+            alert('✅ Сообщение отправлено в бота. Отправьте фото или файл с билетом(ами) в чат.');
+          } else {
+            alert('Ошибка: ' + (result.error || 'неизвестная ошибка'));
+          }
+        } else {
+          const errorJson = await response.json();
+          alert('Ошибка: ' + (errorJson.error || 'не удалось отправить сообщение'));
+        }
+      } catch (err) {
+        console.error('Ошибка инициализации загрузки билетов:', err);
+        alert('Ошибка. Попробуйте отправить билет напрямую в чат с ботом.');
+      } finally {
+        isProcessing = false;
+        ticketsBtn.disabled = false;
+        ticketsBtn.textContent = '🎟️ Добавить билеты';
+      }
+    });
+    actionsEl.appendChild(ticketsBtn);
+  }
+  
   // Убеждаемся, что film-info видим (filmInfo уже объявлен выше)
   if (filmInfo) {
     filmInfo.classList.remove('hidden');
