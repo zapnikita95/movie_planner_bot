@@ -324,9 +324,9 @@ async function detectAndLoadFilm(url) {
               return;
             }
             if (response && response.imdbId) {
-              await loadFilmByImdbId(response.imdbId);
+              await loadFilmByImdbId(response.imdbId, 'imdb');
             } else {
-              await loadFilmByImdbId(imdbId);
+              await loadFilmByImdbId(imdbId, 'imdb');
             }
           });
         } else {
@@ -354,11 +354,17 @@ async function detectAndLoadFilm(url) {
               return;
             }
             if (response && response.imdbId) {
-              await loadFilmByImdbId(response.imdbId);
+              await loadFilmByImdbId(response.imdbId, 'letterboxd');
             } else {
-              // Fallback: пытаемся загрузить через URL (но это не сработает для letterboxd)
-              document.getElementById('film-title').textContent = 'Не удалось определить фильм';
-              document.getElementById('film-year').textContent = 'Попробуйте открыть страницу фильма на Кинопоиске или IMDb';
+              // Fallback: получаем название и год
+              chrome.tabs.sendMessage(tabs[0].id, { action: 'get_letterboxd_title_year' }, async (fallbackResponse) => {
+                if (fallbackResponse && fallbackResponse.title && fallbackResponse.year) {
+                  await loadFilmByKeyword(fallbackResponse.title, fallbackResponse.year, 'letterboxd');
+                } else {
+                  document.getElementById('film-title').textContent = 'Не удалось определить фильм';
+                  document.getElementById('film-year').textContent = 'Попробуйте открыть страницу фильма на Кинопоиске или IMDb';
+                }
+              });
             }
           });
         } else {
@@ -516,7 +522,10 @@ async function handleLogout() {
   }
 }
 
-async function loadFilmByImdbId(imdbId) {
+// Переменная для хранения fallback данных
+let fallbackFilmData = null;
+
+async function loadFilmByImdbId(imdbId, source = 'imdb') {
   if (!imdbId || !chatId) return;
   
   try {
@@ -533,10 +542,12 @@ async function loadFilmByImdbId(imdbId) {
       const yearEl = document.getElementById('film-year');
       const statusEl = document.getElementById('film-status');
       const actionsEl = document.getElementById('film-actions');
+      const confirmationEl = document.getElementById('film-confirmation');
       if (titleEl) titleEl.textContent = 'Загружаем информацию о фильме';
       if (yearEl) yearEl.textContent = '';
       if (statusEl) statusEl.innerHTML = '';
       if (actionsEl) actionsEl.innerHTML = '';
+      if (confirmationEl) confirmationEl.classList.add('hidden');
     }
     
     const response = await fetch(`${API_BASE_URL}/api/extension/film-info?imdb_id=${imdbId}&chat_id=${chatId}`);
@@ -554,30 +565,114 @@ async function loadFilmByImdbId(imdbId) {
     
     const json = await response.json();
     
-    if (json.success) {
+    if (json.success && json.film && json.film.kp_id) {
       displayFilmInfo(json.film, json);
     } else {
-      const filmInfoEl = document.getElementById('film-info');
-      if (filmInfoEl) {
-        filmInfoEl.classList.remove('hidden');
-        filmInfoEl.style.display = ''; // Убираем style.display = 'none'
+      // Fallback: если API вернул пустоту, пытаемся найти по названию и году
+      if (source === 'imdb' || source === 'letterboxd') {
+        await tryFallbackSearch(imdbId, source);
+      } else {
+        const filmInfoEl = document.getElementById('film-info');
+        if (filmInfoEl) {
+          filmInfoEl.classList.remove('hidden');
+          filmInfoEl.style.display = '';
+        }
+        const titleEl = document.getElementById('film-title');
+        const yearEl = document.getElementById('film-year');
+        if (titleEl) titleEl.textContent = 'Фильм не найден';
+        if (yearEl) yearEl.textContent = json.error || 'Попробуйте другую ссылку';
       }
-      const titleEl = document.getElementById('film-title');
-      const yearEl = document.getElementById('film-year');
-      if (titleEl) titleEl.textContent = 'Фильм не найден';
-      if (yearEl) yearEl.textContent = json.error || 'Попробуйте другую ссылку';
     }
   } catch (err) {
     console.error('Ошибка загрузки фильма:', err);
     const filmInfo = document.getElementById('film-info');
     if (filmInfo) {
       filmInfo.classList.remove('hidden');
-      filmInfo.style.display = ''; // Убираем style.display = 'none'
+      filmInfo.style.display = '';
       const titleEl = document.getElementById('film-title');
       const yearEl = document.getElementById('film-year');
       if (titleEl) titleEl.textContent = 'Ошибка загрузки';
       if (yearEl) yearEl.textContent = 'Проверьте подключение к интернету';
     }
+  }
+}
+
+async function tryFallbackSearch(imdbId, source) {
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tabs || !tabs[0]) return;
+    
+    let title, year;
+    
+    if (source === 'imdb') {
+      const response = await chrome.tabs.sendMessage(tabs[0].id, { action: 'get_imdb_title_year' });
+      if (response && response.title && response.year) {
+        title = response.title;
+        year = response.year;
+      }
+    } else if (source === 'letterboxd') {
+      const response = await chrome.tabs.sendMessage(tabs[0].id, { action: 'get_letterboxd_title_year' });
+      if (response && response.title && response.year) {
+        title = response.title;
+        year = response.year;
+      }
+    }
+    
+    if (title && year) {
+      await loadFilmByKeyword(title, year, source);
+    } else {
+      const titleEl = document.getElementById('film-title');
+      const yearEl = document.getElementById('film-year');
+      if (titleEl) titleEl.textContent = 'Фильм не найден';
+      if (yearEl) yearEl.textContent = 'Не удалось получить данные со страницы';
+    }
+  } catch (err) {
+    console.error('Ошибка fallback поиска:', err);
+  }
+}
+
+async function loadFilmByKeyword(keyword, year, source) {
+  try {
+    const titleEl = document.getElementById('film-title');
+    const yearEl = document.getElementById('film-year');
+    if (titleEl) titleEl.textContent = 'Ищем фильм по названию...';
+    if (yearEl) yearEl.textContent = '';
+    
+    const response = await fetch(`${API_BASE_URL}/api/extension/search-film-by-keyword?keyword=${encodeURIComponent(keyword)}&year=${year}`);
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    const json = await response.json();
+    
+    if (json.success && json.kp_id) {
+      // Загружаем информацию о фильме по найденному kp_id
+      const filmResponse = await fetch(`${API_BASE_URL}/api/extension/film-info?kp_id=${json.kp_id}&chat_id=${chatId}`);
+      if (filmResponse.ok) {
+        const filmJson = await filmResponse.json();
+        if (filmJson.success) {
+          // Сохраняем данные для подтверждения
+          fallbackFilmData = {
+            film: filmJson.film,
+            data: filmJson,
+            source: source
+          };
+          displayFilmInfo(filmJson.film, filmJson, true); // true = показать подтверждение
+        }
+      }
+    } else {
+      const titleEl = document.getElementById('film-title');
+      const yearEl = document.getElementById('film-year');
+      if (titleEl) titleEl.textContent = 'Фильм не найден';
+      if (yearEl) yearEl.textContent = 'Попробуйте другую ссылку';
+    }
+  } catch (err) {
+    console.error('Ошибка поиска по keyword:', err);
+    const titleEl = document.getElementById('film-title');
+    const yearEl = document.getElementById('film-year');
+    if (titleEl) titleEl.textContent = 'Ошибка поиска';
+    if (yearEl) yearEl.textContent = 'Проверьте подключение к интернету';
   }
 }
 
@@ -599,8 +694,8 @@ async function loadFilmByUrl(url) {
   alert('Не удалось распознать ссылку на фильм');
 }
 
-function displayFilmInfo(film, data) {
-  console.log('[DISPLAY FILM] displayFilmInfo вызвана, film:', film, 'data:', data);
+function displayFilmInfo(film, data, showConfirmation = false) {
+  console.log('[DISPLAY FILM] displayFilmInfo вызвана, film:', film, 'data:', data, 'showConfirmation:', showConfirmation);
   
   // ОБЯЗАТЕЛЬНО скрываем поиск, если фильм опознался
   const searchSection = document.getElementById('search-section');
@@ -748,6 +843,44 @@ function displayFilmInfo(film, data) {
       }
     });
     actionsEl.appendChild(ticketsBtn);
+  }
+  
+  // Показываем подтверждение, если это fallback поиск
+  const confirmationEl = document.getElementById('film-confirmation');
+  if (showConfirmation && confirmationEl) {
+    confirmationEl.classList.remove('hidden');
+    
+    // Обработчики кнопок подтверждения
+    const confirmYesBtn = document.getElementById('confirm-film-yes');
+    const confirmNoBtn = document.getElementById('confirm-film-no');
+    
+    if (confirmYesBtn) {
+      confirmYesBtn.onclick = () => {
+        // Подтверждаем - скрываем блок подтверждения
+        if (confirmationEl) confirmationEl.classList.add('hidden');
+        fallbackFilmData = null;
+      };
+    }
+    
+    if (confirmNoBtn) {
+      confirmNoBtn.onclick = () => {
+        // Отклоняем - скрываем информацию о фильме
+        if (confirmationEl) confirmationEl.classList.add('hidden');
+        const filmInfoEl = document.getElementById('film-info');
+        if (filmInfoEl) {
+          filmInfoEl.classList.add('hidden');
+          filmInfoEl.style.display = 'none';
+        }
+        const searchSection = document.getElementById('search-section');
+        if (searchSection) {
+          searchSection.classList.remove('hidden');
+          searchSection.style.display = '';
+        }
+        fallbackFilmData = null;
+      };
+    }
+  } else if (confirmationEl) {
+    confirmationEl.classList.add('hidden');
   }
   
   // Убеждаемся, что film-info видим (filmInfo уже объявлен выше)

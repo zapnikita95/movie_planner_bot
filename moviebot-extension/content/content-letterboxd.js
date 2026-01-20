@@ -31,6 +31,32 @@ function extractImdbId() {
   return null;
 }
 
+function extractTitleAndYear() {
+  // Парсим название
+  // Селектор: #film-page-wrapper > div.col-17 > section.production-masthead.-shadowed.-productionscreen.-film > div > h1 > span
+  const titleElement = document.querySelector('#film-page-wrapper h1 span.name');
+  let title = null;
+  if (titleElement) {
+    title = titleElement.textContent.trim();
+    // Очищаем от HTML entities и нормализуем
+    title = title.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&apos;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, ' ').trim();
+  }
+  
+  // Парсим год
+  // Селектор: #film-page-wrapper > div.col-17 > section.production-masthead.-shadowed.-productionscreen.-film > div > div > span > a
+  const yearElement = document.querySelector('#film-page-wrapper section.production-masthead div span a[href*="/films/year/"]');
+  let year = null;
+  if (yearElement) {
+    const yearText = yearElement.textContent.trim();
+    const yearMatch = yearText.match(/\d{4}/);
+    if (yearMatch) {
+      year = parseInt(yearMatch[0]);
+    }
+  }
+  
+  return { title, year };
+}
+
 // Отправляем imdb_id в background script
 const imdbId = extractImdbId();
 
@@ -40,6 +66,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ imdbId: imdbId || null });
     return true;
   }
+  if (message.action === 'get_letterboxd_title_year') {
+    const { title, year } = extractTitleAndYear();
+    sendResponse({ title, year });
+    return true;
+  }
 });
 
 if (imdbId) {
@@ -47,19 +78,4 @@ if (imdbId) {
     action: "found_imdb_id", 
     imdbId: imdbId 
   });
-} else {
-  // Fallback: отправляем название и год
-  const titleElem = document.querySelector('h1.filmtitle, h1.headline-1');
-  const yearElem = document.querySelector('small.releaseyear, .releaseyear');
-  
-  if (titleElem && yearElem) {
-    const title = titleElem.textContent.trim();
-    const year = yearElem.textContent.replace(/[()]/g, '').trim();
-    
-    chrome.runtime.sendMessage({
-      action: "letterboxd_fallback",
-      title: title,
-      year: year
-    });
-  }
 }

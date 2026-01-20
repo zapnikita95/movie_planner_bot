@@ -2421,6 +2421,73 @@ def create_web_app(bot):
             resp = jsonify({"success": False, "error": "server error"})
             return resp, 500
     
+    @app.route('/api/extension/search-film-by-keyword', methods=['GET', 'OPTIONS'])
+    def search_film_by_keyword():
+        """Поиск фильма по keyword и году"""
+        # Обработка preflight запроса
+        if request.method == 'OPTIONS':
+            logger.info("[EXTENSION API] OPTIONS preflight request for /api/extension/search-film-by-keyword")
+            response = jsonify({'status': 'ok'})
+            return response
+        
+        keyword = request.args.get('keyword')
+        year = request.args.get('year', type=int)
+        
+        if not keyword:
+            resp = jsonify({"success": False, "error": "keyword required"})
+            return resp, 400
+        
+        try:
+            from moviebot.config import KP_TOKEN
+            import requests
+            
+            headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
+            url = "https://kinopoiskapiunofficial.tech/api/v2.2/films"
+            params = {
+                'order': 'RATING',
+                'type': 'ALL',
+                'ratingFrom': 0,
+                'ratingTo': 10,
+                'keyword': keyword,
+                'page': 1
+            }
+            
+            # Если указан год, добавляем диапазон ±1 год
+            if year:
+                params['yearFrom'] = year - 1
+                params['yearTo'] = year + 1
+            
+            response = requests.get(url, headers=headers, params=params, timeout=15)
+            
+            if response.status_code == 200:
+                data = response.json()
+                items = data.get('items', [])
+                if items and len(items) > 0:
+                    # Берем первый результат
+                    film = items[0]
+                    kp_id = film.get('kinopoiskId') or film.get('filmId')
+                    resp = jsonify({
+                        "success": True,
+                        "kp_id": str(kp_id) if kp_id else None,
+                        "film": {
+                            "kinopoiskId": kp_id,
+                            "nameRu": film.get('nameRu'),
+                            "nameOriginal": film.get('nameOriginal'),
+                            "year": film.get('year')
+                        }
+                    })
+                    return resp
+                else:
+                    resp = jsonify({"success": False, "error": "film not found"})
+                    return resp, 404
+            else:
+                resp = jsonify({"success": False, "error": "api error"})
+                return resp, 500
+        except Exception as e:
+            logger.error(f"Ошибка поиска фильма по keyword: {e}", exc_info=True)
+            resp = jsonify({"success": False, "error": "server error"})
+            return resp, 500
+    
     logger.info(f"[WEB APP] ===== FLASK ПРИЛОЖЕНИЕ СОЗДАНО =====")
     logger.info(f"[WEB APP] Зарегистрированные роуты: {[str(rule) for rule in app.url_map.iter_rules()]}")
     logger.info(f"[WEB APP] Возвращаем app: {app}")
