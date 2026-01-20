@@ -13,9 +13,11 @@ let urlRequestHistory = []; // История запросов для защит
 function resetExtensionState() {
   currentFilm = null;
   isProcessing = false;
-  // Очищаем форму планирования
+  
+  // Скрываем форму планирования (ОБЯЗАТЕЛЬНО!)
   const planningForm = document.getElementById('planning-form');
   if (planningForm) planningForm.classList.add('hidden');
+  
   // Очищаем информацию о фильме
   const filmInfo = document.getElementById('film-info');
   if (filmInfo) {
@@ -29,12 +31,15 @@ function resetExtensionState() {
     if (statusEl) statusEl.innerHTML = '';
     if (actionsEl) actionsEl.innerHTML = '';
   }
+  
   // Скрываем результаты поиска
   const searchResults = document.getElementById('search-results');
   if (searchResults) searchResults.classList.add('hidden');
-  // Скрываем секцию поиска (она показывается только если фильм не опознался)
+  
+  // Скрываем секцию поиска (она показывается ТОЛЬКО после определения, что фильм не опознался)
   const searchSection = document.getElementById('search-section');
   if (searchSection) searchSection.classList.add('hidden');
+  
   // Очищаем поле поиска
   const searchInput = document.getElementById('search-input');
   if (searchInput) searchInput.value = '';
@@ -132,9 +137,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
   
-  // Убеждаемся, что форма планирования скрыта изначально
+  // ОБЯЗАТЕЛЬНО скрываем форму планирования изначально
   const planningForm = document.getElementById('planning-form');
   if (planningForm) planningForm.classList.add('hidden');
+  
+  // ОБЯЗАТЕЛЬНО скрываем поиск изначально
+  const searchSection = document.getElementById('search-section');
+  if (searchSection) searchSection.classList.add('hidden');
   
   // Очищаем состояние при каждом открытии
   resetExtensionState();
@@ -224,9 +233,12 @@ async function detectAndLoadFilm(url) {
     return;
   }
   
-  // Скрываем поиск пока загружаем фильм
+  // ОБЯЗАТЕЛЬНО скрываем поиск и форму планирования ПЕРЕД началом загрузки
   const searchSection = document.getElementById('search-section');
   if (searchSection) searchSection.classList.add('hidden');
+  
+  const planningForm = document.getElementById('planning-form');
+  if (planningForm) planningForm.classList.add('hidden');
   
   // Получаем элемент filmInfo один раз для всей функции
   const filmInfo = document.getElementById('film-info');
@@ -341,24 +353,24 @@ async function detectAndLoadFilm(url) {
       return;
     }
     
-    // Если не распознан - скрываем информацию о фильме и показываем поиск
+    // Если не распознан - скрываем информацию о фильме
     if (filmInfo) filmInfo.classList.add('hidden');
     
-    // Показываем поиск только после того, как стало понятно, что фильм не опознался
+    // Показываем поиск ТОЛЬКО после того, как стало понятно, что фильм не опознался
+    // Даем небольшую задержку, чтобы пользователь увидел, что загрузка завершена
     setTimeout(() => {
       const searchSection = document.getElementById('search-section');
       if (searchSection) searchSection.classList.remove('hidden');
-    }, 100);
+    }, 300);
   } catch (error) {
     console.error('Ошибка определения фильма:', error);
-    const filmInfo = document.getElementById('film-info');
     if (filmInfo) filmInfo.classList.add('hidden');
     
-    // Показываем поиск только после того, как стало понятно, что фильм не опознался
+    // Показываем поиск ТОЛЬКО после того, как стало понятно, что фильм не опознался
     setTimeout(() => {
       const searchSection = document.getElementById('search-section');
       if (searchSection) searchSection.classList.remove('hidden');
-    }, 100);
+    }, 300);
   }
 }
 
@@ -551,11 +563,11 @@ async function loadFilmByUrl(url) {
 function displayFilmInfo(film, data) {
   console.log('[DISPLAY FILM] displayFilmInfo вызвана, film:', film, 'data:', data);
   
-  // Скрываем поиск, если фильм опознался
+  // ОБЯЗАТЕЛЬНО скрываем поиск, если фильм опознался
   const searchSection = document.getElementById('search-section');
   if (searchSection) searchSection.classList.add('hidden');
   
-  // Убеждаемся, что форма планирования скрыта
+  // ОБЯЗАТЕЛЬНО скрываем форму планирования (она показывается ТОЛЬКО при клике на кнопку)
   const planningForm = document.getElementById('planning-form');
   if (planningForm) planningForm.classList.add('hidden');
   
