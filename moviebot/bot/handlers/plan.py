@@ -33,6 +33,9 @@ logger = logging.getLogger(__name__)
 days_full = DAYS_FULL
 months_map = MONTHS_MAP
 
+# Логируем, что обработчики на уровне модуля загружены
+logger.info("[PLAN.PY] Модуль plan.py загружен, обработчики на уровне модуля будут зарегистрированы")
+
 
 def process_plan(bot, user_id, chat_id, link, plan_type, day_or_date, message_date_utc=None):
     """
