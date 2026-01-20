@@ -704,8 +704,7 @@ function displayFilmInfo(film, data) {
   });
   actionsEl.appendChild(planBtn);
   
-  // Убеждаемся, что film-info видим
-  const filmInfo = document.getElementById('film-info');
+  // Убеждаемся, что film-info видим (filmInfo уже объявлен выше)
   if (filmInfo) {
     filmInfo.classList.remove('hidden');
     filmInfo.style.display = ''; // Убираем style.display = 'none'
