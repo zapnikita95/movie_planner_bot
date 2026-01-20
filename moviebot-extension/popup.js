@@ -617,6 +617,13 @@ function displayFilmInfo(film, data) {
   
   console.log('[DISPLAY FILM] currentFilm установлен:', currentFilm, 'kp_id:', currentFilm.kp_id);
   
+  // ОБЯЗАТЕЛЬНО показываем блок film-info
+  const filmInfo = document.getElementById('film-info');
+  if (filmInfo) {
+    filmInfo.classList.remove('hidden');
+    filmInfo.style.display = ''; // Убираем style.display = 'none'
+  }
+  
   const titleEl = document.getElementById('film-title');
   const yearEl = document.getElementById('film-year');
   if (titleEl) titleEl.textContent = film.title;
@@ -689,7 +696,12 @@ function displayFilmInfo(film, data) {
   });
   actionsEl.appendChild(planBtn);
   
-  document.getElementById('film-info').classList.remove('hidden');
+  // Убеждаемся, что film-info видим
+  const filmInfo = document.getElementById('film-info');
+  if (filmInfo) {
+    filmInfo.classList.remove('hidden');
+    filmInfo.style.display = ''; // Убираем style.display = 'none'
+  }
 }
 
 async function addFilmToDatabase(kpId) {
