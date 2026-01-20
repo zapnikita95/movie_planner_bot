@@ -1817,6 +1817,12 @@ def create_web_app(bot):
     @app.route('/api/extension/add-film', methods=['POST', 'OPTIONS'])
     def add_film_to_database():
         """Добавление фильма в базу данных"""
+        # Импорты в начале функции
+        from moviebot.api.kinopoisk_api import extract_movie_info
+        from moviebot.database.db_connection import get_db_connection, get_db_cursor
+        from moviebot.config import KP_TOKEN
+        import requests
+        
         # Обработка preflight запроса
         if request.method == 'OPTIONS':
             logger.info("[EXTENSION API] OPTIONS preflight request for /api/extension/add-film")
@@ -1827,10 +1833,6 @@ def create_web_app(bot):
         logger.info(f"[EXTENSION API] POST /api/extension/add-film - method={request.method}, is_json={request.is_json}, content_type={request.content_type}")
         data = request.get_json() if request.is_json else {}
         logger.info(f"[EXTENSION API] POST /api/extension/add-film - raw_data={data}, kp_id={data.get('kp_id')}, chat_id={data.get('chat_id')}")
-        from moviebot.api.kinopoisk_api import extract_movie_info
-        from moviebot.database.db_connection import get_db_connection, get_db_cursor
-        from moviebot.config import KP_TOKEN
-        import requests
         
         # Проверяем, что KP_TOKEN загружен
         if not KP_TOKEN:
