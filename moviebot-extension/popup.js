@@ -528,6 +528,7 @@ async function loadFilmByImdbId(imdbId) {
     const filmInfo = document.getElementById('film-info');
     if (filmInfo) {
       filmInfo.classList.remove('hidden');
+      filmInfo.style.display = ''; // Убираем style.display = 'none'
       const titleEl = document.getElementById('film-title');
       const yearEl = document.getElementById('film-year');
       const statusEl = document.getElementById('film-status');
@@ -556,6 +557,11 @@ async function loadFilmByImdbId(imdbId) {
     if (json.success) {
       displayFilmInfo(json.film, json);
     } else {
+      const filmInfoEl = document.getElementById('film-info');
+      if (filmInfoEl) {
+        filmInfoEl.classList.remove('hidden');
+        filmInfoEl.style.display = ''; // Убираем style.display = 'none'
+      }
       const titleEl = document.getElementById('film-title');
       const yearEl = document.getElementById('film-year');
       if (titleEl) titleEl.textContent = 'Фильм не найден';
@@ -566,6 +572,7 @@ async function loadFilmByImdbId(imdbId) {
     const filmInfo = document.getElementById('film-info');
     if (filmInfo) {
       filmInfo.classList.remove('hidden');
+      filmInfo.style.display = ''; // Убираем style.display = 'none'
       const titleEl = document.getElementById('film-title');
       const yearEl = document.getElementById('film-year');
       if (titleEl) titleEl.textContent = 'Ошибка загрузки';
