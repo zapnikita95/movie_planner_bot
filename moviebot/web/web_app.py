@@ -1899,7 +1899,8 @@ def create_web_app(bot):
                     title = info.get('title', 'Неизвестный фильм')
                     year = info.get('year', '')
                     type_emoji = "📺" if is_series else "🎬"
-                    text = f"{type_emoji} <b>{title}</b> ({year})\n\n✅ Фильм добавлен в базу через расширение браузера"
+                    type_text = "Сериал" if is_series else "Фильм"
+                    text = f"{type_emoji} <b>{title}</b> ({year})\n\n✅ {type_text} добавлен в базу через расширение браузера"
                     
                     markup = InlineKeyboardMarkup()
                     markup.add(InlineKeyboardButton("📖 К описанию", callback_data=f"show_film:{kp_id}"))
