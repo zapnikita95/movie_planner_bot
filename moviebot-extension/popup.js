@@ -228,9 +228,11 @@ async function detectAndLoadFilm(url) {
   const searchSection = document.getElementById('search-section');
   if (searchSection) searchSection.classList.add('hidden');
   
+  // Получаем элемент filmInfo один раз для всей функции
+  const filmInfo = document.getElementById('film-info');
+  
   try {
     // Показываем индикатор загрузки
-    const filmInfo = document.getElementById('film-info');
     if (filmInfo) {
       filmInfo.classList.remove('hidden');
       const titleEl = document.getElementById('film-title');
@@ -340,7 +342,6 @@ async function detectAndLoadFilm(url) {
     }
     
     // Если не распознан - скрываем информацию о фильме и показываем поиск
-    const filmInfo = document.getElementById('film-info');
     if (filmInfo) filmInfo.classList.add('hidden');
     
     // Показываем поиск только после того, как стало понятно, что фильм не опознался
