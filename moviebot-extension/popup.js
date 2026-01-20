@@ -99,10 +99,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   const bindBtn = document.getElementById('bind-btn');
   if (bindBtn) bindBtn.addEventListener('click', handleBind);
   
-  const logoutBtn = document.getElementById('logout-btn');
-  if (logoutBtn) {
-    logoutBtn.addEventListener('click', handleLogout);
-    logoutBtn.title = 'Нажмите, чтобы отвязать аккаунт';
+  const logoutLink = document.getElementById('logout-link');
+  if (logoutLink) {
+    logoutLink.addEventListener('click', handleLogout);
   }
   
   const createPlanBtn = document.getElementById('create-plan-btn');
@@ -140,7 +139,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Очищаем состояние при каждом открытии
   resetExtensionState();
   
-  // Обработчик поиска
+  // Поиск показывается только если фильм не опознался (уже скрыт по умолчанию в HTML)
+  
+  // Обработчик поиска (добавляем только если секция поиска видима)
+  const searchSection = document.getElementById('search-section');
   const searchBtn = document.getElementById('search-btn');
   const searchInput = document.getElementById('search-input');
   if (searchBtn && searchInput) {
@@ -222,13 +224,24 @@ async function detectAndLoadFilm(url) {
     return;
   }
   
+  // Скрываем поиск пока загружаем фильм
+  const searchSection = document.getElementById('search-section');
+  if (searchSection) searchSection.classList.add('hidden');
+  
   try {
     // Показываем индикатор загрузки
-    document.getElementById('film-info').classList.remove('hidden');
-    document.getElementById('film-title').textContent = 'Загружаем информацию о фильме';
-    document.getElementById('film-year').textContent = '';
-    document.getElementById('film-status').innerHTML = '';
-    document.getElementById('film-actions').innerHTML = '';
+    const filmInfo = document.getElementById('film-info');
+    if (filmInfo) {
+      filmInfo.classList.remove('hidden');
+      const titleEl = document.getElementById('film-title');
+      if (titleEl) titleEl.textContent = 'Загружаем информацию о фильме';
+      const yearEl = document.getElementById('film-year');
+      if (yearEl) yearEl.textContent = '';
+      const statusEl = document.getElementById('film-status');
+      if (statusEl) statusEl.innerHTML = '';
+      const actionsEl = document.getElementById('film-actions');
+      if (actionsEl) actionsEl.innerHTML = '';
+    }
     
     // Кинопоиск
     const kpMatch = url.match(/kinopoisk\.ru\/(film|series)\/(\d+)/i);
@@ -326,21 +339,25 @@ async function detectAndLoadFilm(url) {
       return;
     }
     
-    // Если не распознан - скрываем информацию о фильме
+    // Если не распознан - скрываем информацию о фильме и показываем поиск
     const filmInfo = document.getElementById('film-info');
     if (filmInfo) filmInfo.classList.add('hidden');
     
-    // Если фильм не опознался - показываем поиск
-    const searchSection = document.getElementById('search-section');
-    if (searchSection) searchSection.classList.remove('hidden');
+    // Показываем поиск только после того, как стало понятно, что фильм не опознался
+    setTimeout(() => {
+      const searchSection = document.getElementById('search-section');
+      if (searchSection) searchSection.classList.remove('hidden');
+    }, 100);
   } catch (error) {
     console.error('Ошибка определения фильма:', error);
     const filmInfo = document.getElementById('film-info');
     if (filmInfo) filmInfo.classList.add('hidden');
     
-    // Если фильм не опознался - показываем поиск
-    const searchSection = document.getElementById('search-section');
-    if (searchSection) searchSection.classList.remove('hidden');
+    // Показываем поиск только после того, как стало понятно, что фильм не опознался
+    setTimeout(() => {
+      const searchSection = document.getElementById('search-section');
+      if (searchSection) searchSection.classList.remove('hidden');
+    }, 100);
   }
 }
 
@@ -536,6 +553,10 @@ function displayFilmInfo(film, data) {
   // Скрываем поиск, если фильм опознался
   const searchSection = document.getElementById('search-section');
   if (searchSection) searchSection.classList.add('hidden');
+  
+  // Убеждаемся, что форма планирования скрыта
+  const planningForm = document.getElementById('planning-form');
+  if (planningForm) planningForm.classList.add('hidden');
   
   // Очищаем предыдущее состояние
   currentFilm = null;
@@ -802,27 +823,43 @@ async function loadFilmByKpId(kpId) {
   }
 }
 
-function showPlanningForm() {
-  // Если фильм не в базе, сначала добавляем его
+async function showPlanningForm() {
+  // Если фильм не в базе, сначала автоматически добавляем его
   if (!currentFilm || !currentFilm.film_id) {
     if (currentFilm && currentFilm.kp_id) {
       // Автоматически добавляем в базу, если еще не добавлен
-      addFilmToDatabase(currentFilm.kp_id).then(() => {
-        // После добавления показываем форму
-        if (currentFilm && currentFilm.film_id) {
-          document.getElementById('planning-form').classList.remove('hidden');
-          initializePlanningForm();
+      try {
+        await addFilmToDatabase(currentFilm.kp_id);
+        // После добавления перезагружаем информацию о фильме
+        if (currentFilm.kp_id) {
+          await loadFilmByKpId(currentFilm.kp_id);
+        } else if (currentFilm.imdb_id) {
+          await loadFilmByImdbId(currentFilm.imdb_id);
         }
-      });
+        // Проверяем, что фильм теперь в базе
+        if (currentFilm && currentFilm.film_id) {
+          const planningForm = document.getElementById('planning-form');
+          if (planningForm) {
+            planningForm.classList.remove('hidden');
+            initializePlanningForm();
+          }
+        }
+      } catch (err) {
+        console.error('Ошибка при автоматическом добавлении фильма:', err);
+        alert('Не удалось добавить фильм в базу. Попробуйте еще раз.');
+      }
       return;
     } else {
-      alert('Сначала добавьте фильм в базу');
+      alert('Не удалось определить фильм. Попробуйте добавить его вручную.');
       return;
     }
   }
   
-  document.getElementById('planning-form').classList.remove('hidden');
-  initializePlanningForm();
+  const planningForm = document.getElementById('planning-form');
+  if (planningForm) {
+    planningForm.classList.remove('hidden');
+    initializePlanningForm();
+  }
 }
 
 function initializePlanningForm() {
@@ -941,15 +978,21 @@ function setPlanType(type) {
 async function loadStreamingServices(kpId) {
   if (!kpId) return;
   
+  const streamingEl = document.getElementById('streaming-services');
+  const select = document.getElementById('streaming-service');
+  
+  if (!streamingEl || !select) return;
+  
   try {
     const response = await fetch(`${API_BASE_URL}/api/extension/streaming-services?kp_id=${kpId}`);
     if (!response.ok) {
       console.error('Ошибка загрузки стриминговых сервисов:', response.status);
+      // Скрываем поле, если не удалось загрузить
+      streamingEl.classList.add('hidden');
       return;
     }
     
     const json = await response.json();
-    const select = document.getElementById('streaming-service');
     
     // Очищаем текущие опции (кроме первой "Выберите сервис")
     select.innerHTML = '<option value="">Выберите сервис</option>';
@@ -961,9 +1004,16 @@ async function loadStreamingServices(kpId) {
         option.textContent = service.name;
         select.appendChild(option);
       });
+      // Показываем поле только если есть сервисы
+      streamingEl.classList.remove('hidden');
+    } else {
+      // Скрываем поле, если нет сервисов
+      streamingEl.classList.add('hidden');
     }
   } catch (err) {
     console.error('Ошибка загрузки стриминговых сервисов:', err);
+    // Скрываем поле при ошибке
+    streamingEl.classList.add('hidden');
   }
 }
 
@@ -1069,11 +1119,48 @@ async function handleCreatePlan() {
     if (json.success) {
       alert('✅ План создан!');
       
-      // Кнопка билетов уже показывается/скрывается в setPlanType в зависимости от выбора "Дома"/"В кино"
+      // Показываем кнопку "Добавить билеты" после успешного планирования, если выбрано "В кино"
+      const addTicketsBtn = document.getElementById('add-tickets-btn');
+      if (selectedPlanType === 'cinema' && addTicketsBtn && hasTicketsAccess && json.plan_id) {
+        addTicketsBtn.classList.remove('hidden');
+        addTicketsBtn.disabled = false;
+        addTicketsBtn.title = '';
+        // Инициируем сообщение в боте для загрузки билетов
+        addTicketsBtn.onclick = async () => {
+          try {
+            // Отправляем запрос в бот для начала процесса загрузки билетов
+            const response = await fetch(`${API_BASE_URL}/api/extension/init-ticket-upload`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                chat_id: chatId,
+                user_id: userId,
+                plan_id: json.plan_id
+              })
+            });
+            
+            if (response.ok) {
+              const result = await response.json();
+              if (result.success) {
+                alert('✅ Сообщение отправлено в бота. Отправьте фото или файл с билетом(ами) в чат.');
+              } else {
+                alert('Ошибка: ' + (result.error || 'неизвестная ошибка'));
+              }
+            } else {
+              const errorJson = await response.json();
+              alert('Ошибка: ' + (errorJson.error || 'не удалось отправить сообщение'));
+            }
+          } catch (err) {
+            console.error('Ошибка инициализации загрузки билетов:', err);
+            alert('Ошибка. Попробуйте отправить билет напрямую в чат с ботом.');
+          }
+        };
+      }
       
-      // Закрываем форму планирования через 2 секунды, чтобы пользователь мог нажать кнопку билетов
+      // Закрываем форму планирования через 3 секунды, чтобы пользователь мог нажать кнопку билетов
       setTimeout(() => {
-        document.getElementById('planning-form').classList.add('hidden');
+        const planningForm = document.getElementById('planning-form');
+        if (planningForm) planningForm.classList.add('hidden');
         // Завершаем процесс работы с фильмом - очищаем состояние
         resetExtensionState();
         // Очищаем информацию о фильме
@@ -1081,7 +1168,7 @@ async function handleCreatePlan() {
         if (filmInfo) {
           filmInfo.classList.add('hidden');
         }
-      }, 2000);
+      }, 3000);
     } else {
       alert('Ошибка создания плана: ' + (json.error || 'неизвестная ошибка'));
     }

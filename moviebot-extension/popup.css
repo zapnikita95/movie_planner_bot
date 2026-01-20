@@ -42,22 +42,19 @@ body {
     padding: 2px;
 }
 
-.logout-btn {
-    position: absolute;
-    top: 0;
-    right: 0;
-    background: transparent;
-    border: none;
-    font-size: 16px;
+.logout-link {
+    text-align: center;
+    color: rgba(102, 102, 102, 0.6);
+    font-size: 12px;
     cursor: pointer;
-    padding: 5px;
-    color: #666;
+    padding: 10px;
+    margin-top: 10px;
     transition: color 0.2s;
-    width: auto;
+    user-select: none;
 }
 
-.logout-btn:hover {
-    color: #dc3545;
+.logout-link:hover {
+    color: rgba(102, 102, 102, 0.8);
 }
 
 h1 {

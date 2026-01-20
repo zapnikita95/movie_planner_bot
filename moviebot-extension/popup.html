@@ -30,9 +30,8 @@
                 <div class="header">
                     <img id="logo-img" src="icons/icon48.png" alt="Logo" class="logo">
                     <h1>Movie Planner Bot</h1>
-                    <button id="logout-btn" class="logout-btn" title="Нажмите, чтобы отвязать аккаунт">❌</button>
                 </div>
-                <div id="search-section" class="search-section">
+                <div id="search-section" class="search-section hidden">
                     <div class="form-group">
                         <input type="text" id="search-input" class="input" placeholder="Поиск фильмов и сериалов...">
                         <button id="search-btn" class="btn btn-secondary" style="margin-top: 10px;">🔍 Найти</button>
@@ -76,6 +75,7 @@
                     <button id="add-tickets-btn" class="btn btn-secondary hidden" style="margin-top: 10px;" disabled>🎟️ Добавить билеты</button>
                 </div>
             </div>
+            <div id="logout-link" class="logout-link">Отвязать аккаунт</div>
         </div>
     </div>
     <script src="popup.js"></script>

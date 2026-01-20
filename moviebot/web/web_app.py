@@ -2271,6 +2271,69 @@ def create_web_app(bot):
             resp = jsonify({"success": False, "error": "server error"})
             return resp, 500
     
+    @app.route('/api/extension/init-ticket-upload', methods=['POST', 'OPTIONS'])
+    def init_ticket_upload():
+        """Инициализация загрузки билетов для плана"""
+        # Обработка preflight запроса
+        if request.method == 'OPTIONS':
+            logger.info("[EXTENSION API] OPTIONS preflight request for /api/extension/init-ticket-upload")
+            response = jsonify({'status': 'ok'})
+            return response
+        
+        data = request.get_json() if request.is_json else {}
+        chat_id = data.get('chat_id')
+        user_id = data.get('user_id')
+        plan_id = data.get('plan_id')
+        
+        if not chat_id or not user_id or not plan_id:
+            resp = jsonify({"success": False, "error": "chat_id, user_id and plan_id required"})
+            return resp, 400
+        
+        try:
+            from moviebot.utils.helpers import has_tickets_access
+            from moviebot.states import user_ticket_state
+            from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+            from moviebot.bot.bot_init import bot
+            
+            # Проверяем подписку
+            if not has_tickets_access(chat_id, user_id):
+                resp = jsonify({"success": False, "error": "Нет доступа к билетам. Нужна подписка 'Билеты'."})
+                return resp, 403
+            
+            # Устанавливаем состояние для загрузки билетов
+            user_ticket_state[user_id] = {
+                'step': 'upload_ticket',
+                'plan_id': plan_id,
+                'chat_id': chat_id
+            }
+            
+            # Создаем клавиатуру с отменой
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("❌ Отмена", callback_data=f"cancel_ticket_upload:{plan_id}"))
+            
+            # Отправляем сообщение в бот
+            text = "🎟️ <b>Загрузка билетов</b>\n\nОтправьте фото или файл с билетом(ами).\n\n💡 В группе отправьте в ответ на это сообщение, в личке можно отправить следующим сообщением."
+            
+            sent_msg = bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                parse_mode='HTML',
+                reply_markup=markup
+            )
+            
+            # Сохраняем message_id для проверки реплаев в групповых чатах
+            if sent_msg:
+                user_ticket_state[user_id]['prompt_message_id'] = sent_msg.message_id
+            
+            logger.info(f"[EXTENSION API] Инициирована загрузка билетов для plan_id={plan_id}, chat_id={chat_id}, user_id={user_id}")
+            
+            resp = jsonify({"success": True, "message_id": sent_msg.message_id if sent_msg else None})
+            return resp
+        except Exception as e:
+            logger.error(f"[EXTENSION API] Ошибка инициализации загрузки билетов: {e}", exc_info=True)
+            resp = jsonify({"success": False, "error": "server error"})
+            return resp, 500
+    
     @app.route('/api/extension/check-subscription', methods=['GET', 'OPTIONS'])
     def check_subscription():
         """Проверка подписки пользователя/группы"""
