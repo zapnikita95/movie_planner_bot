@@ -2187,16 +2187,18 @@ def create_web_app(bot):
                     import pytz
                     
                     # Получаем информацию о фильме
-                    cursor.execute("SELECT title, kp_id, link FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
+                    cursor.execute("SELECT title, kp_id, link, is_series FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
                     film_row = cursor.fetchone()
                     if film_row:
                         title = film_row.get('title') if isinstance(film_row, dict) else film_row[0]
                         kp_id_plan = film_row.get('kp_id') if isinstance(film_row, dict) else film_row[1]
                         link = film_row.get('link') if isinstance(film_row, dict) else film_row[2]
+                        is_series_db = film_row.get('is_series') if isinstance(film_row, dict) else film_row[3]
                         
-                        # Определяем тип
-                        is_series_plan = '/series/' in link if link else False
+                        # Определяем тип (проверяем и поле is_series, и ссылку для надежности)
+                        is_series_plan = bool(is_series_db) or ('/series/' in link if link else False)
                         type_emoji = "📺" if is_series_plan else "🎬"
+                        type_text = "Сериал" if is_series_plan else "Фильм"
                         
                         # Форматируем дату и время
                         moscow_tz = pytz.timezone('Europe/Moscow')
@@ -2207,7 +2209,7 @@ def create_web_app(bot):
                         plan_type_text = "дома" if plan_type == 'home' else "в кино"
                         action_text = "обновлен" if existing_plan else "создан"
                         
-                        text = f"{type_emoji} <b>{title}</b>\n\n📅 План просмотра {action_text}:\n• {plan_type_text}\n• {date_str} в {time_str}"
+                        text = f"{type_emoji} <b>{title}</b>\n\n📅 План просмотра {type_text.lower()}а {action_text}:\n• {plan_type_text}\n• {date_str} в {time_str}"
                         
                         markup = InlineKeyboardMarkup()
                         markup.add(InlineKeyboardButton("📖 К описанию", callback_data=f"show_film:{kp_id_plan}"))
@@ -2464,6 +2466,8 @@ def create_web_app(bot):
                     # Берем первый результат
                     film = films[0]
                     kp_id = film.get('filmId')
+                    type_film = film.get('type', 'FILM').upper()
+                    is_series = type_film in ['TV_SERIES', 'MINI_SERIES']
                     resp = jsonify({
                         "success": True,
                         "kp_id": str(kp_id) if kp_id else None,
@@ -2472,7 +2476,9 @@ def create_web_app(bot):
                             "nameRu": film.get('nameRu'),
                             "nameEn": film.get('nameEn'),
                             "nameOriginal": film.get('nameEn') or film.get('nameRu'),
-                            "year": film.get('year')
+                            "year": film.get('year'),
+                            "type": type_film,
+                            "is_series": is_series
                         }
                     })
                     return resp
