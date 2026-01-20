@@ -9,7 +9,6 @@
     "activeTab",
     "scripting",
     "contextMenus",
-    "downloads",
     "notifications",
     "tabs"
   ],
@@ -21,8 +20,7 @@
     "*://*.afisha.ru/*",
     "*://*.kinoafisha.info/*",
     "*://kinoteatr.ru/*",
-    "*://karofilm.ru/*",
-    "https://api.telegram.org/*"
+    "*://karofilm.ru/*"
   ],
   "background": {
     "service_worker": "background.js"
