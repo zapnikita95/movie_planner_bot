@@ -1,5 +1,5 @@
 // content-tickets.js
-// Content script для билетных сайтов: добавляет ОДНУ кнопку "Добавить билеты к плану" в правом верхнем углу экрана
+// Content script для билетных сайтов: добавляет ОДНУ кнопку "Добавить билеты к плану" в правом верхнем углу экрана (перетаскиваемую)
 
 (function() {
   'use strict';
@@ -29,7 +29,7 @@
       const saved = localStorage.getItem('movieplanner_button_position');
       if (saved) {
         const pos = JSON.parse(saved);
-        return { top: pos.top || 20, right: pos.right || 20, left: pos.left, bottom: pos.bottom };
+        return { top: pos.top, right: pos.right, left: pos.left, bottom: pos.bottom };
       }
     } catch (e) {
       console.error('Ошибка загрузки позиции кнопки:', e);
@@ -55,7 +55,7 @@
     
     // Проверяем, есть ли кнопки скачивания или это страница расписания
     const isSchedulePage = window.location.href.includes('mos-kino.ru/schedule') || 
-                          window.location.href.includes('mos-kino.ru') && document.querySelector('table, .schedule, [class*="schedule"]');
+                          (window.location.href.includes('mos-kino.ru') && document.querySelector('table, .schedule, [class*="schedule"], [id*="schedule"]'));
     
     if (!hasDownloadButtons() && !isSchedulePage) {
       return;
@@ -67,12 +67,32 @@
     
     // Загружаем сохраненную позицию
     const savedPos = loadButtonPosition();
-    const buttonStyle = `
+    
+    // Устанавливаем начальную позицию
+    if (savedPos.left !== undefined) {
+      floatingButton.style.left = `${savedPos.left}px`;
+      floatingButton.style.right = 'auto';
+    } else if (savedPos.right !== undefined) {
+      floatingButton.style.right = `${savedPos.right}px`;
+      floatingButton.style.left = 'auto';
+    } else {
+      floatingButton.style.right = '20px';
+      floatingButton.style.left = 'auto';
+    }
+    
+    if (savedPos.top !== undefined) {
+      floatingButton.style.top = `${savedPos.top}px`;
+      floatingButton.style.bottom = 'auto';
+    } else if (savedPos.bottom !== undefined) {
+      floatingButton.style.bottom = `${savedPos.bottom}px`;
+      floatingButton.style.top = 'auto';
+    } else {
+      floatingButton.style.top = '20px';
+      floatingButton.style.bottom = 'auto';
+    }
+    
+    floatingButton.style.cssText += `
       position: fixed;
-      ${savedPos.left !== undefined ? `left: ${savedPos.left}px;` : ''}
-      ${savedPos.right !== undefined ? `right: ${savedPos.right}px;` : ''}
-      ${savedPos.top !== undefined ? `top: ${savedPos.top}px;` : ''}
-      ${savedPos.bottom !== undefined ? `bottom: ${savedPos.bottom}px;` : ''}
       z-index: 10000;
       padding: 12px 20px;
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -87,57 +107,32 @@
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
       user-select: none;
     `;
-    floatingButton.style.cssText = buttonStyle;
     
-    // Делаем кнопку перетаскиваемой
+    // Перетаскивание кнопки
     let isDragging = false;
     let dragStartX = 0;
     let dragStartY = 0;
-    let initialX = 0;
-    let initialY = 0;
-    let xOffset = 0;
-    let yOffset = 0;
-    let clickStartTime = 0;
+    let initialLeft = 0;
+    let initialTop = 0;
     let hasMoved = false;
-    
-    // Инициализируем смещения из сохраненной позиции
-    if (savedPos.left !== undefined) {
-      xOffset = savedPos.left;
-      floatingButton.style.left = `${savedPos.left}px`;
-      floatingButton.style.right = 'auto';
-    } else if (savedPos.right !== undefined) {
-      floatingButton.style.right = `${savedPos.right}px`;
-      floatingButton.style.left = 'auto';
-    }
-    if (savedPos.top !== undefined) {
-      yOffset = savedPos.top;
-      floatingButton.style.top = `${savedPos.top}px`;
-      floatingButton.style.bottom = 'auto';
-    } else if (savedPos.bottom !== undefined) {
-      floatingButton.style.bottom = `${savedPos.bottom}px`;
-      floatingButton.style.top = 'auto';
-    }
     
     floatingButton.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return; // Только левая кнопка мыши
       
-      clickStartTime = Date.now();
-      hasMoved = false;
       dragStartX = e.clientX;
       dragStartY = e.clientY;
+      hasMoved = false;
       
       // Получаем текущую позицию кнопки
       const rect = floatingButton.getBoundingClientRect();
-      initialX = rect.left;
-      initialY = rect.top;
-      xOffset = initialX;
-      yOffset = initialY;
+      initialLeft = rect.left;
+      initialTop = rect.top;
       
       e.preventDefault();
     });
     
     document.addEventListener('mousemove', (e) => {
-      if (!clickStartTime) return;
+      if (dragStartX === 0 && dragStartY === 0) return;
       
       const deltaX = Math.abs(e.clientX - dragStartX);
       const deltaY = Math.abs(e.clientY - dragStartY);
@@ -152,15 +147,15 @@
           floatingButton.style.userSelect = 'none';
         }
         
-        currentX = e.clientX - dragStartX + initialX;
-        currentY = e.clientY - dragStartY + initialY;
+        let newLeft = e.clientX - dragStartX + initialLeft;
+        let newTop = e.clientY - dragStartY + initialTop;
         
         // Ограничиваем перемещение границами экрана
-        currentX = Math.max(0, Math.min(currentX, window.innerWidth - floatingButton.offsetWidth));
-        currentY = Math.max(0, Math.min(currentY, window.innerHeight - floatingButton.offsetHeight));
+        newLeft = Math.max(0, Math.min(newLeft, window.innerWidth - floatingButton.offsetWidth));
+        newTop = Math.max(0, Math.min(newTop, window.innerHeight - floatingButton.offsetHeight));
         
-        floatingButton.style.left = `${currentX}px`;
-        floatingButton.style.top = `${currentY}px`;
+        floatingButton.style.left = `${newLeft}px`;
+        floatingButton.style.top = `${newTop}px`;
         floatingButton.style.right = 'auto';
         floatingButton.style.bottom = 'auto';
         floatingButton.style.transform = 'none';
@@ -185,8 +180,8 @@
         saveButtonPosition(position);
       }
       
-      clickStartTime = 0;
-      hasMoved = false;
+      dragStartX = 0;
+      dragStartY = 0;
     });
     
     floatingButton.addEventListener('mouseenter', () => {
