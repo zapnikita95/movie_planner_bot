@@ -721,6 +721,12 @@ async function loadFilmByUrl(url) {
 function displayFilmInfo(film, data, showConfirmation = false) {
   console.log('[DISPLAY FILM] displayFilmInfo вызвана, film:', film, 'data:', data, 'showConfirmation:', showConfirmation);
   
+  // ВСЕГДА сначала скрываем блок подтверждения, если это не fallback поиск
+  const confirmationEl = document.getElementById('film-confirmation');
+  if (confirmationEl && !showConfirmation) {
+    confirmationEl.classList.add('hidden');
+  }
+  
   // Если открыт режим auto_plan_cinema, автоматически открываем форму планирования
   if (window.autoPlanCinemaMode) {
     window.autoPlanCinemaMode = false; // Сбрасываем флаг
@@ -885,8 +891,7 @@ function displayFilmInfo(film, data, showConfirmation = false) {
     actionsEl.appendChild(ticketsBtn);
   }
   
-  // Показываем подтверждение, если это fallback поиск
-  const confirmationEl = document.getElementById('film-confirmation');
+  // Показываем подтверждение ТОЛЬКО если это fallback поиск
   if (showConfirmation && confirmationEl) {
     confirmationEl.classList.remove('hidden');
     
@@ -919,8 +924,6 @@ function displayFilmInfo(film, data, showConfirmation = false) {
         fallbackFilmData = null;
       };
     }
-  } else if (confirmationEl) {
-    confirmationEl.classList.add('hidden');
   }
   
   // Убеждаемся, что film-info видим (filmInfo уже объявлен выше)
