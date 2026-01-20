@@ -2423,7 +2423,7 @@ def create_web_app(bot):
     
     @app.route('/api/extension/search-film-by-keyword', methods=['GET', 'OPTIONS'])
     def search_film_by_keyword():
-        """Поиск фильма по keyword и году"""
+        """Поиск фильма по keyword и году (использует API v2.1 с форматом 'название год')"""
         # Обработка preflight запроса
         if request.method == 'OPTIONS':
             logger.info("[EXTENSION API] OPTIONS preflight request for /api/extension/search-film-by-keyword")
@@ -2442,37 +2442,36 @@ def create_web_app(bot):
             import requests
             
             headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
-            url = "https://kinopoiskapiunofficial.tech/api/v2.2/films"
+            
+            # Формируем поисковый запрос в формате "название год"
+            search_query = keyword
+            if year:
+                search_query = f"{keyword} {year}"
+            
+            # Используем API v2.1 для поиска
+            url = "https://kinopoiskapiunofficial.tech/api/v2.1/films/search-by-keyword"
             params = {
-                'order': 'RATING',
-                'type': 'ALL',
-                'ratingFrom': 0,
-                'ratingTo': 10,
-                'keyword': keyword,
+                'keyword': search_query,
                 'page': 1
             }
-            
-            # Если указан год, добавляем диапазон ±1 год
-            if year:
-                params['yearFrom'] = year - 1
-                params['yearTo'] = year + 1
             
             response = requests.get(url, headers=headers, params=params, timeout=15)
             
             if response.status_code == 200:
                 data = response.json()
-                items = data.get('items', [])
-                if items and len(items) > 0:
+                films = data.get('films', [])
+                if films and len(films) > 0:
                     # Берем первый результат
-                    film = items[0]
-                    kp_id = film.get('kinopoiskId') or film.get('filmId')
+                    film = films[0]
+                    kp_id = film.get('filmId')
                     resp = jsonify({
                         "success": True,
                         "kp_id": str(kp_id) if kp_id else None,
                         "film": {
                             "kinopoiskId": kp_id,
                             "nameRu": film.get('nameRu'),
-                            "nameOriginal": film.get('nameOriginal'),
+                            "nameEn": film.get('nameEn'),
+                            "nameOriginal": film.get('nameEn') or film.get('nameRu'),
                             "year": film.get('year')
                         }
                     })

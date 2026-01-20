@@ -552,35 +552,41 @@ async function loadFilmByImdbId(imdbId, source = 'imdb') {
     
     const response = await fetch(`${API_BASE_URL}/api/extension/film-info?imdb_id=${imdbId}&chat_id=${chatId}`);
     
-    if (!response.ok) {
-      let errorText = '';
-      try {
-        const errorJson = await response.json();
-        errorText = errorJson.error || 'неизвестная ошибка';
-      } catch (e) {
-        errorText = await response.text();
+    let json;
+    if (response.ok) {
+      json = await response.json();
+      
+      if (json.success && json.film && json.film.kp_id) {
+        displayFilmInfo(json.film, json);
+        return; // Успешно загрузили, выходим
       }
-      throw new Error(`HTTP error! status: ${response.status}, error: ${errorText}`);
     }
     
-    const json = await response.json();
-    
-    if (json.success && json.film && json.film.kp_id) {
-      displayFilmInfo(json.film, json);
+    // Если не удалось загрузить по imdb_id (404 или пустой результат), используем fallback
+    if (source === 'imdb' || source === 'letterboxd') {
+      await tryFallbackSearch(imdbId, source);
     } else {
-      // Fallback: если API вернул пустоту, пытаемся найти по названию и году
-      if (source === 'imdb' || source === 'letterboxd') {
-        await tryFallbackSearch(imdbId, source);
-      } else {
-        const filmInfoEl = document.getElementById('film-info');
-        if (filmInfoEl) {
-          filmInfoEl.classList.remove('hidden');
-          filmInfoEl.style.display = '';
+      const filmInfoEl = document.getElementById('film-info');
+      if (filmInfoEl) {
+        filmInfoEl.classList.remove('hidden');
+        filmInfoEl.style.display = '';
+      }
+      const titleEl = document.getElementById('film-title');
+      const yearEl = document.getElementById('film-year');
+      if (titleEl) titleEl.textContent = 'Фильм не найден';
+      if (yearEl) {
+        let errorText = 'Попробуйте другую ссылку';
+        if (response.ok && json) {
+          errorText = json.error || errorText;
+        } else if (!response.ok) {
+          try {
+            const errorJson = await response.json();
+            errorText = errorJson.error || errorText;
+          } catch (e) {
+            errorText = 'Ошибка загрузки';
+          }
         }
-        const titleEl = document.getElementById('film-title');
-        const yearEl = document.getElementById('film-year');
-        if (titleEl) titleEl.textContent = 'Фильм не найден';
-        if (yearEl) yearEl.textContent = json.error || 'Попробуйте другую ссылку';
+        yearEl.textContent = errorText;
       }
     }
   } catch (err) {
