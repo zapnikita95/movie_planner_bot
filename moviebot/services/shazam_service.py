@@ -1413,7 +1413,11 @@ def _detect_genre_from_keywords(keywords, query_en_lower, query_en_words):
     return detected_genres
 
 def _remove_wish_phrases(query):
-    """Удаляет мусорные фразы о желании посмотреть фильм из запроса"""
+    """
+    Удаляет мусорные фразы о желании посмотреть фильм и лишние конструкции из запроса.
+    Удаляет фразы типа "Фильм где", "главный герой", "его выбирают", "что бы спасти" и т.д.
+    Оставляет только ключевые слова, описывающие суть фильма.
+    """
     import re
     
     # Список фраз, которые нужно удалить (на русском и английском)
@@ -1489,14 +1493,90 @@ def _remove_wish_phrases(query):
         r'let us watch a movie',
     ]
     
+    # Дополнительные фразы-конструкции, которые размывают смысл запроса
+    # Эти фразы описывают не суть фильма, а обстоятельства сюжета или запроса
+    filler_phrases = [
+        # Русские конструкции
+        r'фильм где',
+        r'фильм в котором',
+        r'кино где',
+        r'кино в котором',
+        r'сериал где',
+        r'сериал в котором',
+        r'главный герой',
+        r'главная героиня',
+        r'герой которого',
+        r'героиня которой',
+        r'его выбирают',
+        r'её выбирают',
+        r'его отправляют',
+        r'её отправляют',
+        r'его посылают',
+        r'её посылают',
+        r'для полета',
+        r'для полёта',
+        r'в полет',
+        r'в полёт',
+        r'что бы',
+        r'чтобы',
+        r'что бы спасти',
+        r'чтобы спасти',
+        r'спасти людей',
+        r'спасти человечество',
+        r'спасти мир',
+        r'спасти планету',
+        r'в космос к',
+        r'в космос',
+        r'полет в космос',
+        r'полёт в космос',
+        r'в космос к',
+        # Предлоги и союзы, которые не несут смысловой нагрузки
+        r'\bк\b',  # "к черной дыре" → "черная дыра"
+        r'\bи\b',  # "летчик и его" → "летчик его" (но нужно аккуратно)
+        r'\bего\b',  # "и его выбирают" → "выбирают"
+        r'\bеё\b',
+        # Английские конструкции
+        r'film where',
+        r'movie where',
+        r'main character',
+        r'protagonist',
+        r'hero who',
+        r'heroine who',
+        r'he is chosen',
+        r'she is chosen',
+        r'he is sent',
+        r'she is sent',
+        r'to save',
+        r'save people',
+        r'save humanity',
+        r'save the world',
+        r'save the planet',
+        r'into space to',
+        r'to space to',
+        r'in space to',
+    ]
+    
     cleaned_query = query
+    # Удаляем фразы о желании посмотреть
     for phrase in wish_phrases:
-        # Удаляем фразу с пробелами до и после (регистронезависимо)
         pattern = re.compile(r'\b' + phrase + r'\b', re.IGNORECASE)
+        cleaned_query = pattern.sub('', cleaned_query)
+    
+    # Удаляем лишние конструкции
+    for phrase in filler_phrases:
+        # Для предлогов и коротких слов используем границы слов
+        if phrase.startswith(r'\b') and phrase.endswith(r'\b'):
+            pattern = re.compile(phrase, re.IGNORECASE)
+        else:
+            pattern = re.compile(r'\b' + phrase + r'\b', re.IGNORECASE)
         cleaned_query = pattern.sub('', cleaned_query)
     
     # Убираем лишние пробелы
     cleaned_query = re.sub(r'\s+', ' ', cleaned_query).strip()
+    
+    # Удаляем предлоги в начале и конце (если остались)
+    cleaned_query = re.sub(r'^(в|на|к|с|из|от|для|по|за|при|под|над|о|об|про|у)\s+', '', cleaned_query, flags=re.IGNORECASE)
+    cleaned_query = re.sub(r'\s+(в|на|к|с|из|от|для|по|за|при|под|над|о|об|про|у)$', '', cleaned_query, flags=re.IGNORECASE)
     
     return cleaned_query
 
