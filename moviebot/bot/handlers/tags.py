@@ -69,10 +69,12 @@ def check_add_tag_reply(message):
     if message.reply_to_message:
         prompt_message_id = state.get('prompt_message_id')
         if prompt_message_id and message.reply_to_message.message_id == prompt_message_id:
+            logger.info(f"[CHECK ADD TAG REPLY] ✅ Сообщение является ответом на промпт /add_tags для user_id={user_id}")
             return True
     
     # Если это не ответ, но пользователь в состоянии - тоже обрабатываем
     # (пользователь может отправить следующее сообщение без реплая)
+    logger.info(f"[CHECK ADD TAG REPLY] ✅ Пользователь в состоянии /add_tags, обрабатываем сообщение для user_id={user_id}")
     return True
 
 
@@ -83,7 +85,7 @@ def handle_add_tag_reply(message):
     chat_id = message.chat.id
     text = message.text or ""
     
-    logger.info(f"[ADD TAG] Обработка сообщения от user_id={user_id}, text_length={len(text)}")
+    logger.info(f"[ADD TAG] ===== START: Обработка сообщения от user_id={user_id}, text_length={len(text)}, message_id={message.message_id}")
     
     try:
         # Извлекаем название тега из кавычек
