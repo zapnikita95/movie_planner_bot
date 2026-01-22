@@ -513,14 +513,23 @@ def handle_tag_confirm(call):
                 cursor.execute('SELECT id, name FROM tags WHERE short_code = %s', (short_code,))
                 row = cursor.fetchone()
                 if row:
-                    tag_info = {'id': row[0], 'name': row[1]}
+                    tag_info = {
+                        'id': row.get('id') if isinstance(row, dict) else row[0],
+                        'name': row.get('name') if isinstance(row, dict) else row[1]
+                    }
                     cursor.execute('''
                         SELECT kp_id, is_series 
                         FROM tag_movies 
                         WHERE tag_id = %s
                         ORDER BY added_at
                     ''', (tag_info['id'],))
-                    tag_movies = cursor.fetchall()
+                    rows = cursor.fetchall()
+                    tag_movies = []
+                    for row_item in rows:
+                        if isinstance(row_item, dict):
+                            tag_movies.append((row_item.get('kp_id'), row_item.get('is_series')))
+                        else:
+                            tag_movies.append((row_item[0], row_item[1]))
         finally:
             try:
                 cursor.close()
