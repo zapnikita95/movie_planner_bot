@@ -18,9 +18,10 @@ def is_admin(user_id):
         bool: True если пользователь администратор
     """
     conn_local = get_db_connection()
-    cursor_local = get_db_cursor()
+    cursor_local = None
     
     try:
+        cursor_local = conn_local.cursor()
         with db_lock:
             cursor_local.execute('SELECT id FROM admins WHERE user_id = %s AND is_active = TRUE', (user_id,))
             row = cursor_local.fetchone()
@@ -29,10 +30,11 @@ def is_admin(user_id):
         logger.error(f"Ошибка при проверке прав администратора: {e}", exc_info=True)
         return False
     finally:
-        try:
-            cursor_local.close()
-        except:
-            pass
+        if cursor_local:
+            try:
+                cursor_local.close()
+            except:
+                pass
         try:
             conn_local.close()
         except:

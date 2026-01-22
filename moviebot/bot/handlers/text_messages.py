@@ -1887,15 +1887,33 @@ def main_text_handler(message):
             # После обработки состояние очищается в самом handler'е
     
     # Пропускаем сообщения со ссылками на Кинопоиск без реплая - они обрабатываются отдельным handler
+    # НО: не пропускаем, если пользователь создаёт подборку через /add_tags
     if text and ('kinopoisk.ru' in text.lower() or 'kinopoisk.com' in text.lower()):
-        # Проверяем, что это не реплай на промпт планирования или другие специальные случаи
-        if not message.reply_to_message or not any(prompt in (message.reply_to_message.text or "") for prompt in [
-            "Пришлите ссылку или ID фильма в ответном сообщении",
-            "Пришлите в ответном сообщении ссылку или ID фильма",
-            "В ответном сообщении пришлите ID фильмов"
-        ]):
-            logger.info(f"[MAIN TEXT HANDLER] Пропускаем сообщение со ссылкой на Кинопоиск (будет обработано handle_kinopoisk_link)")
-            return
+        # Проверяем, не находится ли пользователь в состоянии создания подборки
+        from moviebot.bot.handlers.tags import user_add_tag_state
+        if user_id in user_add_tag_state:
+            state = user_add_tag_state.get(user_id, {})
+            if state.get('step') == 'waiting_for_tag_data':
+                logger.info(f"[MAIN TEXT HANDLER] Пользователь в состоянии /add_tags, не пропускаем сообщение")
+                # Не пропускаем - пусть обработает handle_add_tag_reply
+            else:
+                # Проверяем, что это не реплай на промпт планирования или другие специальные случаи
+                if not message.reply_to_message or not any(prompt in (message.reply_to_message.text or "") for prompt in [
+                    "Пришлите ссылку или ID фильма в ответном сообщении",
+                    "Пришлите в ответном сообщении ссылку или ID фильма",
+                    "В ответном сообщении пришлите ID фильмов"
+                ]):
+                    logger.info(f"[MAIN TEXT HANDLER] Пропускаем сообщение со ссылкой на Кинопоиск (будет обработано handle_kinopoisk_link)")
+                    return
+        else:
+            # Проверяем, что это не реплай на промпт планирования или другие специальные случаи
+            if not message.reply_to_message or not any(prompt in (message.reply_to_message.text or "") for prompt in [
+                "Пришлите ссылку или ID фильма в ответном сообщении",
+                "Пришлите в ответном сообщении ссылку или ID фильма",
+                "В ответном сообщении пришлите ID фильмов"
+            ]):
+                logger.info(f"[MAIN TEXT HANDLER] Пропускаем сообщение со ссылкой на Кинопоиск (будет обработано handle_kinopoisk_link)")
+                return
     
     # Проверяем, не обрабатывается ли это сообщение одним из специализированных handlers
     # Если пользователь в каком-то состоянии, пропускаем - пусть специализированный handler обработает
