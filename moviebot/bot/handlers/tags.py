@@ -95,23 +95,40 @@ def check_add_tag_reply(message):
     return True
 
 
-# Регистрируем обработчик с более высоким приоритетом - проверяем состояние ДО других обработчиков
-@bot.message_handler(content_types=['text'], func=lambda m: (
-    m.text and 
-    not m.text.strip().startswith('/') and
-    m.from_user.id in user_add_tag_state and
-    user_add_tag_state[m.from_user.id].get('step') == 'waiting_for_tag_data' and
-    m.reply_to_message is not None and
-    m.reply_to_message.message_id == user_add_tag_state[m.from_user.id].get('prompt_message_id')
-))
+# Регистрируем обработчик БЕЗ условий - проверка внутри функции
+# Это гарантирует, что обработчик будет вызван для всех текстовых сообщений
+@bot.message_handler(content_types=['text'], func=lambda m: m.text and not m.text.strip().startswith('/'))
 def handle_add_tag_reply(message):
     """Обработчик ответа на команду /add_tags"""
     user_id = message.from_user.id
     chat_id = message.chat.id
     text = message.text or ""
     
+    # КРИТИЧЕСКАЯ ПРОВЕРКА: только если пользователь в состоянии /add_tags
+    if user_id not in user_add_tag_state:
+        return  # Не обрабатываем, пусть другие обработчики попробуют
+    
+    state = user_add_tag_state[user_id]
+    if state.get('step') != 'waiting_for_tag_data':
+        return  # Не обрабатываем
+    
+    # Проверяем, что это реплай на промпт
+    if not message.reply_to_message:
+        logger.info(f"[ADD TAG] ❌ Сообщение НЕ является реплаем для user_id={user_id}")
+        return
+    
+    prompt_message_id = state.get('prompt_message_id')
+    if not prompt_message_id:
+        logger.info(f"[ADD TAG] ❌ prompt_message_id не найден для user_id={user_id}")
+        return
+    
+    if message.reply_to_message.message_id != prompt_message_id:
+        logger.info(f"[ADD TAG] ❌ Реплай не на промпт /add_tags (reply_to={message.reply_to_message.message_id}, expected={prompt_message_id}) для user_id={user_id}")
+        return
+    
+    # ВСЕ ПРОВЕРКИ ПРОЙДЕНЫ - ОБРАБАТЫВАЕМ
     logger.info(f"[ADD TAG] ===== START: Обработка сообщения от user_id={user_id}, text_length={len(text)}, message_id={message.message_id}")
-    logger.info(f"[ADD TAG] ✅ ОБРАБОТЧИК СРАБОТАЛ! Условие выполнено")
+    logger.info(f"[ADD TAG] ✅ ОБРАБОТЧИК СРАБОТАЛ! Все проверки пройдены")
     
     try:
         # Извлекаем название тега из кавычек
@@ -129,19 +146,30 @@ def handle_add_tag_reply(message):
                 del user_add_tag_state[user_id]
             return
         
-        # Извлекаем все ссылки на Кинопоиск
+        # Извлекаем все kp_id из текста
         kp_ids = set()
+        
+        # 1. Ищем ссылки на Кинопоиск
         links = re.findall(r'https?://(?:www\.)?kinopoisk\.(?:ru|com)/(?:film|series)/(\d+)', text)
         for link_match in links:
             kp_ids.add(link_match)
         
-        # Также проверяем короткие ссылки типа kinopoisk.ru/film/123
+        # 2. Ищем короткие ссылки типа kinopoisk.ru/film/123
         short_links = re.findall(r'kinopoisk\.(?:ru|com)/(?:film|series)/(\d+)', text)
         for short_link in short_links:
             kp_ids.add(short_link)
         
+        # 3. Ищем ID через запятую или пробел (например: "10246904, 5268266, 8106285" или "10246904 5268266 8106285")
+        # Ищем последовательности цифр длиной от 4 до 10 символов (типичные kp_id)
+        id_pattern = r'\b\d{4,10}\b'
+        found_ids = re.findall(id_pattern, text)
+        for found_id in found_ids:
+            # Проверяем, что это не часть ссылки (уже обработано выше)
+            # И не часть названия тега в кавычках
+            kp_ids.add(found_id)
+        
         if not kp_ids:
-            bot.reply_to(message, "❌ Не найдено ссылок на фильмы/сериалы с Кинопоиска.")
+            bot.reply_to(message, "❌ Не найдено ссылок или ID фильмов/сериалов с Кинопоиска.\n\nМожно указать:\n• Ссылки: https://www.kinopoisk.ru/film/123/\n• ID через запятую: 10246904, 5268266, 8106285")
             if user_id in user_add_tag_state:
                 del user_add_tag_state[user_id]
             return
