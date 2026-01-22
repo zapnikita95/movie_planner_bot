@@ -95,7 +95,15 @@ def check_add_tag_reply(message):
     return True
 
 
-@bot.message_handler(content_types=['text'], func=check_add_tag_reply)
+# Регистрируем обработчик с более высоким приоритетом - проверяем состояние ДО других обработчиков
+@bot.message_handler(content_types=['text'], func=lambda m: (
+    m.text and 
+    not m.text.strip().startswith('/') and
+    m.from_user.id in user_add_tag_state and
+    user_add_tag_state[m.from_user.id].get('step') == 'waiting_for_tag_data' and
+    m.reply_to_message is not None and
+    m.reply_to_message.message_id == user_add_tag_state[m.from_user.id].get('prompt_message_id')
+))
 def handle_add_tag_reply(message):
     """Обработчик ответа на команду /add_tags"""
     user_id = message.from_user.id
@@ -103,7 +111,7 @@ def handle_add_tag_reply(message):
     text = message.text or ""
     
     logger.info(f"[ADD TAG] ===== START: Обработка сообщения от user_id={user_id}, text_length={len(text)}, message_id={message.message_id}")
-    logger.info(f"[ADD TAG] ✅ ОБРАБОТЧИК СРАБОТАЛ! check_add_tag_reply вернул True")
+    logger.info(f"[ADD TAG] ✅ ОБРАБОТЧИК СРАБОТАЛ! Условие выполнено")
     
     try:
         # Извлекаем название тега из кавычек
