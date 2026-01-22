@@ -190,7 +190,7 @@ def get_film_current_state(chat_id, kp_id, user_id=None):
                         'type': plan_type,
                         'date': date_str
                     }
-            logger.info(f"[GET FILM STATE] plan_info создан: {plan_info}")
+                    logger.info(f"[GET FILM STATE] plan_info создан: {plan_info}")
                     
                     # Проверяем наличие билетов для планов в кино
                     if plan_type == 'cinema' and ticket_file_id:
