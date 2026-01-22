@@ -4,7 +4,7 @@ API модуль для работы с Kinopoisk API
 import re
 import requests
 import logging
-from datetime import datetime
+from datetime import datetime, date
 from moviebot.config import KP_TOKEN
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 
@@ -177,6 +177,38 @@ def extract_movie_info(link_or_id):
     except Exception as e:
         logger.error(f"[EXTRACT MOVIE] ===== END: КРИТИЧЕСКАЯ ОШИБКА для link_or_id={link_or_id}: {e}", exc_info=True)
         return None
+
+
+def get_film_distribution(kp_id):
+    """Получает информацию о прокате фильма в России. Возвращает None или {'date': date, 'date_str': str} только если дата выхода в будущем."""
+    headers = {'X-API-KEY': KP_TOKEN, 'accept': 'application/json'}
+    url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}/distributions"
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code != 200:
+            return None
+        data = response.json()
+        items = data.get('items', [])
+        for item in items:
+            if item.get('type') != 'COUNTRY_SPECIFIC':
+                continue
+            country = item.get('country', {})
+            if not isinstance(country, dict) or country.get('country') != 'Россия':
+                continue
+            date_str = item.get('date')
+            if not date_str:
+                continue
+            try:
+                release_date = datetime.strptime(date_str, '%Y-%m-%d').date()
+                if release_date > date.today():
+                    return {'date': release_date, 'date_str': release_date.strftime('%d.%m.%Y')}
+            except Exception:
+                pass
+        return None
+    except Exception as e:
+        logger.warning(f"[DISTRIBUTION] Ошибка получения проката для {kp_id}: {e}")
+        return None
+
 
 def get_facts(kp_id):
     """Получает интересные факты о фильме"""
