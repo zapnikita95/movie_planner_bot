@@ -3549,7 +3549,15 @@ def handle_dice_result(message):
     # Обработчик settings: перенесен в handlers/settings_main.py
 
     # Обработчик текстовых сообщений для поиска (ответы на сообщения поиска)
-    @bot.message_handler(content_types=['text'], func=lambda m: m.text and not m.text.strip().startswith('/') and m.from_user.id in user_search_state)
+    @bot.message_handler(content_types=['text'], func=lambda m: (
+        m.text and 
+        not m.text.strip().startswith('/') and 
+        m.from_user.id in user_search_state and
+        not (m.from_user.id in __import__('moviebot.bot.handlers.tags', fromlist=['user_add_tag_state']).user_add_tag_state and
+             __import__('moviebot.bot.handlers.tags', fromlist=['user_add_tag_state']).user_add_tag_state[m.from_user.id].get('step') == 'waiting_for_tag_data' and
+             m.reply_to_message and
+             m.reply_to_message.message_id == __import__('moviebot.bot.handlers.tags', fromlist=['user_add_tag_state']).user_add_tag_state[m.from_user.id].get('prompt_message_id'))
+    ))
     def handle_search_reply(message):
         """Обработчик ответных сообщений для поиска"""
         logger.info(f"[SEARCH REPLY] ===== НАЧАЛО ОБРАБОТКИ =====")
@@ -3897,7 +3905,24 @@ def ensure_movie_in_database(kp_id, title=None):
     return existing or (cursor_local.lastrowid if 'cursor_local' in locals() else None)
 
 # Обработчик текстовых сообщений для поиска (ответы на сообщения поиска)
-@bot.message_handler(content_types=['text'], func=lambda m: m.text and not m.text.strip().startswith('/') and m.from_user.id in user_search_state)
+def should_skip_for_add_tags(message):
+    """Проверяет, нужно ли пропустить обработку (если пользователь в состоянии /add_tags)"""
+    from moviebot.bot.handlers.tags import user_add_tag_state
+    user_id = message.from_user.id
+    if user_id in user_add_tag_state:
+        state = user_add_tag_state.get(user_id, {})
+        if state.get('step') == 'waiting_for_tag_data' and message.reply_to_message:
+            prompt_message_id = state.get('prompt_message_id')
+            if prompt_message_id and message.reply_to_message.message_id == prompt_message_id:
+                return True
+    return False
+
+@bot.message_handler(content_types=['text'], func=lambda m: (
+    m.text and 
+    not m.text.strip().startswith('/') and 
+    m.from_user.id in user_search_state and
+    not should_skip_for_add_tags(m)
+))
 def handle_search_reply(message):
         """Обработчик ответных сообщений для поиска"""
         logger.info(f"[SEARCH REPLY] ===== НАЧАЛО ОБРАБОТКИ =====")
@@ -4776,6 +4801,16 @@ def send_event_prompt(bot, message_or_call, state, text, markup=None):
 
 # === Текст: название и дата ===
 def is_event_text(message):
+    # Пропускаем, если пользователь в состоянии /add_tags
+    from moviebot.bot.handlers.tags import user_add_tag_state
+    user_id = message.from_user.id
+    if user_id in user_add_tag_state:
+        state_tag = user_add_tag_state.get(user_id, {})
+        if state_tag.get('step') == 'waiting_for_tag_data' and message.reply_to_message:
+            prompt_message_id = state_tag.get('prompt_message_id')
+            if prompt_message_id and message.reply_to_message.message_id == prompt_message_id:
+                return False  # Пропускаем - обработает handle_add_tag_reply
+    
     user_id = message.from_user.id
     state = user_ticket_state.get(user_id, {})
     return (state.get('type') == 'event' and state.get('step') in ['event_add_name', 'event_add_date'])

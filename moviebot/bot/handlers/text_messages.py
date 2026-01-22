@@ -843,7 +843,16 @@ def handle_list_view_film_reply(message):
             pass
 
 
-@bot.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.message_id in added_movie_messages and m.text and m.text.strip().isdigit() and 1 <= int(m.text.strip()) <= 10)
+@bot.message_handler(func=lambda m: (
+    m.reply_to_message and 
+    m.reply_to_message.message_id in added_movie_messages and 
+    m.text and 
+    m.text.strip().isdigit() and 
+    1 <= int(m.text.strip()) <= 10 and
+    not (m.from_user.id in __import__('moviebot.bot.handlers.tags', fromlist=['user_add_tag_state']).user_add_tag_state and
+         __import__('moviebot.bot.handlers.tags', fromlist=['user_add_tag_state']).user_add_tag_state[m.from_user.id].get('step') == 'waiting_for_tag_data' and
+         m.reply_to_message.message_id == __import__('moviebot.bot.handlers.tags', fromlist=['user_add_tag_state']).user_add_tag_state[m.from_user.id].get('prompt_message_id'))
+))
 def handle_added_movie_rating_reply(message):
     """Обрабатывает реплай на сообщение 'Добавлено в базу' с числом от 1 до 10"""
     try:
@@ -875,7 +884,15 @@ def handle_added_movie_rating_reply(message):
         logger.error(f"[ADDED MOVIE REPLY] Ошибка: {e}", exc_info=True)
 
 
-@bot.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.from_user.id == BOT_ID and m.text and "Введите промокод в ответном сообщении" in (m.reply_to_message.text or ""))
+@bot.message_handler(func=lambda m: (
+    m.reply_to_message and 
+    m.reply_to_message.from_user.id == BOT_ID and 
+    m.text and 
+    "Введите промокод в ответном сообщении" in (m.reply_to_message.text or "") and
+    not (m.from_user.id in __import__('moviebot.bot.handlers.tags', fromlist=['user_add_tag_state']).user_add_tag_state and
+         __import__('moviebot.bot.handlers.tags', fromlist=['user_add_tag_state']).user_add_tag_state[m.from_user.id].get('step') == 'waiting_for_tag_data' and
+         m.reply_to_message.message_id == __import__('moviebot.bot.handlers.tags', fromlist=['user_add_tag_state']).user_add_tag_state[m.from_user.id].get('prompt_message_id'))
+))
 def handle_promo_reply_direct(message):
     """ОТДЕЛЬНЫЙ handler для реплаев на сообщение промокода - ВЫСОКИЙ ПРИОРИТЕТ"""
     logger.info(f"[PROMO REPLY DIRECT] ===== START: message_id={message.message_id}, user_id={message.from_user.id}, text='{message.text[:50] if message.text else ''}'")
@@ -1251,6 +1268,16 @@ def process_search_query(message, query, reply_to_message=None):
 # ==================== 1. ОБРАБОТЧИК ДЛЯ ЛС: ТОЛЬКО ЕСЛИ БОТ ОЖИДАЕТ ТЕКСТ ====================
 def is_expected_text_in_private(message):
     """Проверка для обработчика ожидаемого текста в ЛС"""
+    # Пропускаем, если пользователь в состоянии /add_tags
+    from moviebot.bot.handlers.tags import user_add_tag_state
+    user_id = message.from_user.id
+    if user_id in user_add_tag_state:
+        state = user_add_tag_state.get(user_id, {})
+        if state.get('step') == 'waiting_for_tag_data' and message.reply_to_message:
+            prompt_message_id = state.get('prompt_message_id')
+            if prompt_message_id and message.reply_to_message.message_id == prompt_message_id:
+                return False  # Пропускаем - обработает handle_add_tag_reply
+    
     if message.chat.type != 'private':
         return False
     user_id = message.from_user.id
