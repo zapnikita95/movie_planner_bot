@@ -207,6 +207,12 @@ register_start_handlers(bot)
 logger.info("✅ start handlers зарегистрированы (ПЕРЕД state_handlers)")
 
 import moviebot.bot.handlers.state_handlers  # noqa: F401
+
+# КРИТИЧЕСКИ ВАЖНО: tags должен быть импортирован ПЕРЕД text_messages,
+# чтобы handle_add_tag_reply регистрировался раньше и имел приоритет
+import moviebot.bot.handlers.tags  # noqa: F401
+logger.info("✅ tags handlers зарегистрированы (ПЕРЕД text_messages)")
+
 import moviebot.bot.handlers.text_messages  # noqa: F401
 
 from moviebot.bot.handlers.list import register_list_handlers
@@ -237,9 +243,7 @@ except Exception as e:
     logger.critical(f"[MAIN] ❌ ОШИБКА ПРИ РЕГИСТРАЦИИ rate handlers: {e}", exc_info=True)
     sys.exit(1)
 
-# Регистрируем обработчики тегов (команды регистрируются на уровне модуля)
-import moviebot.bot.handlers.tags  # noqa: F401
-logger.info("✅ tags handlers зарегистрированы")
+# tags уже импортирован выше (перед text_messages)
 
 from moviebot.bot.handlers.stats import register_stats_handlers
 register_stats_handlers(bot)

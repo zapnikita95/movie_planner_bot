@@ -1867,6 +1867,15 @@ def main_text_handler(message):
     chat_id = message.chat.id
     text = message.text.strip() if message.text else ""
     
+    # КРИТИЧЕСКИ ВАЖНО: Если пользователь в состоянии /add_tags, сразу возвращаемся
+    # чтобы handle_add_tag_reply мог обработать сообщение
+    from moviebot.bot.handlers.tags import user_add_tag_state
+    if user_id in user_add_tag_state:
+        state = user_add_tag_state.get(user_id, {})
+        if state.get('step') == 'waiting_for_tag_data':
+            logger.info(f"[MAIN TEXT HANDLER] ⚠️ Пользователь в состоянии /add_tags, ПРОПУСКАЕМ обработку - пусть handle_add_tag_reply обработает")
+            return
+    
     # ЛОГИКА ДЛЯ ЛИЧНЫХ ЧАТОВ: проверяем, есть ли ожидающее сообщение для handler'а
     is_private = message.chat.type == 'private'
     if is_private:

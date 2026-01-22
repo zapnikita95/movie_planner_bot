@@ -56,7 +56,7 @@ def add_tags_command(message):
 
 
 def check_add_tag_reply(message):
-    """Проверяет, является ли сообщение ответом для команды /add_tags"""
+    """Проверяет, является ли сообщение ответом для команды /add_tags - ТОЛЬКО РЕПЛАИ НА ПРОМПТ"""
     user_id = message.from_user.id
     if user_id not in user_add_tag_state:
         return False
@@ -64,17 +64,21 @@ def check_add_tag_reply(message):
     if state.get('step') != 'waiting_for_tag_data':
         return False
     
-    # Проверяем, что это ответ на промпт или следующее сообщение после промпта
-    # Если это ответ на промпт - точно обрабатываем
-    if message.reply_to_message:
-        prompt_message_id = state.get('prompt_message_id')
-        if prompt_message_id and message.reply_to_message.message_id == prompt_message_id:
-            logger.info(f"[CHECK ADD TAG REPLY] ✅ Сообщение является ответом на промпт /add_tags для user_id={user_id}")
-            return True
+    # СТРОГАЯ ПРОВЕРКА: ТОЛЬКО реплаи на промпт
+    if not message.reply_to_message:
+        logger.info(f"[CHECK ADD TAG REPLY] ❌ Сообщение НЕ является реплаем, пропускаем для user_id={user_id}")
+        return False
     
-    # Если это не ответ, но пользователь в состоянии - тоже обрабатываем
-    # (пользователь может отправить следующее сообщение без реплая)
-    logger.info(f"[CHECK ADD TAG REPLY] ✅ Пользователь в состоянии /add_tags, обрабатываем сообщение для user_id={user_id}")
+    prompt_message_id = state.get('prompt_message_id')
+    if not prompt_message_id:
+        logger.info(f"[CHECK ADD TAG REPLY] ❌ prompt_message_id не найден в состоянии для user_id={user_id}")
+        return False
+    
+    if message.reply_to_message.message_id != prompt_message_id:
+        logger.info(f"[CHECK ADD TAG REPLY] ❌ Сообщение является реплаем, но НЕ на промпт /add_tags (reply_to={message.reply_to_message.message_id}, expected={prompt_message_id}) для user_id={user_id}")
+        return False
+    
+    logger.info(f"[CHECK ADD TAG REPLY] ✅ Сообщение является ответом на промпт /add_tags для user_id={user_id}, message_id={message.message_id}")
     return True
 
 
