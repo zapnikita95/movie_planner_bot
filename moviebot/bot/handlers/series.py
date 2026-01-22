@@ -477,8 +477,8 @@ def show_film_info_with_buttons(
                 try:
                     conn_local = get_db_connection()
                     cursor_local = get_db_cursor()
-                try:
-                    with db_lock:
+                    try:
+                        with db_lock:
                             cursor_local.execute("""
                             SELECT AVG(rating) as avg 
                             FROM ratings 
