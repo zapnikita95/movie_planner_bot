@@ -433,7 +433,10 @@ def handle_tag_deep_link(bot, message, short_code):
             cursor.execute('SELECT id, name FROM tags WHERE short_code = %s', (short_code,))
             row = cursor.fetchone()
             if row:
-                tag_info = {'id': row[0], 'name': row[1]}
+                tag_info = {
+                    'id': row.get('id') if isinstance(row, dict) else row[0],
+                    'name': row.get('name') if isinstance(row, dict) else row[1]
+                }
                 
                 # Получаем список фильмов из подборки
                 cursor.execute('''
