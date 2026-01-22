@@ -170,20 +170,22 @@ def handle_add_tag_reply(message):
         
         logger.info(f"[ADD TAG] Найдено {len(kp_ids)} уникальных kp_id для подборки '{tag_name}'")
         
-        # Проверяем, существует ли уже подборка с таким названием
+        # Проверяем, существует ли уже подборка с таким названием, созданная тем же пользователем
         conn_check = get_db_connection()
         cursor_check = get_db_cursor()
         existing_tag_id = None
         existing_tag_code = None
+        existing_tag_created_by = None
         
         try:
             with db_lock:
-                cursor_check.execute('SELECT id, short_code FROM tags WHERE name = %s AND created_by = %s', (tag_name, user_id))
+                cursor_check.execute('SELECT id, short_code, created_by FROM tags WHERE name = %s', (tag_name,))
                 row = cursor_check.fetchone()
                 if row:
                     existing_tag_id = row.get('id') if isinstance(row, dict) else row[0]
                     existing_tag_code = row.get('short_code') if isinstance(row, dict) else row[1]
-                    logger.info(f"[ADD TAG] Найдена существующая подборка с таким названием: id={existing_tag_id}, code={existing_tag_code}")
+                    existing_tag_created_by = row.get('created_by') if isinstance(row, dict) else row[2]
+                    logger.info(f"[ADD TAG] Найдена существующая подборка с таким названием: id={existing_tag_id}, code={existing_tag_code}, created_by={existing_tag_created_by}")
         except Exception as e:
             logger.error(f"[ADD TAG] Ошибка проверки существующей подборки: {e}", exc_info=True)
         finally:
@@ -196,11 +198,60 @@ def handle_add_tag_reply(message):
             except:
                 pass
         
-        # Если подборка существует, используем её, иначе создаём новую
-        if existing_tag_id:
-            tag_id = existing_tag_id
-            short_code = existing_tag_code
-            bot.reply_to(message, f"ℹ️ Подборка с названием <b>\"{tag_name}\"</b> уже существует. Добавляю только новые фильмы/сериалы.", parse_mode='HTML')
+        # Если подборка существует и создана тем же пользователем - предлагаем добавить фильмы
+        if existing_tag_id and existing_tag_created_by == user_id:
+            # Проверяем, сколько новых фильмов будет добавлено (исключая дубли)
+            conn_count = get_db_connection()
+            cursor_count = get_db_cursor()
+            new_films_count = 0
+            try:
+                with db_lock:
+                    for kp_id in kp_ids:
+                        cursor_count.execute('SELECT id FROM tag_movies WHERE tag_id = %s AND kp_id = %s', (existing_tag_id, kp_id))
+                        if not cursor_count.fetchone():
+                            new_films_count += 1
+            except Exception as e:
+                logger.error(f"[ADD TAG] Ошибка подсчета новых фильмов: {e}", exc_info=True)
+            finally:
+                try:
+                    cursor_count.close()
+                except:
+                    pass
+                try:
+                    conn_count.close()
+                except:
+                    pass
+            
+            if new_films_count == 0:
+                bot.reply_to(message, f"ℹ️ Все указанные фильмы/сериалы уже есть в подборке <b>\"{tag_name}\"</b>.", parse_mode='HTML')
+                if user_id in user_add_tag_state:
+                    del user_add_tag_state[user_id]
+                return
+            
+            # Предлагаем добавить фильмы к существующему тегу
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("✅ Добавить к существующей подборке", callback_data=f"tag_add_to_existing:{existing_tag_id}:{tag_name}"))
+            markup.add(InlineKeyboardButton("❌ Отмена", callback_data="tag_cancel_add"))
+            
+            bot.reply_to(
+                message,
+                f"📦 Подборка с названием <b>\"{tag_name}\"</b> уже существует.\n\n"
+                f"Будет добавлено <b>{new_films_count}</b> новых фильмов/сериалов (дубли будут пропущены).\n\n"
+                f"Добавить фильмы к существующей подборке?",
+                parse_mode='HTML',
+                reply_markup=markup
+            )
+            
+            # Сохраняем данные для обработки подтверждения
+            if user_id not in user_add_tag_state:
+                user_add_tag_state[user_id] = {}
+            user_add_tag_state[user_id]['pending_add'] = {
+                'tag_id': existing_tag_id,
+                'tag_name': tag_name,
+                'kp_ids': list(kp_ids),
+                'short_code': existing_tag_code
+            }
+            return
         else:
             # Генерируем короткий код для ссылки
             short_code = secrets.token_urlsafe(8).upper()[:12]  # 12 символов
