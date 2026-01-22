@@ -64,7 +64,7 @@ def add_tags_command(message):
 def check_add_tag_reply(message):
     """Проверяет, является ли сообщение ответом для команды /add_tags - ТОЛЬКО РЕПЛАИ НА ПРОМПТ"""
     user_id = message.from_user.id
-    logger.info(f"[CHECK ADD TAG REPLY] ===== START: user_id={user_id}, message_id={message.message_id}, has_reply={message.reply_to_message is not None}")
+    logger.info(f"[CHECK ADD TAG REPLY] ===== START: user_id={user_id}, message_id={message.message_id}, has_reply={message.reply_to_message is not None}, text_preview='{message.text[:50] if message.text else None}'")
     
     if user_id not in user_add_tag_state:
         logger.info(f"[CHECK ADD TAG REPLY] ❌ user_id={user_id} НЕ в user_add_tag_state")
@@ -87,27 +87,17 @@ def check_add_tag_reply(message):
         logger.info(f"[CHECK ADD TAG REPLY] ❌ prompt_message_id не найден в состоянии для user_id={user_id}")
         return False
     
-    if message.reply_to_message.message_id != prompt_message_id:
-        logger.info(f"[CHECK ADD TAG REPLY] ❌ Сообщение является реплаем, но НЕ на промпт /add_tags (reply_to={message.reply_to_message.message_id}, expected={prompt_message_id}) для user_id={user_id}")
+    reply_to_id = message.reply_to_message.message_id
+    if reply_to_id != prompt_message_id:
+        logger.info(f"[CHECK ADD TAG REPLY] ❌ Сообщение является реплаем, но НЕ на промпт /add_tags (reply_to={reply_to_id}, expected={prompt_message_id}) для user_id={user_id}")
         return False
     
     logger.info(f"[CHECK ADD TAG REPLY] ✅ Сообщение является ответом на промпт /add_tags для user_id={user_id}, message_id={message.message_id}")
     return True
 
 
-# Регистрируем обработчик с проверкой состояния в func - это гарантирует, что он сработает ТОЛЬКО для /add_tags
-# Используем lambda с явными проверками для надежности
-@bot.message_handler(
-    content_types=['text'], 
-    func=lambda m: (
-        m.text and 
-        not m.text.strip().startswith('/') and
-        m.from_user.id in user_add_tag_state and
-        user_add_tag_state[m.from_user.id].get('step') == 'waiting_for_tag_data' and
-        m.reply_to_message is not None and
-        m.reply_to_message.message_id == user_add_tag_state[m.from_user.id].get('prompt_message_id')
-    )
-)
+# Регистрируем обработчик с функцией проверки - это гарантирует правильную работу
+@bot.message_handler(content_types=['text'], func=check_add_tag_reply)
 def handle_add_tag_reply(message):
     """Обработчик ответа на команду /add_tags - срабатывает ТОЛЬКО для админов в состоянии /add_tags"""
     user_id = message.from_user.id
@@ -115,7 +105,7 @@ def handle_add_tag_reply(message):
     text = message.text or ""
     
     logger.info(f"[ADD TAG] ===== START: Обработка сообщения от user_id={user_id}, text_length={len(text)}, message_id={message.message_id}")
-    logger.info(f"[ADD TAG] ✅ ОБРАБОТЧИК СРАБОТАЛ! Все проверки пройдены в func")
+    logger.info(f"[ADD TAG] ✅ ОБРАБОТЧИК СРАБОТАЛ! check_add_tag_reply вернул True")
     
     try:
         # Извлекаем название тега из кавычек
