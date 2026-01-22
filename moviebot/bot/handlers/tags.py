@@ -445,7 +445,13 @@ def handle_tag_deep_link(bot, message, short_code):
                     WHERE tag_id = %s
                     ORDER BY added_at
                 ''', (tag_info['id'],))
-                tag_movies = cursor.fetchall()
+                rows = cursor.fetchall()
+                tag_movies = []
+                for row_item in rows:
+                    if isinstance(row_item, dict):
+                        tag_movies.append((row_item.get('kp_id'), row_item.get('is_series')))
+                    else:
+                        tag_movies.append((row_item[0], row_item[1]))
     except Exception as e:
         logger.error(f"[TAG DEEP LINK] Ошибка получения тега: {e}", exc_info=True)
         bot.reply_to(message, "❌ Ошибка при загрузке подборки.")
