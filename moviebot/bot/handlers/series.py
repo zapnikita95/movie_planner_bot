@@ -206,12 +206,12 @@ def get_film_current_state(chat_id, kp_id, user_id=None):
                             # Если не JSON, проверяем как строку
                             if ticket_file_id and str(ticket_file_id).strip():
                                 has_tickets = True
-            logger.info(f"[GET FILM STATE] has_tickets={has_tickets}")
-                    else:
-            logger.info(f"[GET FILM STATE] Нет данных плана для обработки")
+                    logger.info(f"[GET FILM STATE] has_tickets={has_tickets}")
+                else:
+                    logger.info(f"[GET FILM STATE] Нет данных плана для обработки")
             
         if not film_row:
-                logger.info(f"[GET FILM STATE] Фильм не найден в базе")
+            logger.info(f"[GET FILM STATE] Фильм не найден в базе")
     
     except Exception as e:
         logger.error(f"[GET FILM STATE] ❌ Ошибка получения состояния: {e}", exc_info=True)
