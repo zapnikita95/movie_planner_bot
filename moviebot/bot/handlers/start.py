@@ -404,9 +404,22 @@ def register_start_handlers(bot):
             short_code = start_param.replace('tag_', '')
             logger.info(f"[START TAG] Обработка deep link для тега с кодом: {short_code}")
             try:
-                from moviebot.bot.handlers.tags import handle_tag_deep_link
-                handle_tag_deep_link(bot, message, short_code)
-                return
+                from moviebot.bot.handlers.tags import handle_tag_deep_link, is_new_user
+                
+                # Проверяем, новый ли пользователь
+                user_id = message.from_user.id
+                chat_id = message.chat.id
+                is_new = is_new_user(user_id, chat_id)
+                
+                if is_new:
+                    # Если новый пользователь, сначала показываем приветствие, затем обрабатываем deep link
+                    logger.info(f"[START TAG] Новый пользователь, показываем приветствие, затем deep link")
+                    # Отправляем приветствие (send_welcome продолжит выполнение ниже)
+                    # После отправки приветствия обработаем deep link
+                else:
+                    # Если не новый, сразу обрабатываем deep link и выходим
+                    handle_tag_deep_link(bot, message, short_code)
+                    return
             except Exception as e:
                 logger.error(f"[START TAG] Ошибка обработки deep link: {e}", exc_info=True)
                 # Продолжаем показ обычного меню при ошибке
@@ -558,6 +571,19 @@ def register_start_handlers(bot):
                     bot.reply_to(message, "❌ Ошибка при загрузке меню. Попробуйте позже.")
                 except:
                     pass
+            
+            # Если был deep link для тега и пользователь новый, обрабатываем его после приветствия
+            if start_param and start_param.startswith('tag_'):
+                short_code = start_param.replace('tag_', '')
+                logger.info(f"[START TAG] Обработка deep link после приветствия для нового пользователя, code={short_code}")
+                try:
+                    from moviebot.bot.handlers.tags import handle_tag_deep_link
+                    # Небольшая задержка, чтобы приветствие успело отправиться
+                    import time
+                    time.sleep(0.5)
+                    handle_tag_deep_link(bot, message, short_code)
+                except Exception as e:
+                    logger.error(f"[START TAG] Ошибка обработки deep link после приветствия: {e}", exc_info=True)
 
         except Exception as e:
             logger.error(f"❌ Ошибка при отправке меню: {e}", exc_info=True)

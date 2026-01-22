@@ -415,12 +415,43 @@ def handle_add_tag_reply(message):
             del user_add_tag_state[user_id]
 
 
+def is_new_user(user_id, chat_id):
+    """Проверяет, является ли пользователь новым (нет записей в stats)"""
+    conn = get_db_connection()
+    cursor = get_db_cursor()
+    try:
+        with db_lock:
+            cursor.execute('SELECT COUNT(*) FROM stats WHERE user_id = %s AND chat_id = %s', (user_id, chat_id))
+            row = cursor.fetchone()
+            count = row.get('count') if isinstance(row, dict) else row[0]
+            return count == 0
+    except Exception as e:
+        logger.error(f"[IS NEW USER] Ошибка проверки: {e}", exc_info=True)
+        # В случае ошибки считаем пользователя новым для безопасности
+        return True
+    finally:
+        try:
+            cursor.close()
+        except:
+            pass
+        try:
+            conn.close()
+        except:
+            pass
+
+
 def handle_tag_deep_link(bot, message, short_code):
     """Обработчик deep link для добавления фильмов из подборки"""
     user_id = message.from_user.id
     chat_id = message.chat.id
     
     logger.info(f"[TAG DEEP LINK] Обработка для user_id={user_id}, code={short_code}")
+    
+    # Проверяем, является ли пользователь новым
+    is_new = is_new_user(user_id, chat_id)
+    logger.info(f"[TAG DEEP LINK] Пользователь user_id={user_id} новый: {is_new}")
+    
+    # Если пользователь новый, приветствие уже показано в start.py, просто продолжаем обработку deep link
     
     # Получаем информацию о теге
     conn = get_db_connection()
