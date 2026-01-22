@@ -453,6 +453,10 @@ def handle_tag_deep_link(bot, message, short_code):
     
     # Если пользователь новый, приветствие уже показано в start.py, просто продолжаем обработку deep link
     
+    # Отправляем сообщение о загрузке
+    loading_msg = bot.reply_to(message, "⏳ Загружаю подборку...")
+    loading_msg_id = loading_msg.message_id if loading_msg else None
+    
     # Получаем информацию о теге
     conn = get_db_connection()
     cursor = get_db_cursor()
@@ -486,34 +490,39 @@ def handle_tag_deep_link(bot, message, short_code):
                     else:
                         tag_movies.append((row_item[0], row_item[1]))
                 
-                # Получаем названия фильмов для отображения (из базы или через API)
-                for kp_id, is_series in tag_movies[:20]:  # Ограничиваем до 20 для отображения
-                    try:
-                        # Пробуем получить из базы
-                        cursor.execute('''
-                            SELECT title FROM movies 
-                            WHERE kp_id = %s 
-                            LIMIT 1
-                        ''', (kp_id,))
-                        title_row = cursor.fetchone()
-                        if title_row:
-                            title = title_row.get('title') if isinstance(title_row, dict) else title_row[0]
+                # Получаем названия фильмов ТОЛЬКО из базы (быстро, без API запросов)
+                # Если фильма нет в базе - не показываем в списке, но показываем количество
+                kp_ids = [kp_id for kp_id, _ in tag_movies[:20]]
+                if kp_ids:
+                    # Получаем все названия одним запросом
+                    placeholders = ','.join(['%s'] * len(kp_ids))
+                    cursor.execute(f'''
+                        SELECT kp_id, title, is_series 
+                        FROM movies 
+                        WHERE kp_id IN ({placeholders})
+                    ''', kp_ids)
+                    title_rows = cursor.fetchall()
+                    titles_dict = {}
+                    for title_row in title_rows:
+                        if isinstance(title_row, dict):
+                            kp_id = str(title_row.get('kp_id'))
+                            title = title_row.get('title')
+                            is_series = bool(title_row.get('is_series', 0))
                         else:
-                            # Если нет в базе, получаем через API
-                            link = f"https://www.kinopoisk.ru/series/{kp_id}/" if is_series else f"https://www.kinopoisk.ru/film/{kp_id}/"
-                            info = extract_movie_info(link)
-                            title = info.get('title', f'Фильм {kp_id}') if info else f'Фильм {kp_id}'
-                        
-                        if is_series:
-                            series_list.append(title)
-                        else:
-                            films_list.append(title)
-                    except Exception as e:
-                        logger.warning(f"[TAG DEEP LINK] Ошибка получения названия для kp_id={kp_id}: {e}")
-                        if is_series:
-                            series_list.append(f'Сериал {kp_id}')
-                        else:
-                            films_list.append(f'Фильм {kp_id}')
+                            kp_id = str(title_row[0])
+                            title = title_row[1]
+                            is_series = bool(title_row[2] if len(title_row) > 2 else 0)
+                        titles_dict[kp_id] = (title, is_series)
+                    
+                    # Формируем списки
+                    for kp_id, is_series in tag_movies[:20]:
+                        kp_id_str = str(kp_id)
+                        if kp_id_str in titles_dict:
+                            title, actual_is_series = titles_dict[kp_id_str]
+                            if actual_is_series or is_series:
+                                series_list.append(title)
+                            else:
+                                films_list.append(title)
     except Exception as e:
         logger.error(f"[TAG DEEP LINK] Ошибка получения тега: {e}", exc_info=True)
         bot.reply_to(message, "❌ Ошибка при загрузке подборки.")
@@ -529,10 +538,20 @@ def handle_tag_deep_link(bot, message, short_code):
             pass
     
     if not tag_info:
+        if loading_msg_id:
+            try:
+                bot.delete_message(chat_id, loading_msg_id)
+            except:
+                pass
         bot.reply_to(message, "❌ Подборка не найдена.")
         return
     
     if not tag_movies:
+        if loading_msg_id:
+            try:
+                bot.delete_message(chat_id, loading_msg_id)
+            except:
+                pass
         bot.reply_to(message, f"❌ Подборка '{tag_info['name']}' пуста.")
         return
     
@@ -548,24 +567,31 @@ def handle_tag_deep_link(bot, message, short_code):
     text += f"🎬 Фильмов: {films_count}\n"
     text += f"📺 Сериалов: {series_count}\n\n"
     
-    # Добавляем список фильмов и сериалов
+    # Добавляем список фильмов и сериалов (только те, что есть в базе)
     if films_list:
         text += "<b>🎬 Фильмы:</b>\n"
         for i, film_title in enumerate(films_list[:10], 1):  # Показываем до 10
             text += f"{i}. {film_title}\n"
-        if films_count > 10:
-            text += f"... и еще {films_count - 10} фильмов\n"
+        if films_count > len(films_list):
+            text += f"... и еще {films_count - len(films_list)} фильмов\n"
         text += "\n"
     
     if series_list:
         text += "<b>📺 Сериалы:</b>\n"
         for i, series_title in enumerate(series_list[:10], 1):  # Показываем до 10
             text += f"{i}. {series_title}\n"
-        if series_count > 10:
-            text += f"... и еще {series_count - 10} сериалов\n"
+        if series_count > len(series_list):
+            text += f"... и еще {series_count - len(series_list)} сериалов\n"
         text += "\n"
     
     text += "Добавить все фильмы и сериалы в вашу базу?"
+    
+    # Удаляем сообщение о загрузке и отправляем итоговое
+    if loading_msg_id:
+        try:
+            bot.delete_message(chat_id, loading_msg_id)
+        except:
+            pass
     
     bot.reply_to(message, text, parse_mode='HTML', reply_markup=markup)
 
@@ -582,8 +608,9 @@ def handle_tag_confirm(call):
     try:
         bot.answer_callback_query(call.id, "⏳ Добавляю фильмы...")
         
-        # Показываем анимацию загрузки
-        bot.send_chat_action(chat_id, 'typing')
+        # Отправляем сообщение о загрузке
+        loading_msg = bot.send_message(chat_id, "⏳ Загружаю фильмы и сериалы...")
+        loading_msg_id = loading_msg.message_id if loading_msg else None
         
         # Получаем информацию о теге и фильмах
         conn = get_db_connection()
@@ -637,9 +664,16 @@ def handle_tag_confirm(call):
         
         total_movies = len(tag_movies)
         for idx, (kp_id, is_series) in enumerate(tag_movies, 1):
-            # Периодически показываем анимацию загрузки
-            if idx % 3 == 0:  # Каждые 3 фильма
-                bot.send_chat_action(chat_id, 'typing')
+            # Обновляем сообщение о загрузке каждые 5 фильмов
+            if loading_msg_id and idx % 5 == 0:
+                try:
+                    progress = int((idx / total_movies) * 100)
+                    bot.edit_message_text(
+                        f"⏳ Загружаю фильмы и сериалы... {progress}% ({idx}/{total_movies})",
+                        chat_id, loading_msg_id
+                    )
+                except:
+                    pass
             
             try:
                 link = f"https://www.kinopoisk.ru/series/{kp_id}/" if is_series else f"https://www.kinopoisk.ru/film/{kp_id}/"
@@ -742,6 +776,13 @@ def handle_tag_confirm(call):
             except Exception as e:
                 logger.error(f"[TAG CONFIRM] Ошибка обработки kp_id={kp_id}: {e}", exc_info=True)
                 errors.append(f"{kp_id}: {str(e)[:50]}")
+        
+        # Удаляем сообщение о загрузке
+        if loading_msg_id:
+            try:
+                bot.delete_message(chat_id, loading_msg_id)
+            except:
+                pass
         
         # Формируем итоговое сообщение
         result_text = f"✅ <b>Подборка '{tag_info['name']}' добавлена!</b>\n\n"
