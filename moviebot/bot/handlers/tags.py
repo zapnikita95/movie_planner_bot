@@ -458,6 +458,8 @@ def handle_tag_deep_link(bot, message, short_code):
     cursor = get_db_cursor()
     tag_info = None
     tag_movies = []
+    films_list = []
+    series_list = []
     
     try:
         with db_lock:
@@ -483,6 +485,35 @@ def handle_tag_deep_link(bot, message, short_code):
                         tag_movies.append((row_item.get('kp_id'), row_item.get('is_series')))
                     else:
                         tag_movies.append((row_item[0], row_item[1]))
+                
+                # Получаем названия фильмов для отображения (из базы или через API)
+                for kp_id, is_series in tag_movies[:20]:  # Ограничиваем до 20 для отображения
+                    try:
+                        # Пробуем получить из базы
+                        cursor.execute('''
+                            SELECT title FROM movies 
+                            WHERE kp_id = %s 
+                            LIMIT 1
+                        ''', (kp_id,))
+                        title_row = cursor.fetchone()
+                        if title_row:
+                            title = title_row.get('title') if isinstance(title_row, dict) else title_row[0]
+                        else:
+                            # Если нет в базе, получаем через API
+                            link = f"https://www.kinopoisk.ru/series/{kp_id}/" if is_series else f"https://www.kinopoisk.ru/film/{kp_id}/"
+                            info = extract_movie_info(link)
+                            title = info.get('title', f'Фильм {kp_id}') if info else f'Фильм {kp_id}'
+                        
+                        if is_series:
+                            series_list.append(title)
+                        else:
+                            films_list.append(title)
+                    except Exception as e:
+                        logger.warning(f"[TAG DEEP LINK] Ошибка получения названия для kp_id={kp_id}: {e}")
+                        if is_series:
+                            series_list.append(f'Сериал {kp_id}')
+                        else:
+                            films_list.append(f'Фильм {kp_id}')
     except Exception as e:
         logger.error(f"[TAG DEEP LINK] Ошибка получения тега: {e}", exc_info=True)
         bot.reply_to(message, "❌ Ошибка при загрузке подборки.")
@@ -516,6 +547,24 @@ def handle_tag_deep_link(bot, message, short_code):
     text = f"📦 <b>Подборка: {tag_info['name']}</b>\n\n"
     text += f"🎬 Фильмов: {films_count}\n"
     text += f"📺 Сериалов: {series_count}\n\n"
+    
+    # Добавляем список фильмов и сериалов
+    if films_list:
+        text += "<b>🎬 Фильмы:</b>\n"
+        for i, film_title in enumerate(films_list[:10], 1):  # Показываем до 10
+            text += f"{i}. {film_title}\n"
+        if films_count > 10:
+            text += f"... и еще {films_count - 10} фильмов\n"
+        text += "\n"
+    
+    if series_list:
+        text += "<b>📺 Сериалы:</b>\n"
+        for i, series_title in enumerate(series_list[:10], 1):  # Показываем до 10
+            text += f"{i}. {series_title}\n"
+        if series_count > 10:
+            text += f"... и еще {series_count - 10} сериалов\n"
+        text += "\n"
+    
     text += "Добавить все фильмы и сериалы в вашу базу?"
     
     bot.reply_to(message, text, parse_mode='HTML', reply_markup=markup)
@@ -532,6 +581,9 @@ def handle_tag_confirm(call):
     
     try:
         bot.answer_callback_query(call.id, "⏳ Добавляю фильмы...")
+        
+        # Показываем анимацию загрузки
+        bot.send_chat_action(chat_id, 'typing')
         
         # Получаем информацию о теге и фильмах
         conn = get_db_connection()
@@ -583,7 +635,12 @@ def handle_tag_confirm(call):
         already_planned = []
         errors = []
         
-        for kp_id, is_series in tag_movies:
+        total_movies = len(tag_movies)
+        for idx, (kp_id, is_series) in enumerate(tag_movies, 1):
+            # Периодически показываем анимацию загрузки
+            if idx % 3 == 0:  # Каждые 3 фильма
+                bot.send_chat_action(chat_id, 'typing')
+            
             try:
                 link = f"https://www.kinopoisk.ru/series/{kp_id}/" if is_series else f"https://www.kinopoisk.ru/film/{kp_id}/"
                 info = extract_movie_info(link)

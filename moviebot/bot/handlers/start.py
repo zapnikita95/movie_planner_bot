@@ -311,16 +311,16 @@ def back_to_start_menu_callback(call):
             logger.error(f"[BACK TO MENU] Ошибка проверки доступа к билетам: {tickets_error}", exc_info=True)
             has_tickets = False
 
-        # Строка 1: Сериалы / Премьеры / База (маленькая кнопка)
+        # Строка 1: Сериалы / Премьеры
         markup.row(
             InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"),
-            InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres"),
-            InlineKeyboardButton("🗄️", callback_data="start_menu:database")
+            InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres")
         )
 
-        # Строка 2: Поиск
+        # Строка 2: Поиск / База
         markup.row(
-            InlineKeyboardButton("🔍 Поиск", callback_data="start_menu:search")
+            InlineKeyboardButton("🔍 Поиск", callback_data="start_menu:search"),
+            InlineKeyboardButton("🗄️ База", callback_data="start_menu:database")
         )
 
         # Строка 3: Рандом / Шазам
@@ -482,16 +482,16 @@ def register_start_handlers(bot):
                 logger.error(f"[BACK TO MENU] Ошибка проверки доступа к билетам: {tickets_error}", exc_info=True)
                 has_tickets = False
 
-            # Строка 1: Сериалы / Премьеры / База (маленькая кнопка)
+            # Строка 1: Сериалы / Премьеры
             markup.row(
                 InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"),
-                InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres"),
-                InlineKeyboardButton("🗄️", callback_data="start_menu:database")
+                InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres")
             )
 
-            # Строка 2: Поиск
+            # Строка 2: Поиск / База
             markup.row(
-                InlineKeyboardButton("🔍 Поиск", callback_data="start_menu:search")
+                InlineKeyboardButton("🔍 Поиск", callback_data="start_menu:search"),
+                InlineKeyboardButton("🗄️ База", callback_data="start_menu:database")
             )
 
             # Строка 3: Рандом / Шазам
@@ -822,16 +822,16 @@ def register_start_handlers(bot):
                 logger.error(f"[BACK TO MENU] Ошибка проверки доступа к билетам: {tickets_error}", exc_info=True)
                 has_tickets = False
 
-            # Строка 1: Сериалы / Премьеры / База (маленькая кнопка)
+            # Строка 1: Сериалы / Премьеры
             markup.row(
                 InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"),
-                InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres"),
-                InlineKeyboardButton("🗄️", callback_data="start_menu:database")
+                InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres")
             )
 
-            # Строка 2: Поиск
+            # Строка 2: Поиск / База
             markup.row(
-                InlineKeyboardButton("🔍 Поиск", callback_data="start_menu:search")
+                InlineKeyboardButton("🔍 Поиск", callback_data="start_menu:search"),
+                InlineKeyboardButton("🗄️ База", callback_data="start_menu:database")
             )
 
             # Строка 3: Рандом / Шазам
