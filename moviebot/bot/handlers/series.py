@@ -22,7 +22,7 @@ from moviebot.database.db_operations import (
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 from moviebot.database.db_operations import get_user_timezone_or_default, get_user_films_count
 from moviebot.utils.helpers import extract_film_info_from_existing
-from moviebot.api.kinopoisk_api import search_films, extract_movie_info, get_premieres_for_period, get_seasons_data, search_films_by_filters
+from moviebot.api.kinopoisk_api import search_films, extract_movie_info, get_premieres_for_period, get_seasons_data, search_films_by_filters, get_film_distribution
 from moviebot.utils.helpers import has_tickets_access, has_recommendations_access, has_notifications_access
 from moviebot.utils.parsing import parse_plan_date_text
 from moviebot.bot.handlers.seasons import get_series_airing_status, count_episodes_for_watch_check
@@ -635,25 +635,28 @@ def show_film_info_with_buttons(
         facts_and_rate_added = False
         logger.info(f"[SHOW FILM INFO] Markup создан, facts_and_rate_added={facts_and_rate_added}")
         
-        # Проверяем премьеру
+        # Премьера: дата выхода и кнопка "Уведомить о премьере"
+        # Кнопка ТОЛЬКО у фильмов (не сериалов), НЕ в базе, без плана, премьера в будущем.
         logger.info(f"[SHOW FILM INFO] Проверка премьеры...")
-        russia_release = info.get('russia_release')
         premiere_date = None
         premiere_date_str = ""
-        
+        russia_release = info.get('russia_release')
+
         if russia_release and russia_release.get('date'):
             premiere_date = russia_release['date']
             premiere_date_str = russia_release.get('date_str', premiere_date.strftime('%d.%m.%Y'))
-        else:
+        elif not is_series and existing is None:
+            dist = get_film_distribution(kp_id)
+            if dist:
+                premiere_date = dist['date']
+                premiere_date_str = dist['date_str']
+        if premiere_date is None:
             try:
                 headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
                 url_main = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}"
                 response_main = requests.get(url_main, headers=headers, timeout=15)
                 if response_main.status_code == 200:
                     data_main = response_main.json()
-                    from datetime import date as date_class
-                    today = date_class.today()
-                    
                     for date_field in ['premiereWorld', 'premiereRu', 'premiereWorldDate', 'premiereRuDate']:
                         date_value = data_main.get(date_field)
                         if date_value:
@@ -664,64 +667,53 @@ def show_film_info_with_buttons(
                                     premiere_date = datetime.strptime(str(date_value), '%Y-%m-%d').date()
                                 premiere_date_str = premiere_date.strftime('%d.%m.%Y')
                                 break
-                            except:
+                            except Exception:
                                 continue
             except Exception as e:
-                logger.warning(f"[SHOW FILM INFO] Ошибка получения информации о премьере: {e}")
-        
-        # 2. Кнопка уведомления о премьере — ТОЛЬКО если премьера в будущем
-        premiere_date_raw = info.get('premiere_date') or info.get('premiereRu') or info.get('premiereWorld')
-        show_premiere_button = False
-        premiere_date_str = None
+                logger.warning(f"[SHOW FILM INFO] Ошибка получения даты премьеры: {e}")
 
-        if premiere_date_raw:
-            try:
-                # Пытаемся привести к datetime
-                if isinstance(premiere_date_raw, str):
-                    premiere_dt = datetime.strptime(premiere_date_raw.split('T')[0], '%Y-%m-%d')
-                elif isinstance(premiere_date_raw, datetime):
-                    premiere_dt = premiere_date_raw
-                else:
-                    premiere_dt = None
-
-                if premiere_dt:
-                    premiere_dt = premiere_dt.replace(tzinfo=None)  # убираем таймзону для сравнения
-                    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-                    
-                    if premiere_dt > today:  # строго в будущем
-                        show_premiere_button = True
-                        premiere_date_str = premiere_dt.strftime('%Y-%m-%d')
-                    else:
-                        logger.info(f"[SHOW FILM INFO] Премьера {kp_id} уже прошла ({premiere_dt.date()}), кнопку не показываем")
-            except Exception as e:
-                logger.warning(f"[SHOW FILM INFO] Ошибка парсинга даты премьеры {kp_id}: {e}")
+        today = date.today()
+        show_premiere_button = (
+            not is_series
+            and existing is None
+            and plan_info is None
+            and premiere_date is not None
+            and premiere_date > today
+        )
+        if show_premiere_button:
+            logger.info(f"[SHOW FILM INFO] Показываем кнопку «Уведомить о премьере»: kp_id={kp_id}, дата={premiere_date_str}")
+        elif premiere_date and premiere_date <= today:
+            logger.info(f"[SHOW FILM INFO] Премьера {kp_id} уже прошла ({premiere_date}), кнопку не показываем")
 
         if show_premiere_button:
-            conn_local = get_db_connection()
-            cursor_local = get_db_cursor()
-            reminder = None
+            conn_prem = get_db_connection()
+            cursor_prem = None
+            has_premiere_reminder = False
             try:
-                with db_lock:
-                    cursor_local.execute("""
-                        SELECT reminder_sent 
-                        FROM premiere_reminders 
-                        WHERE chat_id = %s AND kp_id = %s
-                    """, (chat_id, kp_id))
-                    reminder = cursor_local.fetchone()
+                if user_id is not None:
+                    with db_lock:
+                        cursor_prem = conn_prem.cursor()
+                        cursor_prem.execute("""
+                            SELECT 1 FROM premiere_reminders
+                            WHERE chat_id = %s AND user_id = %s AND kp_id = %s
+                        """, (chat_id, user_id, kp_id))
+                        has_premiere_reminder = cursor_prem.fetchone() is not None
             finally:
+                if cursor_prem:
+                    try:
+                        cursor_prem.close()
+                    except Exception:
+                        pass
                 try:
-                    cursor_local.close()
-                except:
+                    conn_prem.close()
+                except Exception:
                     pass
-                try:
-                    conn_local.close()
-                except:
-                    pass
-                
-                if reminder and reminder[0]:
-                    markup.add(InlineKeyboardButton("🔕 Отменить уведомление", callback_data=f"premiere_cancel:{int(kp_id)}"))
-                else:
-                    markup.add(InlineKeyboardButton("🔔 Уведомить о премьере", callback_data=f"premiere_notify:{kp_id}:{premiere_date_str}"))
+
+            callback_date = premiere_date.strftime('%d.%m.%Y')
+            if has_premiere_reminder:
+                markup.add(InlineKeyboardButton("🔕 Отменить уведомление", callback_data=f"premiere_cancel:{int(kp_id)}"))
+            else:
+                markup.add(InlineKeyboardButton("🔔 Уведомить о премьере", callback_data=f"premiere_notify:{kp_id}:{callback_date}"))
 
         # Получаем film_id и watched из existing (уже получено через get_film_current_state)
         logger.info(f"[SHOW FILM INFO] Получение film_id из existing...")
@@ -3692,6 +3684,16 @@ def handle_kinopoisk_link(message):
         text = message.text.strip()
         
         logger.info(f"[KINOPOISK LINK] Текст сообщения: '{text[:100]}'")
+        
+        # КРИТИЧЕСКАЯ ПРОВЕРКА: пропускаем, если пользователь в состоянии /add_tags
+        from moviebot.bot.handlers.tags import user_add_tag_state
+        if user_id in user_add_tag_state:
+            state = user_add_tag_state.get(user_id, {})
+            if state.get('step') == 'waiting_for_tag_data' and message.reply_to_message:
+                prompt_message_id = state.get('prompt_message_id')
+                if prompt_message_id and message.reply_to_message.message_id == prompt_message_id:
+                    logger.info(f"[KINOPOISK LINK] ⚠️ Пользователь в состоянии /add_tags, ПРОПУСКАЕМ - пусть handle_add_tag_reply обработает")
+                    return
         
         # Пропускаем, если это ответ на промпт бота (обрабатывается отдельно)
         if message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.id == BOT_ID:
