@@ -14,6 +14,9 @@ from moviebot.bot.handlers.series import ensure_movie_in_database
 from moviebot.states import user_plan_state, user_view_film_state, user_mark_watched_state
 
 logger = logging.getLogger(__name__)
+logger.info("=" * 80)
+logger.info("[TAGS] Модуль tags.py импортирован - декораторы будут зарегистрированы")
+logger.info("=" * 80)
 
 # Состояние для обработки команды /add_tags
 user_add_tag_state = {}
