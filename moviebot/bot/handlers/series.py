@@ -541,15 +541,15 @@ def show_film_info_with_buttons(
                                 user_rating_row = cursor_local.fetchone()
                                 user_rating = user_rating_row[0] if user_rating_row else None
                                 text += f"\n⭐ <b>Ваша оценка: {user_rating if user_rating else '—'}/10</b>"
-                        finally:
-                            try:
-                                cursor_local.close()
-                            except:
-                                pass
-                            try:
-                                conn_local.close()
-                            except:
-                                pass
+                            finally:
+                                try:
+                                    cursor_local.close()
+                                except:
+                                    pass
+                                try:
+                                    conn_local.close()
+                                except:
+                                    pass
                     except Exception as e:
                         logger.warning(f"[SHOW FILM INFO] Ошибка личной оценки: {e}")
             
