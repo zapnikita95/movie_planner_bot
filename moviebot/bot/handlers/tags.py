@@ -1299,6 +1299,169 @@ def mark_watched_from_tag_callback(call):
             pass
 
 
+@bot.callback_query_handler(func=lambda call: call.data.startswith("tag_add_to_group:"))
+def handle_tag_add_to_group(call):
+    """Обработчик кнопки 'Добавить в группу'"""
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    tag_id = int(call.data.split(":")[1])
+    
+    try:
+        bot.answer_callback_query(call.id)
+        
+        # Получаем список общих групп
+        common_groups = []
+        conn_groups = get_db_connection()
+        cursor_groups = get_db_cursor()
+        try:
+            with db_lock:
+                cursor_groups.execute('''
+                    SELECT DISTINCT chat_id 
+                    FROM subscriptions 
+                    WHERE user_id = %s AND chat_id < 0
+                ''', (user_id,))
+                user_groups = [row[0] if isinstance(row, tuple) else row.get('chat_id') for row in cursor_groups.fetchall()]
+                
+                for group_id in user_groups:
+                    try:
+                        chat = bot.get_chat(group_id)
+                        if chat.type in ['group', 'supergroup']:
+                            try:
+                                member = bot.get_chat_member(group_id, bot.get_me().id)
+                                if member.status in ['member', 'administrator', 'creator']:
+                                    common_groups.append((group_id, chat.title or f"Группа {group_id}"))
+                            except:
+                                pass
+                    except Exception as e:
+                        logger.warning(f"[TAG ADD TO GROUP] Ошибка проверки группы {group_id}: {e}")
+                        continue
+        except Exception as e:
+            logger.error(f"[TAG ADD TO GROUP] Ошибка получения списка групп: {e}", exc_info=True)
+        finally:
+            try:
+                cursor_groups.close()
+            except:
+                pass
+            try:
+                conn_groups.close()
+            except:
+                pass
+        
+        if not common_groups:
+            bot.answer_callback_query(call.id, "❌ Не найдено общих групп", show_alert=True)
+            return
+        
+        # Показываем список групп для выбора
+        text = "📢 <b>Выберите группу для добавления подборки:</b>\n\n"
+        markup = InlineKeyboardMarkup(row_width=1)
+        
+        for group_id, group_title in common_groups:
+            # Ограничиваем длину названия
+            button_text = group_title[:50] if len(group_title) <= 50 else group_title[:47] + "..."
+            markup.add(InlineKeyboardButton(button_text, callback_data=f"tag_select_group:{tag_id}:{group_id}"))
+        
+        markup.add(InlineKeyboardButton("❌ Отмена", callback_data="tag_cancel_group"))
+        
+        bot.edit_message_text(text, chat_id, call.message.message_id, parse_mode='HTML', reply_markup=markup)
+        
+    except Exception as e:
+        logger.error(f"[TAG ADD TO GROUP] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+        except:
+            pass
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("tag_select_group:"))
+def handle_tag_select_group(call):
+    """Обработчик выбора группы для добавления подборки"""
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    parts = call.data.split(":")
+    tag_id = int(parts[1])
+    target_group_id = int(parts[2])
+    
+    try:
+        bot.answer_callback_query(call.id, "⏳ Добавляю подборку в группу...")
+        
+        # Получаем информацию о теге
+        conn = get_db_connection()
+        cursor = get_db_cursor()
+        tag_info = None
+        tag_movies = []
+        
+        try:
+            with db_lock:
+                cursor.execute('SELECT id, name, short_code FROM tags WHERE id = %s', (tag_id,))
+                row = cursor.fetchone()
+                if not row:
+                    bot.answer_callback_query(call.id, "❌ Подборка не найдена", show_alert=True)
+                    return
+                
+                tag_info = {
+                    'id': row[0] if isinstance(row, tuple) else row.get('id'),
+                    'name': row[1] if isinstance(row, tuple) else row.get('name'),
+                    'short_code': row[2] if isinstance(row, tuple) else row.get('short_code')
+                }
+                
+                # Получаем все фильмы из подборки
+                cursor.execute('SELECT kp_id, is_series FROM tag_movies WHERE tag_id = %s', (tag_id,))
+                tag_movies = cursor.fetchall()
+        except Exception as e:
+            logger.error(f"[TAG SELECT GROUP] Ошибка получения информации о теге: {e}", exc_info=True)
+            bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+            return
+        finally:
+            try:
+                cursor.close()
+            except:
+                pass
+            try:
+                conn.close()
+            except:
+                pass
+        
+        if not tag_info or not tag_movies:
+            bot.answer_callback_query(call.id, "❌ Подборка пуста", show_alert=True)
+            return
+        
+        # Отправляем сообщение в группу с deep link
+        bot_username = bot.get_me().username
+        deep_link = f"https://t.me/{bot_username}?start=tag_{tag_info['short_code']}"
+        
+        group_text = f"📦 <b>Подборка: {tag_info['name']}</b>\n\n"
+        group_text += f"🎬 Фильмов/сериалов в подборке: {len(tag_movies)}\n\n"
+        group_text += f"🔗 Добавить подборку в базу:\n"
+        group_text += f"<code>{deep_link}</code>"
+        
+        try:
+            bot.send_message(target_group_id, group_text, parse_mode='HTML')
+            bot.edit_message_text(
+                f"✅ Подборка <b>\"{tag_info['name']}\"</b> отправлена в группу!",
+                chat_id, call.message.message_id, parse_mode='HTML'
+            )
+        except Exception as e:
+            logger.error(f"[TAG SELECT GROUP] Ошибка отправки в группу: {e}", exc_info=True)
+            bot.answer_callback_query(call.id, "❌ Не удалось отправить в группу", show_alert=True)
+            
+    except Exception as e:
+        logger.error(f"[TAG SELECT GROUP] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+        except:
+            pass
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "tag_cancel_group")
+def handle_tag_cancel_group(call):
+    """Обработчик отмены выбора группы"""
+    try:
+        bot.answer_callback_query(call.id)
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+    except:
+        pass
+
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("back_to_tag:"))
 def handle_back_to_tag(call):
     """Обработчик возврата к подборке"""
