@@ -58,10 +58,17 @@ def add_tags_command(message):
 def check_add_tag_reply(message):
     """Проверяет, является ли сообщение ответом для команды /add_tags - ТОЛЬКО РЕПЛАИ НА ПРОМПТ"""
     user_id = message.from_user.id
+    logger.info(f"[CHECK ADD TAG REPLY] ===== START: user_id={user_id}, message_id={message.message_id}, has_reply={message.reply_to_message is not None}")
+    
     if user_id not in user_add_tag_state:
+        logger.info(f"[CHECK ADD TAG REPLY] ❌ user_id={user_id} НЕ в user_add_tag_state")
         return False
+    
     state = user_add_tag_state[user_id]
+    logger.info(f"[CHECK ADD TAG REPLY] Состояние найдено: {state}")
+    
     if state.get('step') != 'waiting_for_tag_data':
+        logger.info(f"[CHECK ADD TAG REPLY] ❌ step={state.get('step')} != 'waiting_for_tag_data'")
         return False
     
     # СТРОГАЯ ПРОВЕРКА: ТОЛЬКО реплаи на промпт
@@ -90,6 +97,7 @@ def handle_add_tag_reply(message):
     text = message.text or ""
     
     logger.info(f"[ADD TAG] ===== START: Обработка сообщения от user_id={user_id}, text_length={len(text)}, message_id={message.message_id}")
+    logger.info(f"[ADD TAG] ✅ ОБРАБОТЧИК СРАБОТАЛ! check_add_tag_reply вернул True")
     
     try:
         # Извлекаем название тега из кавычек
@@ -126,78 +134,110 @@ def handle_add_tag_reply(message):
         
         logger.info(f"[ADD TAG] Найдено {len(kp_ids)} уникальных kp_id для подборки '{tag_name}'")
         
-        # Генерируем короткий код для ссылки
-        short_code = secrets.token_urlsafe(8).upper()[:12]  # 12 символов
-        
-        # Проверяем уникальность кода
+        # Проверяем, существует ли уже подборка с таким названием
         conn_check = get_db_connection()
         cursor_check = get_db_cursor()
-        code_unique = False
-        attempts = 0
-        while not code_unique and attempts < 10:
-            try:
-                with db_lock:
-                    cursor_check.execute('SELECT id FROM tags WHERE short_code = %s', (short_code,))
-                    if not cursor_check.fetchone():
-                        code_unique = True
-                    else:
-                        short_code = secrets.token_urlsafe(8).upper()[:12]
-                        attempts += 1
-            except:
-                pass
-        
-        try:
-            cursor_check.close()
-        except:
-            pass
-        try:
-            conn_check.close()
-        except:
-            pass
-        
-        if not code_unique:
-            bot.reply_to(message, "❌ Не удалось сгенерировать уникальный код. Попробуйте позже.")
-            if user_id in user_add_tag_state:
-                del user_add_tag_state[user_id]
-            return
-        
-        # Создаем тег в БД
-        conn = get_db_connection()
-        cursor = get_db_cursor()
-        tag_id = None
+        existing_tag_id = None
+        existing_tag_code = None
         
         try:
             with db_lock:
-                cursor.execute('''
-                    INSERT INTO tags (name, short_code, created_by)
-                    VALUES (%s, %s, %s)
-                    RETURNING id
-                ''', (tag_name, short_code, user_id))
-                tag_id = cursor.fetchone()[0]
-                conn.commit()
-                logger.info(f"[ADD TAG] Создан тег id={tag_id}, name='{tag_name}', code={short_code}")
+                cursor_check.execute('SELECT id, short_code FROM tags WHERE name = %s AND created_by = %s', (tag_name, user_id))
+                row = cursor_check.fetchone()
+                if row:
+                    existing_tag_id = row[0] if isinstance(row, tuple) else row.get('id')
+                    existing_tag_code = row[1] if isinstance(row, tuple) else row.get('short_code')
+                    logger.info(f"[ADD TAG] Найдена существующая подборка с таким названием: id={existing_tag_id}, code={existing_tag_code}")
         except Exception as e:
-            logger.error(f"[ADD TAG] Ошибка создания тега: {e}", exc_info=True)
-            try:
-                conn.rollback()
-            except:
-                pass
-            bot.reply_to(message, "❌ Ошибка при создании подборки в базе данных.")
-            if user_id in user_add_tag_state:
-                del user_add_tag_state[user_id]
-            return
+            logger.error(f"[ADD TAG] Ошибка проверки существующей подборки: {e}", exc_info=True)
         finally:
             try:
-                cursor.close()
+                cursor_check.close()
             except:
                 pass
             try:
-                conn.close()
+                conn_check.close()
             except:
                 pass
         
-        # Добавляем фильмы в тег
+        # Если подборка существует, используем её, иначе создаём новую
+        if existing_tag_id:
+            tag_id = existing_tag_id
+            short_code = existing_tag_code
+            bot.reply_to(message, f"ℹ️ Подборка с названием <b>\"{tag_name}\"</b> уже существует. Добавляю только новые фильмы/сериалы.", parse_mode='HTML')
+        else:
+            # Генерируем короткий код для ссылки
+            short_code = secrets.token_urlsafe(8).upper()[:12]  # 12 символов
+            
+            # Проверяем уникальность кода
+            conn_code = get_db_connection()
+            cursor_code = get_db_cursor()
+            code_unique = False
+            attempts = 0
+            while not code_unique and attempts < 10:
+                try:
+                    with db_lock:
+                        cursor_code.execute('SELECT id FROM tags WHERE short_code = %s', (short_code,))
+                        if not cursor_code.fetchone():
+                            code_unique = True
+                        else:
+                            short_code = secrets.token_urlsafe(8).upper()[:12]
+                            attempts += 1
+                except:
+                    pass
+            
+            try:
+                cursor_code.close()
+            except:
+                pass
+            try:
+                conn_code.close()
+            except:
+                pass
+            
+            if not code_unique:
+                bot.reply_to(message, "❌ Не удалось сгенерировать уникальный код. Попробуйте позже.")
+                if user_id in user_add_tag_state:
+                    del user_add_tag_state[user_id]
+                return
+            
+            # Создаем тег в БД
+            conn = get_db_connection()
+            cursor = get_db_cursor()
+            
+            try:
+                with db_lock:
+                    cursor.execute('''
+                        INSERT INTO tags (name, short_code, created_by)
+                        VALUES (%s, %s, %s)
+                        RETURNING id
+                    ''', (tag_name, short_code, user_id))
+                    tag_id = cursor.fetchone()[0]
+                    conn.commit()
+                    logger.info(f"[ADD TAG] Создан тег id={tag_id}, name='{tag_name}', code={short_code}")
+            except Exception as e:
+                logger.error(f"[ADD TAG] Ошибка создания тега: {e}", exc_info=True)
+                try:
+                    conn.rollback()
+                except:
+                    pass
+                bot.reply_to(message, "❌ Ошибка при создании подборки в базе данных.")
+                if user_id in user_add_tag_state:
+                    del user_add_tag_state[user_id]
+                return
+            finally:
+                try:
+                    cursor.close()
+                except:
+                    pass
+                try:
+                    conn.close()
+                except:
+                    pass
+        
+        # Добавляем фильмы в тег (только новые, если подборка уже существовала)
         added_count = 0
+        already_in_tag = 0
         errors = []
         
         for kp_id in kp_ids:
@@ -217,19 +257,24 @@ def handle_add_tag_reply(message):
                 
                 is_series = info.get('is_series', False)
                 
-                # Добавляем в tag_movies
+                # Добавляем в tag_movies (проверяем, не добавлен ли уже)
                 conn_add = get_db_connection()
                 cursor_add = get_db_cursor()
                 try:
                     with db_lock:
-                        cursor_add.execute('''
-                            INSERT INTO tag_movies (tag_id, kp_id, is_series)
-                            VALUES (%s, %s, %s)
-                            ON CONFLICT (tag_id, kp_id) DO NOTHING
-                        ''', (tag_id, kp_id, is_series))
-                        conn_add.commit()
-                        added_count += 1
-                        logger.info(f"[ADD TAG] Добавлен kp_id={kp_id} (is_series={is_series}) в тег {tag_id}")
+                        # Проверяем, есть ли уже этот фильм в подборке
+                        cursor_add.execute('SELECT id FROM tag_movies WHERE tag_id = %s AND kp_id = %s', (tag_id, kp_id))
+                        if cursor_add.fetchone():
+                            already_in_tag += 1
+                            logger.info(f"[ADD TAG] kp_id={kp_id} уже есть в подборке {tag_id}, пропускаем")
+                        else:
+                            cursor_add.execute('''
+                                INSERT INTO tag_movies (tag_id, kp_id, is_series)
+                                VALUES (%s, %s, %s)
+                            ''', (tag_id, kp_id, is_series))
+                            conn_add.commit()
+                            added_count += 1
+                            logger.info(f"[ADD TAG] Добавлен kp_id={kp_id} (is_series={is_series}) в тег {tag_id}")
                 except Exception as e:
                     logger.error(f"[ADD TAG] Ошибка добавления kp_id={kp_id}: {e}")
                     errors.append(f"{kp_id}: ошибка БД")
@@ -252,9 +297,16 @@ def handle_add_tag_reply(message):
         deep_link = f"https://t.me/{bot_username}?start=tag_{short_code}"
         
         # Формируем ответ
-        result_text = f"✅ <b>Подборка создана!</b>\n\n"
+        if existing_tag_id:
+            result_text = f"✅ <b>Подборка обновлена!</b>\n\n"
+        else:
+            result_text = f"✅ <b>Подборка создана!</b>\n\n"
+        
         result_text += f"📌 <b>Название:</b> {tag_name}\n"
-        result_text += f"🎬 <b>Добавлено фильмов/сериалов:</b> {added_count}\n"
+        result_text += f"🎬 <b>Добавлено новых:</b> {added_count}\n"
+        
+        if already_in_tag > 0:
+            result_text += f"ℹ️ <b>Уже было в подборке:</b> {already_in_tag}\n"
         
         if errors:
             result_text += f"\n⚠️ <b>Ошибки ({len(errors)}):</b>\n"
@@ -266,7 +318,54 @@ def handle_add_tag_reply(message):
         result_text += f"\n🔗 <b>Ссылка для добавления:</b>\n"
         result_text += f"<code>{deep_link}</code>"
         
-        bot.reply_to(message, result_text, parse_mode='HTML')
+        # Проверяем, есть ли общие группы у пользователя и бота
+        # Получаем список групп из подписок
+        common_groups = []
+        conn_groups = get_db_connection()
+        cursor_groups = get_db_cursor()
+        try:
+            with db_lock:
+                # Получаем все чаты, где есть подписки пользователя
+                cursor_groups.execute('''
+                    SELECT DISTINCT chat_id 
+                    FROM subscriptions 
+                    WHERE user_id = %s AND chat_id < 0
+                ''', (user_id,))
+                user_groups = [row[0] if isinstance(row, tuple) else row.get('chat_id') for row in cursor_groups.fetchall()]
+                
+                # Проверяем, в каких из этих групп есть бот
+                for group_id in user_groups:
+                    try:
+                        chat = bot.get_chat(group_id)
+                        if chat.type in ['group', 'supergroup']:
+                            # Проверяем, что бот является участником
+                            try:
+                                member = bot.get_chat_member(group_id, bot.get_me().id)
+                                if member.status in ['member', 'administrator', 'creator']:
+                                    common_groups.append((group_id, chat.title or f"Группа {group_id}"))
+                            except:
+                                pass
+                    except Exception as e:
+                        logger.warning(f"[ADD TAG] Ошибка проверки группы {group_id}: {e}")
+                        continue
+        except Exception as e:
+            logger.error(f"[ADD TAG] Ошибка получения списка групп: {e}", exc_info=True)
+        finally:
+            try:
+                cursor_groups.close()
+            except:
+                pass
+            try:
+                conn_groups.close()
+            except:
+                pass
+        
+        markup = InlineKeyboardMarkup()
+        if common_groups:
+            # Добавляем кнопку "Добавить в группу"
+            markup.add(InlineKeyboardButton("📢 Добавить в группу", callback_data=f"tag_add_to_group:{tag_id}"))
+        
+        bot.reply_to(message, result_text, parse_mode='HTML', reply_markup=markup if common_groups else None)
         
         # Очищаем состояние
         if user_id in user_add_tag_state:
