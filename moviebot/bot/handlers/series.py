@@ -691,7 +691,7 @@ def show_film_info_with_buttons(
             has_premiere_reminder = False
             try:
                 if user_id is not None:
-            with db_lock:
+                    with db_lock:
                         cursor_prem = conn_prem.cursor()
                         cursor_prem.execute("""
                             SELECT 1 FROM premiere_reminders
