@@ -4487,6 +4487,7 @@ def handle_clean_confirm_internal(message):
         watched_deleted = 0
         stats_deleted = 0
         settings_deleted = 0
+        tags_deleted = 0
         try:
             with db_lock:
                 # Удаляем оценки пользователя (но не импортированные - они удаляются отдельной командой)
