@@ -165,8 +165,8 @@ def get_film_current_state(chat_id, kp_id, user_id=None):
             ticket_file_id = plan_data['ticket_file_id']
             
             # Форматируем дату (ВНЕ db_lock, чтобы избежать дедлока)
-                    date_str = "не указана"
-                    if plan_dt_value and user_id:
+            date_str = "не указана"
+            if plan_dt_value and user_id:
                         try:
                     # ВАЖНО: Вызываем get_user_timezone_or_default ВНЕ db_lock, чтобы избежать дедлока
                     logger.info(f"[GET FILM STATE] Вызов get_user_timezone_or_default для user_id={user_id}")
