@@ -33,17 +33,11 @@ def add_tags_command(message):
         bot.reply_to(message, "❌ Эта команда доступна только администраторам.")
         return
     
-    # Устанавливаем состояние
-    user_add_tag_state[user_id] = {
-        'step': 'waiting_for_tag_data',
-        'chat_id': chat_id,
-        'prompt_message_id': message.message_id
-    }
-    
+    # Сначала отправляем промпт
     prompt_msg = bot.reply_to(
         message,
         "📝 <b>Создание подборки</b>\n\n"
-        "В ответном сообщении (или следующем) пришлите:\n"
+        "В ответном сообщении пришлите:\n"
         "• Название подборки в кавычках (например: \"watch с Викулей\")\n"
         "• Ссылки на фильмы/сериалы с Кинопоиска\n\n"
         "Пример:\n"
@@ -53,9 +47,18 @@ def add_tags_command(message):
         parse_mode='HTML'
     )
     
-    # Сохраняем message_id промпта в состояние
-    if prompt_msg:
-        user_add_tag_state[user_id]['prompt_message_id'] = prompt_msg.message_id
+    # Сохраняем message_id промпта ПЕРЕД установкой состояния
+    prompt_message_id = prompt_msg.message_id if prompt_msg else None
+    logger.info(f"[ADD TAG COMMAND] Создан промпт с message_id={prompt_message_id} для user_id={user_id}")
+    
+    # Устанавливаем состояние с правильным prompt_message_id
+    user_add_tag_state[user_id] = {
+        'step': 'waiting_for_tag_data',
+        'chat_id': chat_id,
+        'prompt_message_id': prompt_message_id
+    }
+    
+    logger.info(f"[ADD TAG COMMAND] Состояние установлено: {user_add_tag_state[user_id]}")
 
 
 def check_add_tag_reply(message):
