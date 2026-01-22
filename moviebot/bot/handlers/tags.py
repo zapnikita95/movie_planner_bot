@@ -10,7 +10,7 @@ from moviebot.database.db_connection import get_db_connection, get_db_cursor, db
 from moviebot.utils.admin import is_admin, is_owner
 from moviebot.api.kinopoisk_api import extract_movie_info
 from moviebot.utils.parsing import extract_kp_id_from_text
-from moviebot.bot.handlers.text_messages import ensure_movie_in_database
+from moviebot.bot.handlers.series import ensure_movie_in_database
 from moviebot.states import user_plan_state, user_view_film_state, user_mark_watched_state
 
 logger = logging.getLogger(__name__)
