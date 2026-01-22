@@ -162,7 +162,12 @@ def register_rate_handlers(bot):
                 return
         
         if not unwatched_films:
-            bot.reply_to(message, "✅ Все просмотренные фильмы уже оценены!")
+            text = "✅ Все просмотренные фильмы уже оценены!\n\nВы можете:\n• Отметить фильм просмотренным в базе\n• Найти фильм, который вы смотрели, через поиск"
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("🗃️ Перейти в базу", callback_data="database:unwatched"))
+            markup.add(InlineKeyboardButton("🔍 Найти фильм", callback_data="start_menu:search"))
+            markup.add(InlineKeyboardButton("◀️ Назад в базу", callback_data="back_to_database"))
+            bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
             return
         
         # Формируем список фильмов для оценки

@@ -564,9 +564,11 @@ def tags_command(message):
             pass
     
     if not tags_list:
-        markup = InlineKeyboardMarkup()
+        text = "🏷️ <b>Теги</b>\n\nПока что тегов не добавлено, следите за кино пабликами и новостями!"
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("🔍 Найти фильм", callback_data="start_menu:search"))
         markup.add(InlineKeyboardButton("◀️ Назад в базу", callback_data="back_to_database"))
-        bot.reply_to(message, "🏷️ <b>Теги</b>\n\nУ вас пока нет добавленных подборок.", parse_mode='HTML', reply_markup=markup)
+        bot.reply_to(message, text, parse_mode='HTML', reply_markup=markup)
         return
     
     text = "🏷️ <b>Тут собраны все добавленные подборки</b>\n\n"
@@ -861,8 +863,9 @@ def handle_tags_list(call):
                 pass
         
         if not tags_list:
-            text = "🏷️ <b>Теги</b>\n\nУ вас пока нет добавленных подборок."
-            markup = InlineKeyboardMarkup()
+            text = "🏷️ <b>Теги</b>\n\nПока что тегов не добавлено, следите за кино пабликами и новостями!"
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("🔍 Найти фильм", callback_data="start_menu:search"))
             markup.add(InlineKeyboardButton("◀️ Назад в базу", callback_data="back_to_database"))
             bot.edit_message_text(text, chat_id, call.message.message_id, parse_mode='HTML', reply_markup=markup)
             return
@@ -924,19 +927,114 @@ def handle_database_action(call):
             from moviebot.bot.handlers.list import show_list_page
             show_list_page(bot, chat_id, user_id, page=1, message_id=call.message.message_id)
         elif action == "unrated":
-            # Вызываем /rate
-            from moviebot.bot.handlers.rate import rate_command
+            # Вызываем /rate - используем внутреннюю функцию rate_movie из register_rate_handlers
+            # Создаем фейковое сообщение для вызова обработчика
             class FakeMessage:
                 def __init__(self, call):
                     self.from_user = call.from_user
                     self.chat = call.message.chat
                     self.text = '/rate'
+                    self.message_id = call.message.message_id
             fake_msg = FakeMessage(call)
-            rate_command(fake_msg)
+            # Импортируем и вызываем обработчик напрямую
+            from moviebot.bot.handlers.rate import register_rate_handlers
+            # Создаем временный обработчик для вызова
+            import types
+            temp_bot = types.SimpleNamespace()
+            temp_bot.reply_to = lambda msg, text, **kwargs: bot.send_message(call.message.chat.id, text, **kwargs)
+            # Вызываем обработчик напрямую
+            conn_local = get_db_connection()
+            cursor_local = get_db_cursor()
             try:
-                bot.delete_message(chat_id, call.message.message_id)
+                # Получаем все просмотренные фильмы без оценок
+                with db_lock:
+                    cursor_local.execute('''
+                        SELECT m.id, m.kp_id, m.title, m.year
+                        FROM movies m
+                        WHERE m.chat_id = %s AND m.watched = 1
+                        AND NOT (
+                            NOT EXISTS (
+                                SELECT 1 FROM ratings r 
+                                WHERE r.chat_id = m.chat_id 
+                                AND r.film_id = m.id 
+                                AND (r.is_imported = FALSE OR r.is_imported IS NULL)
+                            )
+                            AND EXISTS (
+                                SELECT 1 FROM ratings r 
+                                WHERE r.chat_id = m.chat_id 
+                                AND r.film_id = m.id 
+                                AND r.is_imported = TRUE
+                            )
+                        )
+                        AND NOT EXISTS (
+                            SELECT 1 FROM ratings r 
+                            WHERE r.chat_id = m.chat_id 
+                            AND r.film_id = m.id 
+                            AND r.user_id = %s
+                            AND (r.is_imported = FALSE OR r.is_imported IS NULL)
+                        )
+                        ORDER BY m.title
+                        LIMIT 10
+                    ''', (chat_id, user_id))
+                    unwatched_films = cursor_local.fetchall()
+            except Exception as db_e:
+                logger.error(f"[DATABASE ACTION] Ошибка запроса списка фильмов: {db_e}", exc_info=True)
+                try:
+                    bot.edit_message_text("❌ Ошибка доступа к базе данных", chat_id, call.message.message_id)
+                except:
+                    pass
+                return
+            finally:
+                try:
+                    cursor_local.close()
+                except:
+                    pass
+                try:
+                    conn_local.close()
+                except:
+                    pass
+            
+            if not unwatched_films:
+                text = "✅ Все просмотренные фильмы уже оценены!\n\nВы можете:\n• Отметить фильм просмотренным в базе\n• Найти фильм, который вы смотрели, через поиск"
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("🗃️ Перейти в базу", callback_data="database:unwatched"))
+                markup.add(InlineKeyboardButton("🔍 Найти фильм", callback_data="start_menu:search"))
+                markup.add(InlineKeyboardButton("◀️ Назад в базу", callback_data="back_to_database"))
+                try:
+                    bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                except:
+                    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                return
+            
+            # Формируем список фильмов для оценки
+            text = "⭐ <b>Оцените просмотренные фильмы:</b>\n\n"
+            markup = InlineKeyboardMarkup(row_width=1)
+            
+            for row in unwatched_films:
+                if isinstance(row, dict):
+                    film_id = row.get('id')
+                    kp_id = row.get('kp_id')
+                    title = row.get('title')
+                    year = row.get('year')
+                else:
+                    film_id = row[0] if row else None
+                    kp_id = row[1]
+                    title = row[2]
+                    year = row[3] if len(row) > 3 else '—'
+                
+                text += f"• <b>{title}</b> ({year})\n"
+                button_text = f"{title} ({year})"
+                if len(button_text) > 50:
+                    button_text = button_text[:47] + "..."
+                markup.add(InlineKeyboardButton(button_text, callback_data=f"rate_from_list:{int(kp_id)}"))
+            
+            text += "\n<i>Нажмите на фильм, чтобы открыть его описание и оценить</i>"
+            markup.add(InlineKeyboardButton("◀️ Назад в базу", callback_data="back_to_database"))
+            
+            try:
+                bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
             except:
-                pass
+                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
         elif action == "tags":
             # Показываем список тегов
             tags_command(call.message)
