@@ -872,10 +872,11 @@ def show_schedule(message):
             has_shazam_access = has_recommendations_access(chat_id, user_id)
             has_tickets = has_tickets_access(chat_id, user_id)
             
-            # Строка 1: Сериалы / Премьеры
+            # Строка 1: Сериалы / Премьеры / База (маленькая кнопка)
             markup.row(
                 InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"),
-                InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres")
+                InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres"),
+                InlineKeyboardButton("🗄️", callback_data="start_menu:database")
             )
             
             # Строка 2: Поиск
