@@ -4514,6 +4514,11 @@ def handle_clean_confirm_internal(message):
                 settings_deleted = cursor_local.rowcount
                 logger.info(f"[CLEAN CONFIRM] Удалено настроек: {settings_deleted}")
                 
+                # Удаляем все подборки пользователя (user_tag_movies)
+                cursor_local.execute('DELETE FROM user_tag_movies WHERE user_id = %s AND chat_id = %s', (user_id, chat_id))
+                tags_deleted = cursor_local.rowcount
+                logger.info(f"[CLEAN CONFIRM] Удалено подборок: {tags_deleted}")
+                
                 conn_local.commit()
         finally:
             try:
@@ -4531,7 +4536,8 @@ def handle_clean_confirm_internal(message):
         result_text += f"• Планов: {plans_deleted}\n"
         result_text += f"• Отметок просмотра: {watched_deleted}\n"
         result_text += f"• Статистики: {stats_deleted}\n"
-        result_text += f"• Настроек: {settings_deleted}"
+        result_text += f"• Настроек: {settings_deleted}\n"
+        result_text += f"• Подборок: {tags_deleted}"
         
         try:
             chat_info = bot.get_chat(message.chat.id)

@@ -431,54 +431,7 @@ def handle_add_tag_reply(message):
         result_text += f"\n🔗 <b>Ссылка для добавления:</b>\n"
         result_text += f"<code>{deep_link}</code>"
         
-        # Проверяем, есть ли общие группы у пользователя и бота
-        # Получаем список групп из подписок
-        common_groups = []
-        conn_groups = get_db_connection()
-        cursor_groups = get_db_cursor()
-        try:
-            with db_lock:
-                # Получаем все чаты, где есть подписки пользователя
-                cursor_groups.execute('''
-                    SELECT DISTINCT chat_id 
-                    FROM subscriptions 
-                    WHERE user_id = %s AND chat_id < 0
-                ''', (user_id,))
-                user_groups = [row[0] if isinstance(row, tuple) else row.get('chat_id') for row in cursor_groups.fetchall()]
-                
-                # Проверяем, в каких из этих групп есть бот
-                for group_id in user_groups:
-                    try:
-                        chat = bot.get_chat(group_id)
-                        if chat.type in ['group', 'supergroup']:
-                            # Проверяем, что бот является участником
-                            try:
-                                member = bot.get_chat_member(group_id, bot.get_me().id)
-                                if member.status in ['member', 'administrator', 'creator']:
-                                    common_groups.append((group_id, chat.title or f"Группа {group_id}"))
-                            except:
-                                pass
-                    except Exception as e:
-                        logger.warning(f"[ADD TAG] Ошибка проверки группы {group_id}: {e}")
-                        continue
-        except Exception as e:
-            logger.error(f"[ADD TAG] Ошибка получения списка групп: {e}", exc_info=True)
-        finally:
-            try:
-                cursor_groups.close()
-            except:
-                pass
-            try:
-                conn_groups.close()
-            except:
-                pass
-        
-        markup = InlineKeyboardMarkup()
-        if common_groups:
-            # Добавляем кнопку "Добавить в группу"
-            markup.add(InlineKeyboardButton("📢 Добавить в группу", callback_data=f"tag_add_to_group:{tag_id}"))
-        
-        bot.reply_to(message, result_text, parse_mode='HTML', reply_markup=markup if common_groups else None)
+        bot.reply_to(message, result_text, parse_mode='HTML')
         
         # Очищаем состояние
         if user_id in user_add_tag_state:
@@ -670,6 +623,163 @@ def handle_tag_deep_link(bot, message, short_code):
             pass
     
     bot.reply_to(message, text, parse_mode='HTML', reply_markup=markup)
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("tag_add_to_existing:"))
+def handle_tag_add_to_existing(call):
+    """Обработчик подтверждения добавления фильмов к существующему тегу"""
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    parts = call.data.split(":")
+    tag_id = int(parts[1])
+    tag_name = ":".join(parts[2:])  # Название может содержать ":"
+    
+    logger.info(f"[TAG ADD TO EXISTING] user_id={user_id}, tag_id={tag_id}, tag_name={tag_name}")
+    
+    try:
+        bot.answer_callback_query(call.id, "⏳ Добавляю фильмы...")
+        
+        # Получаем сохраненные данные
+        if user_id not in user_add_tag_state or 'pending_add' not in user_add_tag_state[user_id]:
+            bot.edit_message_text("❌ Данные не найдены. Начните заново.", chat_id, call.message.message_id)
+            return
+        
+        pending_data = user_add_tag_state[user_id]['pending_add']
+        kp_ids = pending_data['kp_ids']
+        short_code = pending_data['short_code']
+        
+        # Проверяем, что tag_id совпадает
+        if pending_data['tag_id'] != tag_id:
+            bot.edit_message_text("❌ Ошибка: несоответствие данных.", chat_id, call.message.message_id)
+            if user_id in user_add_tag_state:
+                del user_add_tag_state[user_id]
+            return
+        
+        # Добавляем фильмы к существующему тегу (только новые, без дублей)
+        added_count = 0
+        already_in_tag = 0
+        errors = []
+        
+        for kp_id in kp_ids:
+            try:
+                # Определяем, фильм это или сериал
+                link = f"https://www.kinopoisk.ru/film/{kp_id}/"
+                info = extract_movie_info(link)
+                
+                if not info:
+                    # Пробуем как сериал
+                    link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+                    info = extract_movie_info(link)
+                
+                if not info:
+                    errors.append(f"{kp_id}: не удалось получить информацию")
+                    continue
+                
+                is_series = info.get('is_series', False)
+                
+                # Добавляем фильм в админскую базу для быстрого получения названий
+                ADMIN_CHAT_ID = 301810276
+                conn_admin = get_db_connection()
+                cursor_admin = get_db_cursor()
+                try:
+                    with db_lock:
+                        cursor_admin.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (ADMIN_CHAT_ID, kp_id))
+                        if not cursor_admin.fetchone():
+                            from moviebot.bot.handlers.series import ensure_movie_in_database
+                            ensure_movie_in_database(ADMIN_CHAT_ID, kp_id, link, info, ADMIN_CHAT_ID)
+                            logger.info(f"[ADD TAG] Добавлен kp_id={kp_id} в админскую базу для быстрого доступа")
+                except Exception as e:
+                    logger.warning(f"[ADD TAG] Ошибка добавления в админскую базу kp_id={kp_id}: {e}")
+                finally:
+                    try:
+                        cursor_admin.close()
+                    except:
+                        pass
+                    try:
+                        conn_admin.close()
+                    except:
+                        pass
+                
+                # Добавляем в tag_movies (проверяем, не добавлен ли уже - дубли не создаем)
+                conn_add = get_db_connection()
+                cursor_add = get_db_cursor()
+                try:
+                    with db_lock:
+                        # Проверяем, есть ли уже этот фильм в подборке
+                        cursor_add.execute('SELECT id FROM tag_movies WHERE tag_id = %s AND kp_id = %s', (tag_id, kp_id))
+                        if cursor_add.fetchone():
+                            already_in_tag += 1
+                            logger.info(f"[ADD TAG] kp_id={kp_id} уже есть в подборке {tag_id}, пропускаем (дубль)")
+                        else:
+                            cursor_add.execute('''
+                                INSERT INTO tag_movies (tag_id, kp_id, is_series)
+                                VALUES (%s, %s, %s)
+                            ''', (tag_id, kp_id, is_series))
+                            conn_add.commit()
+                            added_count += 1
+                            logger.info(f"[ADD TAG] Добавлен kp_id={kp_id} (is_series={is_series}) в тег {tag_id}")
+                except Exception as e:
+                    logger.error(f"[ADD TAG] Ошибка добавления kp_id={kp_id}: {e}")
+                    errors.append(f"{kp_id}: ошибка БД")
+                finally:
+                    try:
+                        cursor_add.close()
+                    except:
+                        pass
+                    try:
+                        conn_add.close()
+                    except:
+                        pass
+                        
+            except Exception as e:
+                logger.error(f"[ADD TAG] Ошибка обработки kp_id={kp_id}: {e}", exc_info=True)
+                errors.append(f"{kp_id}: {str(e)[:50]}")
+        
+        # Формируем итоговое сообщение
+        result_text = f"✅ <b>Фильмы добавлены в подборку '{tag_name}'!</b>\n\n"
+        
+        if added_count > 0:
+            result_text += f"✅ Добавлено новых: <b>{added_count}</b>\n"
+        if already_in_tag > 0:
+            result_text += f"ℹ️ Пропущено дублей: <b>{already_in_tag}</b>\n"
+        if errors:
+            result_text += f"❌ Ошибок: <b>{len(errors)}</b>\n"
+        
+        result_text += f"\n🔗 Ссылка на подборку:\n"
+        bot_username = bot.get_me().username
+        deep_link = f"https://t.me/{bot_username}?start=tag_{short_code}"
+        result_text += f"<code>{deep_link}</code>"
+        
+        # Очищаем состояние
+        if user_id in user_add_tag_state:
+            del user_add_tag_state[user_id]
+        
+        bot.edit_message_text(result_text, chat_id, call.message.message_id, parse_mode='HTML')
+        
+    except Exception as e:
+        logger.error(f"[TAG ADD TO EXISTING] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка при добавлении", show_alert=True)
+        except:
+            pass
+        if user_id in user_add_tag_state:
+            del user_add_tag_state[user_id]
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "tag_cancel_add")
+def handle_tag_cancel_add(call):
+    """Обработчик отмены добавления к существующему тегу"""
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    
+    try:
+        bot.answer_callback_query(call.id, "❌ Отменено")
+        bot.edit_message_text("❌ Добавление отменено.", chat_id, call.message.message_id)
+        
+        if user_id in user_add_tag_state:
+            del user_add_tag_state[user_id]
+    except Exception as e:
+        logger.error(f"[TAG CANCEL ADD] Ошибка: {e}", exc_info=True)
 
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("tag_confirm:"))
@@ -886,6 +996,52 @@ def handle_tag_confirm(call):
         
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("🏷️ Посмотреть подборку", callback_data=f"tag_view:{tag_info['id']}"))
+        
+        # Проверяем, есть ли общие группы у пользователя и бота для кнопки "Добавить в группу"
+        common_groups = []
+        conn_groups = get_db_connection()
+        cursor_groups = get_db_cursor()
+        try:
+            with db_lock:
+                # Получаем все чаты, где есть подписки пользователя
+                cursor_groups.execute('''
+                    SELECT DISTINCT chat_id 
+                    FROM subscriptions 
+                    WHERE user_id = %s AND chat_id < 0
+                ''', (user_id,))
+                user_groups = [row[0] if isinstance(row, tuple) else row.get('chat_id') for row in cursor_groups.fetchall()]
+                
+                # Проверяем, в каких из этих групп есть бот
+                for group_id in user_groups:
+                    try:
+                        chat = bot.get_chat(group_id)
+                        if chat.type in ['group', 'supergroup']:
+                            # Проверяем, что бот является участником
+                            try:
+                                member = bot.get_chat_member(group_id, bot.get_me().id)
+                                if member.status in ['member', 'administrator', 'creator']:
+                                    common_groups.append((group_id, chat.title or f"Группа {group_id}"))
+                            except:
+                                pass
+                    except Exception as e:
+                        logger.warning(f"[TAG ADD TO GROUP] Ошибка проверки группы {group_id}: {e}")
+                        continue
+        except Exception as e:
+            logger.error(f"[TAG ADD TO GROUP] Ошибка получения списка групп: {e}", exc_info=True)
+        finally:
+            try:
+                cursor_groups.close()
+            except:
+                pass
+            try:
+                conn_groups.close()
+            except:
+                pass
+        
+        if common_groups:
+            # Добавляем кнопку "Добавить в группу"
+            markup.add(InlineKeyboardButton("📢 Добавить в группу", callback_data=f"tag_add_to_group:{tag_info['id']}"))
+        
         markup.add(InlineKeyboardButton("◀️ В базу", callback_data="back_to_database"))
         
         bot.edit_message_text(result_text, chat_id, call.message.message_id, parse_mode='HTML', reply_markup=markup)
@@ -924,17 +1080,19 @@ def tags_command(message):
     
     try:
         with db_lock:
-            # Получаем все подборки с количеством фильмов у пользователя
+            # Получаем все подборки с количеством фильмов у пользователя и проверяем, все ли просмотрены
             cursor.execute('''
                 SELECT t.id, t.name, 
-                       COALESCE(COUNT(DISTINCT utm.film_id), 0) as user_films_count,
-                       COUNT(DISTINCT tm.kp_id) as total_films_count
+                       COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL THEN utm.film_id END), 0) as user_films_count,
+                       COUNT(DISTINCT tm.kp_id) as total_films_count,
+                       COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL AND m.watched = 1 THEN utm.film_id END), 0) as watched_films_count
                 FROM tags t
                 LEFT JOIN tag_movies tm ON t.id = tm.tag_id
                 LEFT JOIN user_tag_movies utm ON t.id = utm.tag_id AND utm.user_id = %s AND utm.chat_id = %s
+                LEFT JOIN movies m ON utm.film_id = m.id AND m.chat_id = %s
                 GROUP BY t.id, t.name
                 ORDER BY t.name
-            ''', (user_id, chat_id))
+            ''', (user_id, chat_id, chat_id))
             tags_list = cursor.fetchall()
     except Exception as e:
         logger.error(f"[TAGS] Ошибка получения списка подборок: {e}", exc_info=True)
@@ -959,18 +1117,47 @@ def tags_command(message):
     text = "🏷️ <b>Тут собраны все добавленные подборки</b>\n\n"
     markup = InlineKeyboardMarkup(row_width=1)
     
+    # Разделяем на просмотренные и непросмотренные
+    unwatched_tags = []
+    watched_tags = []
+    
     for tag_row in tags_list:
         tag_id = tag_row[0] if isinstance(tag_row, tuple) else tag_row.get('id')
         tag_name = tag_row[1] if isinstance(tag_row, tuple) else tag_row.get('name')
         user_films_count = tag_row[2] if isinstance(tag_row, tuple) else tag_row.get('user_films_count', 0)
         total_films_count = tag_row[3] if isinstance(tag_row, tuple) else tag_row.get('total_films_count', 0)
+        watched_films_count = tag_row[4] if isinstance(tag_row, tuple) else tag_row.get('watched_films_count', 0)
         
-        # Показываем количество фильмов у пользователя, если есть, иначе общее количество
-        count_text = f"{user_films_count}" if user_films_count > 0 else f"0/{total_films_count}"
-        button_text = f"📦 {tag_name} ({count_text})"
+        # Если у пользователя есть фильмы в теге и все они просмотрены - тег просмотрен
+        is_watched = user_films_count > 0 and watched_films_count == user_films_count
+        
+        tag_info = {
+            'id': tag_id,
+            'name': tag_name,
+            'user_films_count': user_films_count,
+            'total_films_count': total_films_count,
+            'watched_films_count': watched_films_count,
+            'is_watched': is_watched
+        }
+        
+        if is_watched:
+            watched_tags.append(tag_info)
+        else:
+            unwatched_tags.append(tag_info)
+    
+    # Сначала показываем непросмотренные
+    for tag_info in unwatched_tags:
+        count_text = f"{tag_info['user_films_count']}" if tag_info['user_films_count'] > 0 else f"0/{tag_info['total_films_count']}"
+        button_text = f"📦 {tag_info['name']} ({count_text})"
         if len(button_text) > 60:
             button_text = button_text[:57] + "..."
-        markup.add(InlineKeyboardButton(button_text, callback_data=f"tag_view:{tag_id}"))
+        markup.add(InlineKeyboardButton(button_text, callback_data=f"tag_view:{tag_info['id']}"))
+    
+    # Кнопка "✅ Просмотренные" если есть просмотренные теги
+    if watched_tags:
+        watched_count = len(watched_tags)
+        watched_button_text = f"✅ Просмотренные ({watched_count})"
+        markup.add(InlineKeyboardButton(watched_button_text, callback_data="watched_tags_list"))
     
     markup.add(InlineKeyboardButton("◀️ Назад в базу", callback_data="back_to_database"))
     
@@ -1205,6 +1392,85 @@ def handle_tag_view(call):
         logger.error(f"[TAG VIEW] Ошибка: {e}", exc_info=True)
         try:
             bot.edit_message_text("❌ Ошибка при загрузке подборки.", call.message.chat.id, call.message.message_id)
+        except:
+            pass
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "watched_tags_list")
+def handle_watched_tags_list(call):
+    """Обработчик кнопки '✅ Просмотренные' для тегов"""
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    message_id = call.message.message_id
+    
+    logger.info(f"[WATCHED TAGS] Показ просмотренных тегов для user_id={user_id}")
+    
+    try:
+        safe_answer_callback_query(bot, call.id)
+        
+        conn = get_db_connection()
+        cursor = get_db_cursor()
+        watched_tags_list = []
+        
+        try:
+            with db_lock:
+                # Получаем все подборки, где все фильмы пользователя просмотрены
+                cursor.execute('''
+                    SELECT t.id, t.name, 
+                           COALESCE(COUNT(DISTINCT utm.film_id), 0) as user_films_count,
+                           COUNT(DISTINCT tm.kp_id) as total_films_count,
+                           COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL AND m.watched = 1 THEN utm.film_id END), 0) as watched_films_count
+                    FROM tags t
+                    LEFT JOIN tag_movies tm ON t.id = tm.tag_id
+                    LEFT JOIN user_tag_movies utm ON t.id = utm.tag_id AND utm.user_id = %s AND utm.chat_id = %s
+                    LEFT JOIN movies m ON utm.film_id = m.id AND m.chat_id = %s
+                    GROUP BY t.id, t.name
+                    HAVING COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL THEN utm.film_id END), 0) > 0
+                       AND COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL AND m.watched = 1 THEN utm.film_id END), 0) = 
+                           COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL THEN utm.film_id END), 0)
+                    ORDER BY t.name
+                ''', (user_id, chat_id, chat_id))
+                watched_tags_list = cursor.fetchall()
+        except Exception as e:
+            logger.error(f"[WATCHED TAGS] Ошибка получения списка просмотренных тегов: {e}", exc_info=True)
+        finally:
+            try:
+                cursor.close()
+            except:
+                pass
+            try:
+                conn.close()
+            except:
+                pass
+        
+        if not watched_tags_list:
+            text = "✅ <b>Просмотренные подборки</b>\n\nПока что нет полностью просмотренных подборок."
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("◀️ Назад к подборкам", callback_data="tags_list"))
+            bot.edit_message_text(text, chat_id, message_id, parse_mode='HTML', reply_markup=markup)
+            return
+        
+        text = f"✅ <b>Просмотренные подборки</b>\n\nНайдено: {len(watched_tags_list)}\n\n"
+        markup = InlineKeyboardMarkup(row_width=1)
+        
+        for tag_row in watched_tags_list:
+            tag_id = tag_row[0] if isinstance(tag_row, tuple) else tag_row.get('id')
+            tag_name = tag_row[1] if isinstance(tag_row, tuple) else tag_row.get('name')
+            user_films_count = tag_row[2] if isinstance(tag_row, tuple) else tag_row.get('user_films_count', 0)
+            
+            button_text = f"✅ {tag_name} ({user_films_count})"
+            if len(button_text) > 60:
+                button_text = button_text[:57] + "..."
+            markup.add(InlineKeyboardButton(button_text, callback_data=f"tag_view:{tag_id}"))
+        
+        markup.add(InlineKeyboardButton("◀️ Назад к подборкам", callback_data="tags_list"))
+        
+        bot.edit_message_text(text, chat_id, message_id, parse_mode='HTML', reply_markup=markup)
+        
+    except Exception as e:
+        logger.error(f"[WATCHED TAGS] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
         except:
             pass
 
