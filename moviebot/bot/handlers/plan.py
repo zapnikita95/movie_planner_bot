@@ -48,6 +48,11 @@ def process_plan(bot, user_id, chat_id, link, plan_type, day_or_date, message_da
     plan_dt = None
     needs_tz_check = False
     
+    # Проверяем, есть ли tag_id для возврата в подборку
+    tag_id = None
+    if user_id in user_plan_state:
+        tag_id = user_plan_state[user_id].get('tag_id')
+    
     # Проверяем, нужно ли уточнить часовой пояс (НО не прерываем текущее планирование)
     if message_date_utc:
         needs_tz_check = check_timezone_change(user_id, message_date_utc)
@@ -262,6 +267,13 @@ def process_plan(bot, user_id, chat_id, link, plan_type, day_or_date, message_da
             logger.info(f"[PROCESS PLAN] Добавлена кнопка 'Вернуться к описанию' с kp_id={kp_id_int}")
         except (ValueError, TypeError) as e:
             logger.warning(f"[PROCESS PLAN] Не удалось преобразовать kp_id в int: {kp_id}, ошибка: {e}")
+    
+    # Если есть tag_id, добавляем кнопку возврата в подборку
+    if tag_id:
+        if not markup.keyboard:
+            markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("◀️ Назад в базу", callback_data="back_to_database"))
+        logger.info(f"[PROCESS PLAN] Добавлена кнопка 'Назад в базу' для tag_id={tag_id}")
     
     # Проверяем, есть ли уже выбранный кинотеатр
     selected_streaming_service = None

@@ -501,7 +501,7 @@ def handle_tag_confirm(call):
         
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton("🏷️ Посмотреть подборку", callback_data=f"tag_view:{tag_info['id']}"))
-        markup.add(InlineKeyboardButton("◀️ В меню", callback_data="back_to_start_menu"))
+        markup.add(InlineKeyboardButton("◀️ В базу", callback_data="back_to_database"))
         
         bot.edit_message_text(result_text, chat_id, call.message.message_id, parse_mode='HTML', reply_markup=markup)
         
@@ -531,20 +531,23 @@ def tags_command(message):
     
     logger.info(f"[TAGS] Команда /tags от user_id={user_id}")
     
-    # Получаем список подборок, в которых есть фильмы у пользователя
+    # Получаем список всех подборок (не только тех, где есть фильмы у пользователя)
+    # Но показываем количество фильмов у пользователя в каждой подборке
     conn = get_db_connection()
     cursor = get_db_cursor()
     tags_list = []
     
     try:
         with db_lock:
+            # Получаем все подборки с количеством фильмов у пользователя
             cursor.execute('''
-                SELECT DISTINCT t.id, t.name, COUNT(DISTINCT utm.film_id) as user_films_count
+                SELECT t.id, t.name, 
+                       COALESCE(COUNT(DISTINCT utm.film_id), 0) as user_films_count,
+                       COUNT(DISTINCT tm.kp_id) as total_films_count
                 FROM tags t
-                INNER JOIN tag_movies tm ON t.id = tm.tag_id
+                LEFT JOIN tag_movies tm ON t.id = tm.tag_id
                 LEFT JOIN user_tag_movies utm ON t.id = utm.tag_id AND utm.user_id = %s AND utm.chat_id = %s
                 GROUP BY t.id, t.name
-                HAVING COUNT(DISTINCT utm.film_id) > 0
                 ORDER BY t.name
             ''', (user_id, chat_id))
             tags_list = cursor.fetchall()
@@ -572,9 +575,12 @@ def tags_command(message):
     for tag_row in tags_list:
         tag_id = tag_row[0] if isinstance(tag_row, tuple) else tag_row.get('id')
         tag_name = tag_row[1] if isinstance(tag_row, tuple) else tag_row.get('name')
-        films_count = tag_row[2] if isinstance(tag_row, tuple) else tag_row.get('user_films_count', 0)
+        user_films_count = tag_row[2] if isinstance(tag_row, tuple) else tag_row.get('user_films_count', 0)
+        total_films_count = tag_row[3] if isinstance(tag_row, tuple) else tag_row.get('total_films_count', 0)
         
-        button_text = f"📦 {tag_name} ({films_count})"
+        # Показываем количество фильмов у пользователя, если есть, иначе общее количество
+        count_text = f"{user_films_count}" if user_films_count > 0 else f"0/{total_films_count}"
+        button_text = f"📦 {tag_name} ({count_text})"
         if len(button_text) > 60:
             button_text = button_text[:57] + "..."
         markup.add(InlineKeyboardButton(button_text, callback_data=f"tag_view:{tag_id}"))
@@ -590,7 +596,7 @@ user_tag_list_state = {}
 
 def show_tag_films_page(bot, chat_id, user_id, tag_id, page=1, message_id=None):
     """Показывает страницу фильмов из подборки (аналогично show_list_page)"""
-    MOVIES_PER_PAGE = 10
+    MOVIES_PER_PAGE = 15  # Как в /list
     
     conn_local = get_db_connection()
     cursor_local = get_db_cursor()
@@ -661,7 +667,8 @@ def show_tag_films_page(bot, chat_id, user_id, tag_id, page=1, message_id=None):
         # Формируем текст страницы
         text = f"📦 <b>{tag_name}</b>\n\n"
         text += f"Просмотрено: {watched_count}/{total_count}\n\n"
-        text += f"Страница {page}/{total_pages}:\n\n"
+        if total_pages > 1:
+            text += f"Страница {page}/{total_pages}:\n\n"
         
         for row in page_movies:
             film_id = row.get('id') if isinstance(row, dict) else row[0]
@@ -820,21 +827,64 @@ def handle_tags_list(call):
     """Обработчик возврата к списку подборок"""
     try:
         bot.answer_callback_query(call.id)
-        # Имитируем команду /tags
-        class FakeMessage:
-            def __init__(self, call):
-                self.from_user = call.from_user
-                self.chat = call.message.chat
-                self.text = '/tags'
-                self.message_id = call.message.message_id
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
         
-        fake_msg = FakeMessage(call)
-        tags_command(fake_msg)
-        # Удаляем старое сообщение
+        # Получаем список всех подборок
+        conn = get_db_connection()
+        cursor = get_db_cursor()
+        tags_list = []
+        
         try:
-            bot.delete_message(call.message.chat.id, call.message.message_id)
-        except:
-            pass
+            with db_lock:
+                cursor.execute('''
+                    SELECT t.id, t.name, 
+                           COALESCE(COUNT(DISTINCT utm.film_id), 0) as user_films_count,
+                           COUNT(DISTINCT tm.kp_id) as total_films_count
+                    FROM tags t
+                    LEFT JOIN tag_movies tm ON t.id = tm.tag_id
+                    LEFT JOIN user_tag_movies utm ON t.id = utm.tag_id AND utm.user_id = %s AND utm.chat_id = %s
+                    GROUP BY t.id, t.name
+                    ORDER BY t.name
+                ''', (user_id, chat_id))
+                tags_list = cursor.fetchall()
+        except Exception as e:
+            logger.error(f"[TAGS LIST] Ошибка получения списка подборок: {e}", exc_info=True)
+        finally:
+            try:
+                cursor.close()
+            except:
+                pass
+            try:
+                conn.close()
+            except:
+                pass
+        
+        if not tags_list:
+            text = "🏷️ <b>Теги</b>\n\nУ вас пока нет добавленных подборок."
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("◀️ Назад в базу", callback_data="back_to_database"))
+            bot.edit_message_text(text, chat_id, call.message.message_id, parse_mode='HTML', reply_markup=markup)
+            return
+        
+        text = "🏷️ <b>Тут собраны все добавленные подборки</b>\n\n"
+        markup = InlineKeyboardMarkup(row_width=1)
+        
+        for tag_row in tags_list:
+            tag_id = tag_row[0] if isinstance(tag_row, tuple) else tag_row.get('id')
+            tag_name = tag_row[1] if isinstance(tag_row, tuple) else tag_row.get('name')
+            user_films_count = tag_row[2] if isinstance(tag_row, tuple) else tag_row.get('user_films_count', 0)
+            total_films_count = tag_row[3] if isinstance(tag_row, tuple) else tag_row.get('total_films_count', 0)
+            
+            count_text = f"{user_films_count}" if user_films_count > 0 else f"0/{total_films_count}"
+            button_text = f"📦 {tag_name} ({count_text})"
+            if len(button_text) > 60:
+                button_text = button_text[:57] + "..."
+            markup.add(InlineKeyboardButton(button_text, callback_data=f"tag_view:{tag_id}"))
+        
+        markup.add(InlineKeyboardButton("◀️ Назад в базу", callback_data="back_to_database"))
+        
+        bot.edit_message_text(text, chat_id, call.message.message_id, parse_mode='HTML', reply_markup=markup)
     except Exception as e:
         logger.error(f"[TAGS LIST] Ошибка: {e}", exc_info=True)
 
@@ -1040,7 +1090,6 @@ def handle_back_to_tag(call):
             del user_mark_watched_state[user_id]
         
         # Получаем текущую страницу из состояния
-        from moviebot.bot.handlers.tags import user_tag_list_state
         state = user_tag_list_state.get(user_id)
         if state and state.get('tag_id') == tag_id:
             page = state.get('page', 1)

@@ -575,6 +575,12 @@ def handle_view_film_reply_internal(message, state):
         # Показываем описание фильма с кнопками (всегда новое сообщение, не редактируем)
         show_film_info_with_buttons(chat_id, user_id, info, link, kp_id, existing_tuple, message_id=None)
         
+        # Если есть tag_id, после показа фильма возвращаемся в подборку
+        if tag_id:
+            # Не делаем ничего - пользователь может вернуться через кнопку в описании фильма
+            # Или можно добавить автоматический возврат, но это может быть навязчиво
+            pass
+        
     except Exception as e:
         logger.error(f"[VIEW FILM REPLY] Ошибка: {e}", exc_info=True)
         try:
