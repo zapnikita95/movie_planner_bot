@@ -439,8 +439,8 @@ def show_film_info_with_buttons(
                         finally:
                             try:
                                 cursor_check.close()
-                        except:
-                            pass
+                            except:
+                                pass
                             try:
                                 conn_check.close()
                             except:
