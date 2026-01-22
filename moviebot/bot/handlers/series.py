@@ -167,23 +167,23 @@ def get_film_current_state(chat_id, kp_id, user_id=None):
             # Форматируем дату (ВНЕ db_lock, чтобы избежать дедлока)
             date_str = "не указана"
             if plan_dt_value and user_id:
-                        try:
+                try:
                     # ВАЖНО: Вызываем get_user_timezone_or_default ВНЕ db_lock, чтобы избежать дедлока
                     logger.info(f"[GET FILM STATE] Вызов get_user_timezone_or_default для user_id={user_id}")
-                            user_tz = get_user_timezone_or_default(user_id)
+                    user_tz = get_user_timezone_or_default(user_id)
                     logger.info(f"[GET FILM STATE] Часовой пояс получен: {user_tz}")
-                            if isinstance(plan_dt_value, datetime):
-                                if plan_dt_value.tzinfo is None:
-                                    dt = pytz.utc.localize(plan_dt_value).astimezone(user_tz)
-                                else:
-                                    dt = plan_dt_value.astimezone(user_tz)
-                            else:
-                                dt = datetime.fromisoformat(str(plan_dt_value).replace('Z', '+00:00')).astimezone(user_tz)
-                            date_str = dt.strftime('%d.%m.%Y %H:%M')
+                    if isinstance(plan_dt_value, datetime):
+                        if plan_dt_value.tzinfo is None:
+                            dt = pytz.utc.localize(plan_dt_value).astimezone(user_tz)
+                        else:
+                            dt = plan_dt_value.astimezone(user_tz)
+                    else:
+                        dt = datetime.fromisoformat(str(plan_dt_value).replace('Z', '+00:00')).astimezone(user_tz)
+                    date_str = dt.strftime('%d.%m.%Y %H:%M')
                     logger.info(f"[GET FILM STATE] Дата отформатирована: {date_str}")
-                        except Exception as e:
+                except Exception as e:
                     logger.warning(f"[GET FILM STATE] Ошибка парсинга plan_datetime: {e}", exc_info=True)
-                            date_str = str(plan_dt_value)[:16] if plan_dt_value else "не указана"
+                    date_str = str(plan_dt_value)[:16] if plan_dt_value else "не указана"
                     
                     plan_info = {
                         'id': plan_id,
