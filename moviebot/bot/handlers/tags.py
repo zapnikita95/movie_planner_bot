@@ -168,8 +168,8 @@ def handle_add_tag_reply(message):
                 cursor_check.execute('SELECT id, short_code FROM tags WHERE name = %s AND created_by = %s', (tag_name, user_id))
                 row = cursor_check.fetchone()
                 if row:
-                    existing_tag_id = row[0] if isinstance(row, tuple) else row.get('id')
-                    existing_tag_code = row[1] if isinstance(row, tuple) else row.get('short_code')
+                    existing_tag_id = row.get('id') if isinstance(row, dict) else row[0]
+                    existing_tag_code = row.get('short_code') if isinstance(row, dict) else row[1]
                     logger.info(f"[ADD TAG] Найдена существующая подборка с таким названием: id={existing_tag_id}, code={existing_tag_code}")
         except Exception as e:
             logger.error(f"[ADD TAG] Ошибка проверки существующей подборки: {e}", exc_info=True)
@@ -235,7 +235,8 @@ def handle_add_tag_reply(message):
                         VALUES (%s, %s, %s)
                         RETURNING id
                     ''', (tag_name, short_code, user_id))
-                    tag_id = cursor.fetchone()[0]
+                    row = cursor.fetchone()
+                    tag_id = row.get('id') if isinstance(row, dict) else row[0]
                     conn.commit()
                     logger.info(f"[ADD TAG] Создан тег id={tag_id}, name='{tag_name}', code={short_code}")
             except Exception as e:
