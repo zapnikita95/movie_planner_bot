@@ -130,24 +130,37 @@ def handle_add_tag_reply(message):
         # Извлекаем все kp_id из текста
         kp_ids = set()
         
-        # 1. Ищем ссылки на Кинопоиск
-        links = re.findall(r'https?://(?:www\.)?kinopoisk\.(?:ru|com)/(?:film|series)/(\d+)', text)
+        # 1. Ищем ссылки на Кинопоиск (полные URL)
+        links = re.findall(r'https?://(?:www\.)?kinopoisk\.(?:ru|com)/(?:film|series)/(\d+)', text, re.IGNORECASE)
         for link_match in links:
             kp_ids.add(link_match)
+            logger.info(f"[ADD TAG] Найдена ссылка: {link_match}")
         
-        # 2. Ищем короткие ссылки типа kinopoisk.ru/film/123
-        short_links = re.findall(r'kinopoisk\.(?:ru|com)/(?:film|series)/(\d+)', text)
+        # 2. Ищем короткие ссылки типа kinopoisk.ru/film/123 (без протокола)
+        short_links = re.findall(r'kinopoisk\.(?:ru|com)/(?:film|series)/(\d+)', text, re.IGNORECASE)
         for short_link in short_links:
             kp_ids.add(short_link)
+            logger.info(f"[ADD TAG] Найдена короткая ссылка: {short_link}")
         
         # 3. Ищем ID через запятую или пробел (например: "10246904, 5268266, 8106285" или "10246904 5268266 8106285")
         # Ищем последовательности цифр длиной от 4 до 10 символов (типичные kp_id)
+        # НО: исключаем те, что уже найдены в ссылках
         id_pattern = r'\b\d{4,10}\b'
         found_ids = re.findall(id_pattern, text)
         for found_id in found_ids:
             # Проверяем, что это не часть ссылки (уже обработано выше)
-            # И не часть названия тега в кавычках
+            # Проверяем, что перед ID нет "kinopoisk" и после нет "/"
+            found_pos = text.find(found_id)
+            if found_pos > 0:
+                before = text[max(0, found_pos-20):found_pos].lower()
+                after = text[found_pos+len(found_id):min(len(text), found_pos+len(found_id)+5)]
+                # Если это часть ссылки, пропускаем
+                if 'kinopoisk' in before or '/' in after:
+                    continue
             kp_ids.add(found_id)
+            logger.info(f"[ADD TAG] Найден ID: {found_id}")
+        
+        logger.info(f"[ADD TAG] Всего найдено уникальных kp_id: {len(kp_ids)}")
         
         if not kp_ids:
             bot.reply_to(message, "❌ Не найдено ссылок или ID фильмов/сериалов с Кинопоиска.\n\nМожно указать:\n• Ссылки: https://www.kinopoisk.ru/film/123/\n• ID через запятую: 10246904, 5268266, 8106285")
