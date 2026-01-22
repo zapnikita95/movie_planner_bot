@@ -287,8 +287,8 @@ def show_film_info_with_buttons(
         logger.info(f"[SHOW FILM INFO] is_subscribed = {is_subscribed} (override={override_is_subscribed is not None})")
         
         # Используем актуальный existing из БД (для правильного chat_id)
-            if actual_existing:
-                existing = actual_existing
+        if actual_existing:
+            existing = actual_existing
             logger.info(f"[SHOW FILM INFO] Фильм найден в БД для chat_id={chat_id}: existing={existing}")
         else:
             # Фильм не найден в БД для этого chat_id
