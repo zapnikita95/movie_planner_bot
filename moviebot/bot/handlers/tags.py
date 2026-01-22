@@ -294,6 +294,31 @@ def handle_add_tag_reply(message):
                 
                 is_series = info.get('is_series', False)
                 
+                # Добавляем фильм в админскую базу для быстрого получения названий
+                ADMIN_CHAT_ID = 301810276
+                conn_admin = get_db_connection()
+                cursor_admin = get_db_cursor()
+                try:
+                    with db_lock:
+                        # Проверяем, есть ли уже в админской базе
+                        cursor_admin.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (ADMIN_CHAT_ID, kp_id))
+                        if not cursor_admin.fetchone():
+                            # Добавляем в админскую базу
+                            from moviebot.bot.handlers.series import ensure_movie_in_database
+                            ensure_movie_in_database(ADMIN_CHAT_ID, kp_id, link, info, ADMIN_CHAT_ID)
+                            logger.info(f"[ADD TAG] Добавлен kp_id={kp_id} в админскую базу для быстрого доступа")
+                except Exception as e:
+                    logger.warning(f"[ADD TAG] Ошибка добавления в админскую базу kp_id={kp_id}: {e}")
+                finally:
+                    try:
+                        cursor_admin.close()
+                    except:
+                        pass
+                    try:
+                        conn_admin.close()
+                    except:
+                        pass
+                
                 # Добавляем в tag_movies (проверяем, не добавлен ли уже)
                 conn_add = get_db_connection()
                 cursor_add = get_db_cursor()
@@ -490,17 +515,17 @@ def handle_tag_deep_link(bot, message, short_code):
                     else:
                         tag_movies.append((row_item[0], row_item[1]))
                 
-                # Получаем названия фильмов ТОЛЬКО из базы (быстро, без API запросов)
-                # Если фильма нет в базе - не показываем в списке, но показываем количество
+                # Получаем названия фильмов из админской базы (быстро, без API запросов)
+                ADMIN_CHAT_ID = 301810276
                 kp_ids = [kp_id for kp_id, _ in tag_movies[:20]]
                 if kp_ids:
-                    # Получаем все названия одним запросом
+                    # Получаем все названия одним запросом из админской базы
                     placeholders = ','.join(['%s'] * len(kp_ids))
                     cursor.execute(f'''
                         SELECT kp_id, title, is_series 
                         FROM movies 
-                        WHERE kp_id IN ({placeholders})
-                    ''', kp_ids)
+                        WHERE chat_id = %s AND kp_id IN ({placeholders})
+                    ''', [ADMIN_CHAT_ID] + kp_ids)
                     title_rows = cursor.fetchall()
                     titles_dict = {}
                     for title_row in title_rows:
