@@ -574,10 +574,10 @@ def show_film_info_with_buttons(
                                     ''', (chat_id, film_id))
                                     avg_result = cursor_local.fetchone()
                                     if avg_result:
-                                    avg_rating = avg_result.get('avg') if isinstance(avg_result, dict) else avg_result[0]
-                                    avg_rating = float(avg_rating) if avg_rating is not None else None
-                                    if avg_rating:
-                                        text += f"\n⭐ <b>Средняя оценка: {avg_rating:.1f}/10</b>"
+                                        avg_rating = avg_result.get('avg') if isinstance(avg_result, dict) else avg_result[0]
+                                        avg_rating = float(avg_rating) if avg_rating is not None else None
+                                        if avg_rating:
+                                            text += f"\n⭐ <b>Средняя оценка: {avg_rating:.1f}/10</b>"
                                 finally:
                                     try:
                                         cursor_local.close()
