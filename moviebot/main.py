@@ -237,6 +237,10 @@ except Exception as e:
     logger.critical(f"[MAIN] ❌ ОШИБКА ПРИ РЕГИСТРАЦИИ rate handlers: {e}", exc_info=True)
     sys.exit(1)
 
+# Регистрируем обработчики тегов (команды регистрируются на уровне модуля)
+import moviebot.bot.handlers.tags  # noqa: F401
+logger.info("✅ tags handlers зарегистрированы")
+
 from moviebot.bot.handlers.stats import register_stats_handlers
 register_stats_handlers(bot)
 logger.info("✅ stats handlers зарегистрированы")

@@ -670,6 +670,56 @@ def init_database():
         logger.error(f"Ошибка при создании таблицы extension_links: {e}", exc_info=True)
         conn.rollback()
     
+    # Таблицы для тегов/подборок фильмов
+    try:
+        # Таблица тегов (подборок)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS tags (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL,
+                short_code TEXT UNIQUE NOT NULL,
+                created_by BIGINT NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tags_short_code ON tags (short_code)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tags_created_by ON tags (created_by)')
+        
+        # Таблица связи тегов с фильмами (kp_id)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS tag_movies (
+                id SERIAL PRIMARY KEY,
+                tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+                kp_id TEXT NOT NULL,
+                is_series BOOLEAN DEFAULT FALSE,
+                added_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(tag_id, kp_id)
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tag_movies_tag_id ON tag_movies (tag_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tag_movies_kp_id ON tag_movies (kp_id)')
+        
+        # Таблица связи пользователей с тегами (какие фильмы из тега добавлены в базу пользователя)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_tag_movies (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT NOT NULL,
+                chat_id BIGINT NOT NULL,
+                tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+                film_id INTEGER NOT NULL,
+                added_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, chat_id, tag_id, film_id)
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_tag_movies_user_chat ON user_tag_movies (user_id, chat_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_tag_movies_tag_id ON user_tag_movies (tag_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_tag_movies_film_id ON user_tag_movies (film_id)')
+        
+        logger.info("Таблицы для тегов созданы")
+    except Exception as e:
+        logger.error(f"Ошибка при создании таблиц для тегов: {e}", exc_info=True)
+        conn.rollback()
+    
     conn.commit()
     logger.info("База данных инициализирована")
 

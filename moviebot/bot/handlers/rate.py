@@ -189,7 +189,7 @@ def register_rate_handlers(bot):
             markup.add(InlineKeyboardButton(button_text, callback_data=f"rate_from_list:{int(kp_id)}"))
         
         text += "\n<i>Нажмите на фильм, чтобы открыть его описание и оценить</i>"
-        markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+        markup.add(InlineKeyboardButton("◀️ Назад в базу", callback_data="back_to_database"))
         
         bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
 

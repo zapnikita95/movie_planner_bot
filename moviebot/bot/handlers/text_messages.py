@@ -337,6 +337,9 @@ def handle_mark_watched_reply(message):
             except:
                 pass
         
+        # Проверяем, есть ли tag_id для возврата в подборку
+        tag_id = state.get('tag_id')
+        
         # Очищаем состояние
         if user_id in user_mark_watched_state:
             del user_mark_watched_state[user_id]
@@ -356,7 +359,12 @@ def handle_mark_watched_reply(message):
             markup.add(InlineKeyboardButton("📌 Перейти к описанию", callback_data=f"back_to_film:{kp_id_int}"))
         except (ValueError, TypeError):
             pass
-        markup.add(InlineKeyboardButton("◀️ Назад к списку", callback_data="back_to_list"))
+        
+        # Если есть tag_id, возвращаем в подборку, иначе в список
+        if tag_id:
+            markup.add(InlineKeyboardButton("◀️ Назад к подборке", callback_data=f"back_to_tag:{tag_id}"))
+        else:
+            markup.add(InlineKeyboardButton("◀️ Назад к списку", callback_data="back_to_list"))
         
         bot.reply_to(message, confirmation_text, reply_markup=markup, parse_mode='HTML')
         logger.info(f"[MARK WATCHED REPLY] ✅ Завершено: фильм {kp_id} отмечен просмотренным")
@@ -1588,9 +1596,7 @@ def handle_rate_list_reply(message):
                 logger.info(f"[HANDLE RATE LIST REPLY] Пропуск — пользователь в планировании, но не на step=3")
                 return
         
-        # Остальные состояния — пропускаем (НО НЕ для оценок!)
-        # Для оценок (is_rating=True) мы уже обработали выше и вернулись
-        # Сюда попадаем только если is_rating=False
+        # Остальные состояния — пропускаем
         if (user_id in user_ticket_state or
             user_id in user_settings_state or
             user_id in user_edit_state or
@@ -1609,13 +1615,6 @@ def handle_rate_list_reply(message):
         
         reply_msg_id = message.reply_to_message.message_id if message.reply_to_message else None
         from moviebot.states import rating_messages
-        
-        # Логируем информацию о rating_messages для отладки
-        if reply_msg_id:
-            rating_msg_value = rating_messages.get(reply_msg_id)
-            logger.info(f"[HANDLE RATE LIST REPLY] reply_msg_id={reply_msg_id}, rating_messages содержит: {rating_msg_value}")
-        else:
-            logger.warning(f"[HANDLE RATE LIST REPLY] Нет reply_msg_id, но is_rating=True")
         
         try:
             from moviebot.bot.handlers.rate import handle_rating_internal

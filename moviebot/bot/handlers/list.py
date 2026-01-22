@@ -275,7 +275,7 @@ def show_list_page(bot, chat_id, user_id, page=1, message_id=None):
         if not rows:
             text = "⏳ Нет непросмотренных фильмов!"
             markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+            markup.add(InlineKeyboardButton("◀️ Назад в базу", callback_data="back_to_database"))
             if message_id:
                 try:
                     bot.edit_message_text(text, chat_id, message_id, reply_markup=markup)
@@ -376,8 +376,8 @@ def show_list_page(bot, chat_id, user_id, page=1, message_id=None):
             markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data="plan_from_list"))
             markup.add(InlineKeyboardButton("👁️ Отметить просмотренным", callback_data="mark_watched_from_list"))
             
-            # Добавляем кнопку "Назад в меню"
-            markup.add(InlineKeyboardButton("◀️ Назад в меню", callback_data="back_to_start_menu"))
+            # Добавляем кнопку "Назад в базу"
+            markup.add(InlineKeyboardButton("◀️ Назад в базу", callback_data="back_to_database"))
             
             # Сохраняем состояние
             user_list_state[user_id] = {
@@ -439,6 +439,9 @@ def handle_view_film_reply_internal(message, state):
         if not is_reply or (prompt_message_id and message.reply_to_message.message_id != prompt_message_id):
             logger.info(f"[VIEW FILM REPLY] Сообщение от пользователя {user_id} не является ответом на сообщение бота, игнорируем")
             return
+        
+        # Проверяем, есть ли tag_id для возврата в подборку
+        tag_id = state.get('tag_id')
         
         # Удаляем состояние
         if user_id in user_view_film_state:

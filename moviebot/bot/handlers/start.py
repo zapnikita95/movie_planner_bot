@@ -220,6 +220,12 @@ def start_menu_callback(call):
             msg = call.message
             msg.text = '/help'
             help_command(msg)
+        
+        elif action == 'database':
+            # Показываем меню базы
+            from moviebot.bot.handlers.tags import show_database_menu
+            show_database_menu(call.message.chat.id, user_id, call.message.message_id)
+            return
 
         # Удаляем старое меню для всех действий
         try:
@@ -305,10 +311,11 @@ def back_to_start_menu_callback(call):
             logger.error(f"[BACK TO MENU] Ошибка проверки доступа к билетам: {tickets_error}", exc_info=True)
             has_tickets = False
 
-        # Строка 1: Сериалы / Премьеры
+        # Строка 1: Сериалы / Премьеры / База (маленькая кнопка)
         markup.row(
             InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"),
-            InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres")
+            InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres"),
+            InlineKeyboardButton("🗄️", callback_data="start_menu:database")
         )
 
         # Строка 2: Поиск
@@ -383,6 +390,26 @@ def register_start_handlers(bot):
         # Определяем переменные для удобства и фикса NameError
         chat_id = message.chat.id
         user_id = message.from_user.id
+        
+        # Проверяем, есть ли параметр start_parameter (для deep links)
+        start_param = None
+        if message_text.startswith('/start'):
+            parts = message_text.split(' ', 1)
+            if len(parts) > 1:
+                start_param = parts[1].strip()
+                logger.info(f"[START] Обнаружен start_parameter: {start_param}")
+        
+        # Обработка deep link для тегов
+        if start_param and start_param.startswith('tag_'):
+            short_code = start_param.replace('tag_', '')
+            logger.info(f"[START TAG] Обработка deep link для тега с кодом: {short_code}")
+            try:
+                from moviebot.bot.handlers.tags import handle_tag_deep_link
+                handle_tag_deep_link(bot, message, short_code)
+                return
+            except Exception as e:
+                logger.error(f"[START TAG] Ошибка обработки deep link: {e}", exc_info=True)
+                # Продолжаем показ обычного меню при ошибке
 
         # Информация о подписке
         subscription_info = ""
