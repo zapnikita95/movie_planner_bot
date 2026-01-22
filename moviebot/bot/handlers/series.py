@@ -696,7 +696,7 @@ def show_film_info_with_buttons(
                         cursor_prem.execute("""
                             SELECT 1 FROM premiere_reminders
                             WHERE chat_id = %s AND user_id = %s AND kp_id = %s
-                        """, (chat_id, user_id, kp_id))
+                        """, (chat_id, user_id, str(kp_id)))
                         has_premiere_reminder = cursor_prem.fetchone() is not None
             finally:
                 if cursor_prem:
