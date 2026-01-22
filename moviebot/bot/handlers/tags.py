@@ -95,40 +95,27 @@ def check_add_tag_reply(message):
     return True
 
 
-# Регистрируем обработчик БЕЗ условий - проверка внутри функции
-# Это гарантирует, что обработчик будет вызван для всех текстовых сообщений
-@bot.message_handler(content_types=['text'], func=lambda m: m.text and not m.text.strip().startswith('/'))
+# Регистрируем обработчик с проверкой состояния в func - это гарантирует, что он сработает ТОЛЬКО для /add_tags
+# Используем lambda с явными проверками для надежности
+@bot.message_handler(
+    content_types=['text'], 
+    func=lambda m: (
+        m.text and 
+        not m.text.strip().startswith('/') and
+        m.from_user.id in user_add_tag_state and
+        user_add_tag_state[m.from_user.id].get('step') == 'waiting_for_tag_data' and
+        m.reply_to_message is not None and
+        m.reply_to_message.message_id == user_add_tag_state[m.from_user.id].get('prompt_message_id')
+    )
+)
 def handle_add_tag_reply(message):
-    """Обработчик ответа на команду /add_tags"""
+    """Обработчик ответа на команду /add_tags - срабатывает ТОЛЬКО для админов в состоянии /add_tags"""
     user_id = message.from_user.id
     chat_id = message.chat.id
     text = message.text or ""
     
-    # КРИТИЧЕСКАЯ ПРОВЕРКА: только если пользователь в состоянии /add_tags
-    if user_id not in user_add_tag_state:
-        return  # Не обрабатываем, пусть другие обработчики попробуют
-    
-    state = user_add_tag_state[user_id]
-    if state.get('step') != 'waiting_for_tag_data':
-        return  # Не обрабатываем
-    
-    # Проверяем, что это реплай на промпт
-    if not message.reply_to_message:
-        logger.info(f"[ADD TAG] ❌ Сообщение НЕ является реплаем для user_id={user_id}")
-        return
-    
-    prompt_message_id = state.get('prompt_message_id')
-    if not prompt_message_id:
-        logger.info(f"[ADD TAG] ❌ prompt_message_id не найден для user_id={user_id}")
-        return
-    
-    if message.reply_to_message.message_id != prompt_message_id:
-        logger.info(f"[ADD TAG] ❌ Реплай не на промпт /add_tags (reply_to={message.reply_to_message.message_id}, expected={prompt_message_id}) для user_id={user_id}")
-        return
-    
-    # ВСЕ ПРОВЕРКИ ПРОЙДЕНЫ - ОБРАБАТЫВАЕМ
     logger.info(f"[ADD TAG] ===== START: Обработка сообщения от user_id={user_id}, text_length={len(text)}, message_id={message.message_id}")
-    logger.info(f"[ADD TAG] ✅ ОБРАБОТЧИК СРАБОТАЛ! Все проверки пройдены")
+    logger.info(f"[ADD TAG] ✅ ОБРАБОТЧИК СРАБОТАЛ! Все проверки пройдены в func")
     
     try:
         # Извлекаем название тега из кавычек
