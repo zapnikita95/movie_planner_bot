@@ -569,11 +569,11 @@ def show_film_info_with_buttons(
                                 cursor_local = get_db_cursor()
                                 try:
                                     cursor_local.execute('''
-                                    SELECT AVG(rating) as avg FROM ratings 
-                                    WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
-                                ''', (chat_id, film_id))
+                                        SELECT AVG(rating) as avg FROM ratings 
+                                        WHERE chat_id = %s AND film_id = %s AND (is_imported = FALSE OR is_imported IS NULL)
+                                    ''', (chat_id, film_id))
                                     avg_result = cursor_local.fetchone()
-                                if avg_result:
+                                    if avg_result:
                                     avg_rating = avg_result.get('avg') if isinstance(avg_result, dict) else avg_result[0]
                                     avg_rating = float(avg_rating) if avg_rating is not None else None
                                     if avg_rating:
