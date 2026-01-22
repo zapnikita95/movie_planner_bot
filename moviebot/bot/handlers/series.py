@@ -277,11 +277,11 @@ def show_film_info_with_buttons(
         logger.info(f"[SHOW FILM INFO] Проверка состояния фильма: chat_id={chat_id}, kp_id={kp_id}, existing передан={existing is not None}")
         
         # Всегда получаем актуальное состояние из БД для текущего chat_id
-            current_state = get_film_current_state(chat_id, kp_id, user_id)
-            actual_existing = current_state['existing']
-            plan_info = current_state['plan_info']
-            has_tickets = current_state['has_tickets']
-            
+        current_state = get_film_current_state(chat_id, kp_id, user_id)
+        actual_existing = current_state['existing']
+        plan_info = current_state['plan_info']
+        has_tickets = current_state['has_tickets']
+        
         # Используем override, если передан (важно после подписки/отписки)
         is_subscribed = override_is_subscribed if override_is_subscribed is not None else current_state['is_subscribed']
         logger.info(f"[SHOW FILM INFO] is_subscribed = {is_subscribed} (override={override_is_subscribed is not None})")
