@@ -10,7 +10,7 @@ from moviebot.database.db_connection import get_db_connection, get_db_cursor, db
 from moviebot.utils.admin import is_admin, is_owner
 from moviebot.api.kinopoisk_api import extract_movie_info
 from moviebot.utils.parsing import extract_kp_id_from_text
-from moviebot.bot.handlers.series import ensure_movie_in_database
+from moviebot.bot.handlers.text_messages import ensure_movie_in_database
 from moviebot.states import user_plan_state, user_view_film_state, user_mark_watched_state
 
 logger = logging.getLogger(__name__)
@@ -33,10 +33,11 @@ def add_tags_command(message):
     # Устанавливаем состояние
     user_add_tag_state[user_id] = {
         'step': 'waiting_for_tag_data',
-        'chat_id': chat_id
+        'chat_id': chat_id,
+        'prompt_message_id': message.message_id
     }
     
-    bot.reply_to(
+    prompt_msg = bot.reply_to(
         message,
         "📝 <b>Создание подборки</b>\n\n"
         "В ответном сообщении (или следующем) пришлите:\n"
@@ -48,12 +49,31 @@ def add_tags_command(message):
         "https://www.kinopoisk.ru/series/456/</code>",
         parse_mode='HTML'
     )
+    
+    # Сохраняем message_id промпта в состояние
+    if prompt_msg:
+        user_add_tag_state[user_id]['prompt_message_id'] = prompt_msg.message_id
 
 
 def check_add_tag_reply(message):
     """Проверяет, является ли сообщение ответом для команды /add_tags"""
     user_id = message.from_user.id
-    return user_id in user_add_tag_state and user_add_tag_state[user_id].get('step') == 'waiting_for_tag_data'
+    if user_id not in user_add_tag_state:
+        return False
+    state = user_add_tag_state[user_id]
+    if state.get('step') != 'waiting_for_tag_data':
+        return False
+    
+    # Проверяем, что это ответ на промпт или следующее сообщение после промпта
+    # Если это ответ на промпт - точно обрабатываем
+    if message.reply_to_message:
+        prompt_message_id = state.get('prompt_message_id')
+        if prompt_message_id and message.reply_to_message.message_id == prompt_message_id:
+            return True
+    
+    # Если это не ответ, но пользователь в состоянии - тоже обрабатываем
+    # (пользователь может отправить следующее сообщение без реплая)
+    return True
 
 
 @bot.message_handler(content_types=['text'], func=check_add_tag_reply)

@@ -1810,6 +1810,14 @@ def save_movie_message(message):
     is_rating_reply = message.reply_to_message and message.reply_to_message.message_id in rating_messages
     
     if not is_rating_reply:
+        # Пропускаем, если пользователь создаёт подборку через /add_tags
+        from moviebot.bot.handlers.tags import user_add_tag_state
+        if message.from_user.id in user_add_tag_state:
+            state = user_add_tag_state.get(message.from_user.id, {})
+            if state.get('step') == 'waiting_for_tag_data':
+                logger.info(f"[SAVE MOVIE] Пропущено - пользователь в user_add_tag_state, ссылки будут обработаны через handle_add_tag_reply")
+                return
+        
         if message.from_user.id in user_ticket_state:
             state = user_ticket_state.get(message.from_user.id, {})
             step = state.get('step')
