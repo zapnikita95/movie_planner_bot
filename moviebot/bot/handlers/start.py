@@ -482,10 +482,11 @@ def register_start_handlers(bot):
                 logger.error(f"[BACK TO MENU] Ошибка проверки доступа к билетам: {tickets_error}", exc_info=True)
                 has_tickets = False
 
-            # Строка 1: Сериалы / Премьеры
+            # Строка 1: Сериалы / Премьеры / База (маленькая кнопка)
             markup.row(
                 InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"),
-                InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres")
+                InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres"),
+                InlineKeyboardButton("🗄️", callback_data="start_menu:database")
             )
 
             # Строка 2: Поиск
@@ -821,10 +822,11 @@ def register_start_handlers(bot):
                 logger.error(f"[BACK TO MENU] Ошибка проверки доступа к билетам: {tickets_error}", exc_info=True)
                 has_tickets = False
 
-            # Строка 1: Сериалы / Премьеры
+            # Строка 1: Сериалы / Премьеры / База (маленькая кнопка)
             markup.row(
                 InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"),
-                InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres")
+                InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres"),
+                InlineKeyboardButton("🗄️", callback_data="start_menu:database")
             )
 
             # Строка 2: Поиск
