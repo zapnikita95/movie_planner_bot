@@ -1852,7 +1852,26 @@ def save_movie_message(message):
     except Exception as e:
         logger.warning(f"[SAVE MESSAGE] Ошибка при обработке сообщения с фильмом: {e}", exc_info=True)
 
-@bot.message_handler(content_types=['text'], func=lambda m: not (m.text and m.text.strip().startswith('/')))
+# ВАЖНО: Этот обработчик должен быть ПОСЛЕ handle_add_tag_reply
+# Поэтому проверяем состояние /add_tags и НЕ обрабатываем, если пользователь в этом состоянии
+def should_skip_main_text_handler(message):
+    """Проверяет, нужно ли пропустить main_text_handler (если пользователь в состоянии /add_tags)"""
+    from moviebot.bot.handlers.tags import user_add_tag_state
+    user_id = message.from_user.id
+    if user_id in user_add_tag_state:
+        state = user_add_tag_state.get(user_id, {})
+        if state.get('step') == 'waiting_for_tag_data' and message.reply_to_message:
+            prompt_message_id = state.get('prompt_message_id')
+            if prompt_message_id and message.reply_to_message.message_id == prompt_message_id:
+                # Это точно реплай на промпт /add_tags - пропускаем
+                return True
+    return False
+
+@bot.message_handler(content_types=['text'], func=lambda m: (
+    m.text and 
+    not m.text.strip().startswith('/') and
+    not should_skip_main_text_handler(m)
+))
 def main_text_handler(message):
     """
     Fallback handler для текстовых сообщений (исключая команды)
@@ -1866,15 +1885,6 @@ def main_text_handler(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
     text = message.text.strip() if message.text else ""
-    
-    # КРИТИЧЕСКИ ВАЖНО: Если пользователь в состоянии /add_tags, сразу возвращаемся
-    # чтобы handle_add_tag_reply мог обработать сообщение
-    from moviebot.bot.handlers.tags import user_add_tag_state
-    if user_id in user_add_tag_state:
-        state = user_add_tag_state.get(user_id, {})
-        if state.get('step') == 'waiting_for_tag_data':
-            logger.info(f"[MAIN TEXT HANDLER] ⚠️ Пользователь в состоянии /add_tags, ПРОПУСКАЕМ обработку - пусть handle_add_tag_reply обработает")
-            return
     
     # ЛОГИКА ДЛЯ ЛИЧНЫХ ЧАТОВ: проверяем, есть ли ожидающее сообщение для handler'а
     is_private = message.chat.type == 'private'

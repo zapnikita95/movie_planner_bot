@@ -63,6 +63,10 @@ def add_tags_command(message):
 
 def check_add_tag_reply(message):
     """Проверяет, является ли сообщение ответом для команды /add_tags - ТОЛЬКО РЕПЛАИ НА ПРОМПТ"""
+    # КРИТИЧЕСКОЕ ЛОГИРОВАНИЕ - проверяем, вызывается ли функция вообще
+    import sys
+    print(f"[CHECK ADD TAG REPLY] ===== ВЫЗВАНА: user_id={message.from_user.id}, message_id={message.message_id}", file=sys.stdout, flush=True)
+    
     user_id = message.from_user.id
     logger.info(f"[CHECK ADD TAG REPLY] ===== START: user_id={user_id}, message_id={message.message_id}, has_reply={message.reply_to_message is not None}, text_preview='{message.text[:50] if message.text else None}'")
     
