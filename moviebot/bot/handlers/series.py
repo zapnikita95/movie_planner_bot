@@ -503,16 +503,16 @@ def show_film_info_with_buttons(
                         conn_local = get_db_connection()
                         cursor_local = get_db_cursor()
                         try:
-                        with db_lock:
+                            with db_lock:
                                 cursor_local.execute("""
-                                SELECT rating 
-                                FROM ratings 
-                                WHERE chat_id = %s AND film_id = %s AND user_id = %s
-                                AND (is_imported = FALSE OR is_imported IS NULL)
-                            """, (chat_id, film_id, user_id))
+                                    SELECT rating 
+                                    FROM ratings 
+                                    WHERE chat_id = %s AND film_id = %s AND user_id = %s
+                                    AND (is_imported = FALSE OR is_imported IS NULL)
+                                """, (chat_id, film_id, user_id))
                                 user_rating_row = cursor_local.fetchone()
-                            user_rating = user_rating_row[0] if user_rating_row else None
-                            text += f"\n⭐ <b>Ваша оценка: {user_rating if user_rating else '—'}/10</b>"
+                                user_rating = user_rating_row[0] if user_rating_row else None
+                                text += f"\n⭐ <b>Ваша оценка: {user_rating if user_rating else '—'}/10</b>"
                         finally:
                             try:
                                 cursor_local.close()
