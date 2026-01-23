@@ -1134,11 +1134,27 @@ def tags_command(message):
             
             # Сначала проверяем, есть ли вообще записи для этого пользователя
             cursor.execute('''
-                SELECT COUNT(*) FROM user_tag_movies 
+                SELECT COUNT(*) as cnt FROM user_tag_movies 
                 WHERE user_id = %s AND chat_id = %s
             ''', (user_id, chat_id))
-            total_records = cursor.fetchone()[0] if isinstance(cursor.fetchone(), tuple) else cursor.fetchone().get('count', 0)
+            count_row = cursor.fetchone()
+            total_records = count_row[0] if isinstance(count_row, tuple) else count_row.get('cnt', 0) if count_row else 0
             logger.info(f"[TAGS] Всего записей в user_tag_movies для user_id={user_id}, chat_id={chat_id}: {total_records}")
+            
+            # Если записей нет, но это private чат, проверяем по chat_id (который должен быть равен user_id)
+            if total_records == 0 and message.chat.type == 'private':
+                logger.info(f"[TAGS] Записей нет для user_id={user_id}, проверяем по chat_id={chat_id}")
+                cursor.execute('''
+                    SELECT COUNT(*) as cnt FROM user_tag_movies 
+                    WHERE chat_id = %s
+                ''', (chat_id,))
+                count_row = cursor.fetchone()
+                total_records_by_chat = count_row[0] if isinstance(count_row, tuple) else count_row.get('cnt', 0) if count_row else 0
+                logger.info(f"[TAGS] Записей в user_tag_movies для chat_id={chat_id}: {total_records_by_chat}")
+                if total_records_by_chat > 0:
+                    # Используем chat_id как user_id для запроса
+                    logger.info(f"[TAGS] Используем chat_id={chat_id} как user_id для запроса")
+                    user_id = chat_id
             
             cursor.execute('''
                 SELECT 
