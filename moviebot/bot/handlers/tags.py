@@ -1127,9 +1127,8 @@ def tags_command(message):
     
     try:
         with db_lock:
-            # Получаем все подборки, где у пользователя есть хотя бы одна запись в user_tag_movies
-            # Считаем фильмы, которые существуют в movies (m.id IS NOT NULL) для правильного chat_id
-            # НО показываем подборку, даже если не все фильмы еще добавлены в movies
+            # ПРОСТО: Если есть записи в user_tag_movies - показываем подборку
+            # Считаем только фильмы, которые реально есть в movies у пользователя
             logger.info(f"[TAGS] Выполняем SQL запрос с параметрами: user_id={user_id}, chat_id={chat_id}")
             cursor.execute('''
                 SELECT 
@@ -1137,8 +1136,7 @@ def tags_command(message):
                     t.name,
                     COUNT(DISTINCT CASE WHEN m.id IS NOT NULL THEN utm.film_id END) as user_films_count,
                     (SELECT COUNT(DISTINCT kp_id) FROM tag_movies WHERE tag_id = t.id) as total_films_count,
-                    COUNT(DISTINCT CASE WHEN m.id IS NOT NULL AND m.watched = 1 THEN utm.film_id END) as watched_films_count,
-                    COUNT(DISTINCT utm.film_id) as total_user_tag_films
+                    COUNT(DISTINCT CASE WHEN m.id IS NOT NULL AND m.watched = 1 THEN utm.film_id END) as watched_films_count
                 FROM tags t
                 INNER JOIN user_tag_movies utm ON t.id = utm.tag_id AND utm.user_id = %s AND utm.chat_id = %s
                 LEFT JOIN movies m ON utm.film_id = m.id AND m.chat_id = %s
@@ -1601,8 +1599,8 @@ def handle_tags_list(call):
         
         try:
             with db_lock:
-                # Получаем все подборки, где у пользователя есть хотя бы одна запись в user_tag_movies
-                # Считаем только фильмы, которые существуют в movies (m.id IS NOT NULL)
+                # ПРОСТО: Если есть записи в user_tag_movies - показываем подборку
+                # Считаем только фильмы, которые реально есть в movies у пользователя
                 cursor.execute('''
                     SELECT 
                         t.id, 
