@@ -812,9 +812,15 @@ def handle_tag_confirm(call):
     """Обработчик подтверждения добавления фильмов из подборки"""
     user_id = call.from_user.id
     chat_id = call.message.chat.id
+    
+    # В private чате chat_id должен быть равен user_id
+    if call.message.chat.type == 'private':
+        chat_id = user_id
+        logger.info(f"[TAG CONFIRM] Исправлен chat_id для private чата: {chat_id}")
+    
     short_code = call.data.split(":")[1]
     
-    logger.info(f"[TAG CONFIRM] user_id={user_id}, code={short_code}")
+    logger.info(f"[TAG CONFIRM] user_id={user_id}, chat_id={chat_id}, code={short_code}")
     
     try:
         bot.answer_callback_query(call.id, "⏳ Добавляю фильмы...")
@@ -973,7 +979,6 @@ def handle_tag_confirm(call):
                                     ON CONFLICT (user_id, chat_id, tag_id, film_id) DO NOTHING
                                 ''', (user_id, chat_id, tag_info['id'], film_id))
                                 conn_link.commit()
-                                logger.info(f"[TAG CONFIRM] Добавлена запись в user_tag_movies: user_id={user_id}, chat_id={chat_id}, tag_id={tag_info['id']}, film_id={film_id}")
                         finally:
                             try:
                                 cursor_link.close()
@@ -1097,7 +1102,12 @@ def tags_command(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
     
-    logger.info(f"[TAGS] Команда /tags от user_id={user_id}")
+    logger.info(f"[TAGS] Команда /tags от user_id={user_id}, chat_id={chat_id}")
+    
+    # В private чате chat_id должен быть равен user_id
+    if message.chat.type == 'private':
+        chat_id = user_id
+        logger.info(f"[TAGS] Исправлен chat_id для private чата: {chat_id}")
     
     # Получаем список всех подборок (не только тех, где есть фильмы у пользователя)
     # Но показываем количество фильмов у пользователя в каждой подборке
@@ -1552,6 +1562,10 @@ def handle_tags_list(call):
         bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         chat_id = call.message.chat.id
+        
+        # В private чате chat_id должен быть равен user_id
+        if call.message.chat.type == 'private':
+            chat_id = user_id
         
         # Получаем список всех подборок
         conn = get_db_connection()
