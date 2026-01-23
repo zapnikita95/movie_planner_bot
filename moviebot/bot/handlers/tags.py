@@ -1081,16 +1081,18 @@ def tags_command(message):
     try:
         with db_lock:
             # Получаем все подборки с количеством фильмов у пользователя и проверяем, все ли просмотрены
+            # Считаем только фильмы, которые существуют в movies (m.id IS NOT NULL)
             cursor.execute('''
                 SELECT t.id, t.name, 
-                       COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL THEN utm.film_id END), 0) as user_films_count,
+                       COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL AND m.id IS NOT NULL THEN utm.film_id END), 0) as user_films_count,
                        COUNT(DISTINCT tm.kp_id) as total_films_count,
-                       COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL AND m.watched = 1 THEN utm.film_id END), 0) as watched_films_count
+                       COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL AND m.id IS NOT NULL AND m.watched = 1 THEN utm.film_id END), 0) as watched_films_count
                 FROM tags t
                 LEFT JOIN tag_movies tm ON t.id = tm.tag_id
                 LEFT JOIN user_tag_movies utm ON t.id = utm.tag_id AND utm.user_id = %s AND utm.chat_id = %s
                 LEFT JOIN movies m ON utm.film_id = m.id AND m.chat_id = %s
                 GROUP BY t.id, t.name
+                HAVING COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL AND m.id IS NOT NULL THEN utm.film_id END), 0) > 0
                 ORDER BY t.name
             ''', (user_id, chat_id, chat_id))
             tags_list = cursor.fetchall()
@@ -1415,19 +1417,20 @@ def handle_watched_tags_list(call):
         try:
             with db_lock:
                 # Получаем все подборки, где все фильмы пользователя просмотрены
+                # Считаем только фильмы, которые существуют в movies (m.id IS NOT NULL)
                 cursor.execute('''
                     SELECT t.id, t.name, 
-                           COALESCE(COUNT(DISTINCT utm.film_id), 0) as user_films_count,
+                           COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL AND m.id IS NOT NULL THEN utm.film_id END), 0) as user_films_count,
                            COUNT(DISTINCT tm.kp_id) as total_films_count,
-                           COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL AND m.watched = 1 THEN utm.film_id END), 0) as watched_films_count
+                           COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL AND m.id IS NOT NULL AND m.watched = 1 THEN utm.film_id END), 0) as watched_films_count
                     FROM tags t
                     LEFT JOIN tag_movies tm ON t.id = tm.tag_id
                     LEFT JOIN user_tag_movies utm ON t.id = utm.tag_id AND utm.user_id = %s AND utm.chat_id = %s
                     LEFT JOIN movies m ON utm.film_id = m.id AND m.chat_id = %s
                     GROUP BY t.id, t.name
-                    HAVING COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL THEN utm.film_id END), 0) > 0
-                       AND COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL AND m.watched = 1 THEN utm.film_id END), 0) = 
-                           COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL THEN utm.film_id END), 0)
+                    HAVING COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL AND m.id IS NOT NULL THEN utm.film_id END), 0) > 0
+                       AND COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL AND m.id IS NOT NULL AND m.watched = 1 THEN utm.film_id END), 0) = 
+                           COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL AND m.id IS NOT NULL THEN utm.film_id END), 0)
                     ORDER BY t.name
                 ''', (user_id, chat_id, chat_id))
                 watched_tags_list = cursor.fetchall()

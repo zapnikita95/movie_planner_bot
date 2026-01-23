@@ -1213,7 +1213,8 @@ def confirm_remove_from_database(call):
                 film_id = film[0] if isinstance(film, tuple) else film.get('id')
                 title = film[1] if isinstance(film, tuple) else film.get('title', f"ID {kp_id}")
 
-                # Удаляем всё связанное
+                # Удаляем всё связанное (в т.ч. подборки — иначе тег останется в списке)
+                cursor_local.execute('DELETE FROM user_tag_movies WHERE film_id = %s', (film_id,))
                 cursor_local.execute('DELETE FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
                 cursor_local.execute('DELETE FROM plans WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
                 cursor_local.execute('DELETE FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))

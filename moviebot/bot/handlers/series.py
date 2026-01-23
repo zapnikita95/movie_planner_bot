@@ -4604,6 +4604,7 @@ def handle_clean_confirm_internal(message):
         movies_deleted = 0
         stats_deleted = 0
         settings_deleted = 0
+        tags_deleted = 0
         try:
             with db_lock:
                 cursor_local.execute('DELETE FROM ratings WHERE chat_id = %s', (chat_id,))
@@ -4621,6 +4622,10 @@ def handle_clean_confirm_internal(message):
                 cursor_local.execute('DELETE FROM movies WHERE chat_id = %s', (chat_id,))
                 movies_deleted = cursor_local.rowcount
                 logger.info(f"[CLEAN CONFIRM] Удалено фильмов: {movies_deleted}")
+                
+                cursor_local.execute('DELETE FROM user_tag_movies WHERE chat_id = %s', (chat_id,))
+                tags_deleted = cursor_local.rowcount
+                logger.info(f"[CLEAN CONFIRM] Удалено записей подборок: {tags_deleted}")
                 
                 cursor_local.execute('DELETE FROM stats WHERE chat_id = %s', (chat_id,))
                 stats_deleted = cursor_local.rowcount
@@ -4647,6 +4652,7 @@ def handle_clean_confirm_internal(message):
         result_text += f"• Оценок: {ratings_deleted}\n"
         result_text += f"• Планов: {plans_deleted}\n"
         result_text += f"• Отметок просмотра: {watched_deleted}\n"
+        result_text += f"• Записей подборок: {tags_deleted}\n"
         result_text += f"• Статистики: {stats_deleted}\n"
         result_text += f"• Настроек: {settings_deleted}"
         
