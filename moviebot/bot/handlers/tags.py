@@ -1109,16 +1109,19 @@ def handle_tag_cancel(call):
 @bot.message_handler(commands=['tags'])
 def tags_command(message):
     """Команда /tags - список подборок"""
-    user_id = message.from_user.id
+    # ВАЖНО: В private чате chat_id = user_id пользователя
+    # Если message.from_user - это бот, используем chat_id как user_id
     chat_id = message.chat.id
+    user_id = message.from_user.id if message.from_user and not getattr(message.from_user, 'is_bot', False) else chat_id
     
     logger.info(f"[TAGS] Команда /tags от user_id={user_id}, chat_id={chat_id}, chat_type={message.chat.type}, from_user={message.from_user}")
-    logger.info(f"[TAGS] message.from_user.id={message.from_user.id}, message.chat.id={message.chat.id}")
+    logger.info(f"[TAGS] message.from_user.id={message.from_user.id if message.from_user else None}, message.chat.id={message.chat.id}, is_bot={getattr(message.from_user, 'is_bot', False) if message.from_user else None}")
     
-    # В private чате chat_id должен быть равен user_id
+    # В private чате chat_id должен быть равен user_id пользователя
     if message.chat.type == 'private':
-        chat_id = user_id
-        logger.info(f"[TAGS] Исправлен chat_id для private чата: {chat_id}")
+        # Используем chat_id как user_id, так как в private чате они равны
+        user_id = chat_id
+        logger.info(f"[TAGS] Исправлен user_id для private чата: user_id={user_id} (из chat_id)")
     
     # Получаем список всех подборок (не только тех, где есть фильмы у пользователя)
     # Но показываем количество фильмов у пользователя в каждой подборке
