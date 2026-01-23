@@ -1493,16 +1493,21 @@ def handle_tags_list(call):
         
         try:
             with db_lock:
+                # Получаем все подборки с количеством фильмов у пользователя и проверяем, все ли просмотрены
+                # Считаем только фильмы, которые существуют в movies (m.id IS NOT NULL)
                 cursor.execute('''
                     SELECT t.id, t.name, 
-                           COALESCE(COUNT(DISTINCT utm.film_id), 0) as user_films_count,
-                           COUNT(DISTINCT tm.kp_id) as total_films_count
+                           COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL AND m.id IS NOT NULL THEN utm.film_id END), 0) as user_films_count,
+                           COUNT(DISTINCT tm.kp_id) as total_films_count,
+                           COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL AND m.id IS NOT NULL AND m.watched = 1 THEN utm.film_id END), 0) as watched_films_count
                     FROM tags t
                     LEFT JOIN tag_movies tm ON t.id = tm.tag_id
                     LEFT JOIN user_tag_movies utm ON t.id = utm.tag_id AND utm.user_id = %s AND utm.chat_id = %s
+                    LEFT JOIN movies m ON utm.film_id = m.id AND m.chat_id = %s
                     GROUP BY t.id, t.name
+                    HAVING COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL AND m.id IS NOT NULL THEN utm.film_id END), 0) > 0
                     ORDER BY t.name
-                ''', (user_id, chat_id))
+                ''', (user_id, chat_id, chat_id))
                 tags_list = cursor.fetchall()
         except Exception as e:
             logger.error(f"[TAGS LIST] Ошибка получения списка подборок: {e}", exc_info=True)
@@ -1527,17 +1532,47 @@ def handle_tags_list(call):
         text = "🏷️ <b>Тут собраны все добавленные подборки</b>\n\n"
         markup = InlineKeyboardMarkup(row_width=1)
         
+        # Разделяем на просмотренные и непросмотренные
+        unwatched_tags = []
+        watched_tags = []
+        
         for tag_row in tags_list:
             tag_id = tag_row[0] if isinstance(tag_row, tuple) else tag_row.get('id')
             tag_name = tag_row[1] if isinstance(tag_row, tuple) else tag_row.get('name')
             user_films_count = tag_row[2] if isinstance(tag_row, tuple) else tag_row.get('user_films_count', 0)
             total_films_count = tag_row[3] if isinstance(tag_row, tuple) else tag_row.get('total_films_count', 0)
+            watched_films_count = tag_row[4] if isinstance(tag_row, tuple) else tag_row.get('watched_films_count', 0)
             
-            count_text = f"{user_films_count}" if user_films_count > 0 else f"0/{total_films_count}"
-            button_text = f"📦 {tag_name} ({count_text})"
+            # Если у пользователя есть фильмы в теге и все они просмотрены - тег просмотрен
+            is_watched = user_films_count > 0 and watched_films_count == user_films_count
+            
+            tag_info = {
+                'id': tag_id,
+                'name': tag_name,
+                'user_films_count': user_films_count,
+                'total_films_count': total_films_count,
+                'watched_films_count': watched_films_count,
+                'is_watched': is_watched
+            }
+            
+            if is_watched:
+                watched_tags.append(tag_info)
+            else:
+                unwatched_tags.append(tag_info)
+        
+        # Сначала показываем непросмотренные
+        for tag_info in unwatched_tags:
+            count_text = f"{tag_info['user_films_count']}" if tag_info['user_films_count'] > 0 else f"0/{tag_info['total_films_count']}"
+            button_text = f"📦 {tag_info['name']} ({count_text})"
             if len(button_text) > 60:
                 button_text = button_text[:57] + "..."
-            markup.add(InlineKeyboardButton(button_text, callback_data=f"tag_view:{tag_id}"))
+            markup.add(InlineKeyboardButton(button_text, callback_data=f"tag_view:{tag_info['id']}"))
+        
+        # Кнопка "✅ Просмотренные" если есть просмотренные теги
+        if watched_tags:
+            watched_count = len(watched_tags)
+            watched_button_text = f"✅ Просмотренные ({watched_count})"
+            markup.add(InlineKeyboardButton(watched_button_text, callback_data="watched_tags_list"))
         
         markup.add(InlineKeyboardButton("◀️ Назад в базу", callback_data="back_to_database"))
         
