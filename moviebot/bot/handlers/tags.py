@@ -143,14 +143,13 @@ def handle_add_tag_reply(message):
             logger.info(f"[ADD TAG] Найдена короткая ссылка: {short_link}")
         
         # 3. Ищем ID через запятую или пробел (например: "10246904, 5268266, 8106285" или "10246904 5268266 8106285")
-        # Ищем последовательности цифр длиной от 1 до 10 символов (kp_id может быть коротким, например 474, 488)
+        # Ищем последовательности цифр любой длины (kp_id может быть коротким, например 474, 488)
         # НО: исключаем те, что уже найдены в ссылках
-        # Ищем числа, которые стоят отдельно (не часть других слов) и не являются частью ссылок
-        id_pattern = r'\b\d{1,10}\b'
-        found_ids = re.findall(id_pattern, text)
-        for found_id in found_ids:
+        # Сначала ищем длинные ID (4+ цифр) - они точно ID
+        id_pattern_long = r'\b\d{4,10}\b'
+        found_ids_long = re.findall(id_pattern_long, text)
+        for found_id in found_ids_long:
             # Проверяем, что это не часть ссылки (уже обработано выше)
-            # Проверяем, что перед ID нет "kinopoisk" и после нет "/"
             found_pos = text.find(found_id)
             if found_pos > 0:
                 before = text[max(0, found_pos-20):found_pos].lower()
@@ -158,20 +157,34 @@ def handle_add_tag_reply(message):
                 # Если это часть ссылки, пропускаем
                 if 'kinopoisk' in before or '/' in after:
                     continue
-            # Пропускаем очень короткие числа (1-2 цифры), которые могут быть частью текста, но берем от 3 цифр
-            # Или если это точно ID (стоит после запятой/пробела и перед запятой/пробелом/концом)
-            if len(found_id) < 3:
-                # Проверяем контекст - если это точно ID (окружен запятыми/пробелами), берем
-                if found_pos > 0 and found_pos + len(found_id) < len(text):
-                    char_before = text[found_pos - 1] if found_pos > 0 else ' '
-                    char_after = text[found_pos + len(found_id)] if found_pos + len(found_id) < len(text) else ' '
-                    # Если окружен пробелами, запятыми или в начале/конце строки - это ID
-                    if char_before in [' ', ',', '\n', '\t'] and char_after in [' ', ',', '\n', '\t', '\0']:
-                        kp_ids.add(found_id)
-                        logger.info(f"[ADD TAG] Найден короткий ID: {found_id}")
-                continue
             kp_ids.add(found_id)
             logger.info(f"[ADD TAG] Найден ID: {found_id}")
+        
+        # Теперь ищем короткие ID (1-3 цифры) - только если они стоят отдельно (окружены пробелами/запятыми)
+        # Это нужно для случаев типа "474, 488" где ID короткие
+        # Ищем паттерн: пробел/запятая + цифры + пробел/запятая/конец
+        id_pattern_short = r'(?:^|[\s,]+)(\d{1,3})(?:[\s,]+|$)'
+        found_ids_short = re.findall(id_pattern_short, text)
+        for found_id in found_ids_short:
+            # Проверяем, что это не часть ссылки
+            found_pos = text.find(found_id)
+            if found_pos > 0:
+                before = text[max(0, found_pos-20):found_pos].lower()
+                after = text[found_pos+len(found_id):min(len(text), found_pos+len(found_id)+5)]
+                # Если это часть ссылки, пропускаем
+                if 'kinopoisk' in before or '/' in after:
+                    continue
+            # Проверяем, что это не часть названия в кавычках (название обычно в начале)
+            # Если ID находится в первых 50 символах после кавычек, скорее всего это часть названия
+            quote_end_pos = text.rfind('"')
+            if quote_end_pos > 0 and found_pos < quote_end_pos + 50:
+                # Но если после кавычек есть запятая/пробел, то это может быть ID
+                if found_pos > quote_end_pos:
+                    char_after_quote = text[quote_end_pos+1:quote_end_pos+3].strip()
+                    if char_after_quote and char_after_quote[0] not in [',', ' ']:
+                        continue
+            kp_ids.add(found_id)
+            logger.info(f"[ADD TAG] Найден короткий ID: {found_id}")
         
         logger.info(f"[ADD TAG] Всего найдено уникальных kp_id: {len(kp_ids)}")
         
