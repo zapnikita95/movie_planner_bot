@@ -1172,6 +1172,16 @@ def tags_command(message):
                 tag_ids = cursor.fetchall()
                 logger.info(f"[TAGS] DEBUG: Теги в user_tag_movies: {[row[0] if isinstance(row, tuple) else row.get('tag_id') for row in tag_ids]}")
                 
+                # Проверяем, есть ли записи с другими user_id или chat_id
+                cursor.execute('''
+                    SELECT DISTINCT user_id, chat_id, COUNT(*) as cnt
+                    FROM user_tag_movies 
+                    WHERE tag_id IN (SELECT DISTINCT tag_id FROM user_tag_movies WHERE user_id = %s AND chat_id = %s)
+                    GROUP BY user_id, chat_id
+                ''', (user_id, chat_id))
+                all_records = cursor.fetchall()
+                logger.info(f"[TAGS] DEBUG: Все записи для этих тегов: {[(r[0] if isinstance(r, tuple) else r.get('user_id'), r[1] if isinstance(r, tuple) else r.get('chat_id'), r[2] if isinstance(r, tuple) else r.get('cnt')) for r in all_records]}")
+                
                 # Проверяем, есть ли фильмы в movies для этих film_id
                 if tag_ids:
                     tag_id_list = [row[0] if isinstance(row, tuple) else row.get('tag_id') for row in tag_ids]
