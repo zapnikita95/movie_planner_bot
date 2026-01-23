@@ -1086,13 +1086,14 @@ def tags_command(message):
                 SELECT t.id, t.name, 
                        COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL AND m.id IS NOT NULL THEN utm.film_id END), 0) as user_films_count,
                        COUNT(DISTINCT tm.kp_id) as total_films_count,
-                       COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL AND m.id IS NOT NULL AND m.watched = 1 THEN utm.film_id END), 0) as watched_films_count
+                       COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL AND m.id IS NOT NULL AND m.watched = 1 THEN utm.film_id END), 0) as watched_films_count,
+                       COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL THEN utm.film_id END), 0) as total_user_tag_films
                 FROM tags t
                 LEFT JOIN tag_movies tm ON t.id = tm.tag_id
                 LEFT JOIN user_tag_movies utm ON t.id = utm.tag_id AND utm.user_id = %s AND utm.chat_id = %s
                 LEFT JOIN movies m ON utm.film_id = m.id AND m.chat_id = %s
                 GROUP BY t.id, t.name
-                HAVING COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL AND m.id IS NOT NULL THEN utm.film_id END), 0) > 0
+                HAVING COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL THEN utm.film_id END), 0) > 0
                 ORDER BY t.name
             ''', (user_id, chat_id, chat_id))
             tags_list = cursor.fetchall()
@@ -1109,7 +1110,7 @@ def tags_command(message):
             pass
     
     if not tags_list:
-        text = "🏷️ <b>Теги</b>\n\nПока что тегов не добавлено, следите за кино пабликами и новостями!"
+        text = "🏷️ <b>Подборки</b>\n\nПока что подборок не добавлено, следите за кино пабликами и новостями!"
         markup = InlineKeyboardMarkup(row_width=1)
         markup.add(InlineKeyboardButton("🔍 Найти фильм", callback_data="start_menu:search"))
         markup.add(InlineKeyboardButton("◀️ Назад в базу", callback_data="back_to_database"))
@@ -1428,9 +1429,10 @@ def handle_watched_tags_list(call):
                     LEFT JOIN user_tag_movies utm ON t.id = utm.tag_id AND utm.user_id = %s AND utm.chat_id = %s
                     LEFT JOIN movies m ON utm.film_id = m.id AND m.chat_id = %s
                     GROUP BY t.id, t.name
-                    HAVING COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL AND m.id IS NOT NULL THEN utm.film_id END), 0) > 0
+                    HAVING COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL THEN utm.film_id END), 0) > 0
                        AND COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL AND m.id IS NOT NULL AND m.watched = 1 THEN utm.film_id END), 0) = 
                            COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL AND m.id IS NOT NULL THEN utm.film_id END), 0)
+                       AND COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL AND m.id IS NOT NULL THEN utm.film_id END), 0) > 0
                     ORDER BY t.name
                 ''', (user_id, chat_id, chat_id))
                 watched_tags_list = cursor.fetchall()
@@ -1505,7 +1507,7 @@ def handle_tags_list(call):
                     LEFT JOIN user_tag_movies utm ON t.id = utm.tag_id AND utm.user_id = %s AND utm.chat_id = %s
                     LEFT JOIN movies m ON utm.film_id = m.id AND m.chat_id = %s
                     GROUP BY t.id, t.name
-                    HAVING COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL AND m.id IS NOT NULL THEN utm.film_id END), 0) > 0
+                    HAVING COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL THEN utm.film_id END), 0) > 0
                     ORDER BY t.name
                 ''', (user_id, chat_id, chat_id))
                 tags_list = cursor.fetchall()
@@ -1522,14 +1524,14 @@ def handle_tags_list(call):
                 pass
         
         if not tags_list:
-            text = "🏷️ <b>Теги</b>\n\nПока что тегов не добавлено, следите за кино пабликами и новостями!"
+            text = "🏷️ <b>Подборки</b>\n\nПока что подборок не добавлено, следите за кино пабликами и новостями!"
             markup = InlineKeyboardMarkup(row_width=1)
             markup.add(InlineKeyboardButton("🔍 Найти фильм", callback_data="start_menu:search"))
             markup.add(InlineKeyboardButton("◀️ Назад в базу", callback_data="back_to_database"))
             bot.edit_message_text(text, chat_id, call.message.message_id, parse_mode='HTML', reply_markup=markup)
             return
         
-        text = "🏷️ <b>Тут собраны все добавленные подборки</b>\n\n"
+        text = "🏷️ <b>Подборки</b>\n\nТут собраны все добавленные подборки\n\n"
         markup = InlineKeyboardMarkup(row_width=1)
         
         # Разделяем на просмотренные и непросмотренные
@@ -1589,7 +1591,7 @@ def show_database_menu(chat_id, user_id, message_id=None):
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(InlineKeyboardButton("🗃️ Непросмотренные", callback_data="database:unwatched"))
     markup.add(InlineKeyboardButton("⚖️ Неоценённые", callback_data="database:unrated"))
-    markup.add(InlineKeyboardButton("🏷️ Теги", callback_data="database:tags"))
+    markup.add(InlineKeyboardButton("🏷️ Подборки", callback_data="database:tags"))
     markup.add(InlineKeyboardButton("◀️ Назад в меню", callback_data="back_to_start_menu"))
     
     try:
