@@ -1130,6 +1130,7 @@ def tags_command(message):
             # Получаем все подборки, где у пользователя есть хотя бы одна запись в user_tag_movies
             # Считаем фильмы, которые существуют в movies (m.id IS NOT NULL) для правильного chat_id
             # НО показываем подборку, даже если не все фильмы еще добавлены в movies
+            logger.info(f"[TAGS] Выполняем SQL запрос с параметрами: user_id={user_id}, chat_id={chat_id}")
             cursor.execute('''
                 SELECT DISTINCT t.id, t.name,
                        COALESCE(COUNT(DISTINCT CASE WHEN utm.film_id IS NOT NULL AND m.id IS NOT NULL THEN utm.film_id END), 0) as user_films_count,
@@ -1146,6 +1147,12 @@ def tags_command(message):
             ''', (user_id, chat_id, chat_id))
             tags_list = cursor.fetchall()
             logger.info(f"[TAGS] Найдено подборок для user_id={user_id}, chat_id={chat_id}: {len(tags_list)}")
+            if tags_list:
+                for tag_row in tags_list:
+                    tag_id = tag_row[0] if isinstance(tag_row, tuple) else tag_row.get('id')
+                    tag_name = tag_row[1] if isinstance(tag_row, tuple) else tag_row.get('name')
+                    user_films_count = tag_row[2] if isinstance(tag_row, tuple) else tag_row.get('user_films_count')
+                    logger.info(f"[TAGS] Найдена подборка: id={tag_id}, name={tag_name}, user_films_count={user_films_count}")
             
             # Если не найдено подборок, проверяем, есть ли вообще записи в user_tag_movies
             if not tags_list:
