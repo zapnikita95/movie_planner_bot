@@ -143,9 +143,10 @@ def handle_add_tag_reply(message):
             logger.info(f"[ADD TAG] Найдена короткая ссылка: {short_link}")
         
         # 3. Ищем ID через запятую или пробел (например: "10246904, 5268266, 8106285" или "10246904 5268266 8106285")
-        # Ищем последовательности цифр длиной от 4 до 10 символов (типичные kp_id)
+        # Ищем последовательности цифр длиной от 1 до 10 символов (kp_id может быть коротким, например 474, 488)
         # НО: исключаем те, что уже найдены в ссылках
-        id_pattern = r'\b\d{4,10}\b'
+        # Ищем числа, которые стоят отдельно (не часть других слов) и не являются частью ссылок
+        id_pattern = r'\b\d{1,10}\b'
         found_ids = re.findall(id_pattern, text)
         for found_id in found_ids:
             # Проверяем, что это не часть ссылки (уже обработано выше)
@@ -157,6 +158,18 @@ def handle_add_tag_reply(message):
                 # Если это часть ссылки, пропускаем
                 if 'kinopoisk' in before or '/' in after:
                     continue
+            # Пропускаем очень короткие числа (1-2 цифры), которые могут быть частью текста, но берем от 3 цифр
+            # Или если это точно ID (стоит после запятой/пробела и перед запятой/пробелом/концом)
+            if len(found_id) < 3:
+                # Проверяем контекст - если это точно ID (окружен запятыми/пробелами), берем
+                if found_pos > 0 and found_pos + len(found_id) < len(text):
+                    char_before = text[found_pos - 1] if found_pos > 0 else ' '
+                    char_after = text[found_pos + len(found_id)] if found_pos + len(found_id) < len(text) else ' '
+                    # Если окружен пробелами, запятыми или в начале/конце строки - это ID
+                    if char_before in [' ', ',', '\n', '\t'] and char_after in [' ', ',', '\n', '\t', '\0']:
+                        kp_ids.add(found_id)
+                        logger.info(f"[ADD TAG] Найден короткий ID: {found_id}")
+                continue
             kp_ids.add(found_id)
             logger.info(f"[ADD TAG] Найден ID: {found_id}")
         
