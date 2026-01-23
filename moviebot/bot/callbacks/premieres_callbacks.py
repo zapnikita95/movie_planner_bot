@@ -15,7 +15,7 @@ from moviebot.database.db_connection import get_db_connection, get_db_cursor, db
 from moviebot.utils.helpers import extract_film_info_from_existing
 from moviebot.database.db_operations import get_notification_settings, log_request
 
-from moviebot.api.kinopoisk_api import get_premieres_for_period, extract_movie_info
+from moviebot.api.kinopoisk_api import get_premieres_for_period, extract_movie_info, get_film_distribution
 
 from moviebot.bot.handlers.series import ensure_movie_in_database
 
@@ -23,42 +23,6 @@ from moviebot.config import KP_TOKEN
 
 
 logger = logging.getLogger(__name__)
-
-
-def get_film_distribution(kp_id):
-    """Получает информацию о прокате фильма в России"""
-    headers = {
-        'X-API-KEY': KP_TOKEN,
-        'accept': 'application/json'
-    }
-    url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}/distributions"
-    try:
-        response = requests.get(url, headers=headers, timeout=15)
-        if response.status_code == 200:
-            data = response.json()
-            items = data.get('items', [])
-            # Ищем прокат в России (COUNTRY_SPECIFIC для России)
-            for item in items:
-                if item.get('type') == 'COUNTRY_SPECIFIC':
-                    country = item.get('country', {})
-                    if isinstance(country, dict) and country.get('country') == 'Россия':
-                        date_str = item.get('date')
-                        if date_str:
-                            try:
-                                release_date = datetime.strptime(date_str, '%Y-%m-%d').date()
-                                today = date.today()
-                                # Возвращаем только если дата в будущем
-                                if release_date > today:
-                                    return {
-                                        'date': release_date,
-                                        'date_str': release_date.strftime('%d.%m.%Y')
-                                    }
-                            except Exception as e:
-                                logger.warning(f"[DISTRIBUTION] Ошибка парсинга даты {date_str}: {e}")
-        return None
-    except Exception as e:
-        logger.warning(f"[DISTRIBUTION] Ошибка получения информации о прокате для {kp_id}: {e}")
-        return None
 
 
 def show_premieres_page(call, premieres, period, page=0):

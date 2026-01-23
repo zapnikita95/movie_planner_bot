@@ -1319,19 +1319,41 @@ def search_type_callback(call):
                 reply_markup=markup
             )
             logger.info(f"[SEARCH TYPE] ✅ Сообщение обновлено успешно")
+        except ApiTelegramException as edit_e:
+            error_str = str(edit_e).lower()
+            if "message is not modified" in error_str:
+                logger.debug(f"[SEARCH TYPE] Сообщение не изменилось (это нормально)")
+            else:
+                logger.error(f"[SEARCH TYPE] Ошибка редактирования сообщения: {edit_e}", exc_info=True)
+                try:
+                    sent_msg = bot.send_message(
+                        chat_id,
+                        prompt_text,
+                        reply_markup=markup
+                    )
+                    logger.info(f"[SEARCH TYPE] ✅ Новое сообщение отправлено")
+                except Exception as send_e:
+                    logger.error(f"[SEARCH TYPE] ❌ Ошибка отправки нового сообщения: {send_e}", exc_info=True)
+                    bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                    return
         except Exception as edit_e:
-            logger.error(f"[SEARCH TYPE] Ошибка редактирования сообщения: {edit_e}", exc_info=True)
-            try:
-                sent_msg = bot.send_message(
-                    chat_id,
-                    prompt_text,
-                    reply_markup=markup
-                )
-                logger.info(f"[SEARCH TYPE] ✅ Новое сообщение отправлено")
-            except Exception as send_e:
-                logger.error(f"[SEARCH TYPE] ❌ Ошибка отправки нового сообщения: {send_e}", exc_info=True)
-                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
-                return
+            # Проверяем, не является ли это ошибкой "message is not modified" в другом формате
+            error_str = str(edit_e).lower()
+            if "message is not modified" in error_str:
+                logger.debug(f"[SEARCH TYPE] Сообщение не изменилось (это нормально)")
+            else:
+                logger.error(f"[SEARCH TYPE] Ошибка редактирования сообщения: {edit_e}", exc_info=True)
+                try:
+                    sent_msg = bot.send_message(
+                        chat_id,
+                        prompt_text,
+                        reply_markup=markup
+                    )
+                    logger.info(f"[SEARCH TYPE] ✅ Новое сообщение отправлено")
+                except Exception as send_e:
+                    logger.error(f"[SEARCH TYPE] ❌ Ошибка отправки нового сообщения: {send_e}", exc_info=True)
+                    bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+                    return
 
         # Для лички ставим ожидание текста
         if call.message.chat.type == 'private':
@@ -2675,6 +2697,7 @@ def handle_rand_content_type(call):
     @bot.callback_query_handler(func=lambda call: call.data.startswith("ticket_session:"))
     def ticket_session_callback(call):
         """Обработчик выбора сеанса - показывает информацию о сеансе и билеты"""
+        logger.info(f"[TICKET SESSION] ===== START: callback_id={call.id}, data={call.data}, user_id={call.from_user.id}")
         try:
             from moviebot.utils.helpers import has_tickets_access
             
@@ -2686,6 +2709,7 @@ def handle_rand_content_type(call):
             parts = call.data.split(":")
             plan_id = int(parts[1])
             file_id = parts[2] if len(parts) > 2 else None
+            logger.info(f"[TICKET SESSION] Парсинг: plan_id={plan_id}, file_id={file_id}")
             
             # Проверяем доступ к функциям билетов
             if not has_tickets_access(chat_id, user_id):
@@ -2741,8 +2765,11 @@ def handle_rand_content_type(call):
                 title = plan_row[4]
                 kp_id = plan_row[5] if len(plan_row) > 5 else None
             
+            logger.info(f"[TICKET SESSION] Данные сеанса: ticket_file_id={ticket_file_id}, film_id={film_id}, kp_id={kp_id}, title={title}")
+            
             # Если нет билетов и есть film_id и kp_id, открываем описание фильма напрямую
             if not ticket_file_id and film_id and kp_id:
+                logger.info(f"[TICKET SESSION] Нет билетов, но есть film_id и kp_id - открываем описание фильма")
                 # Получаем информацию о фильме из базы
                 conn_film = get_db_connection()
                 cursor_film = get_db_cursor()
@@ -2753,13 +2780,14 @@ def handle_rand_content_type(call):
                             SELECT id, title, link, watched
                             FROM movies
                             WHERE chat_id = %s AND kp_id = %s
-                        ''', (chat_id, kp_id))
+                        ''', (chat_id, str(kp_id)))
                         film_row = cursor_film.fetchone()
                 finally:
-                    try:
-                        cursor_film.close()
-                    except:
-                        pass
+                    if cursor_film:
+                        try:
+                            cursor_film.close()
+                        except:
+                            pass
                     try:
                         conn_film.close()
                     except:
@@ -2777,11 +2805,14 @@ def handle_rand_content_type(call):
                         link = film_row[2]
                         watched = film_row[3] if len(film_row) > 3 else 0
                     
+                    logger.info(f"[TICKET SESSION] Фильм найден в БД: film_id={film_id_val}, title={film_title}, link={link}")
+                    
                     # Получаем информацию о фильме через API
                     from moviebot.api.kinopoisk_api import extract_movie_info
                     info = extract_movie_info(link)
                     
                     if info:
+                        logger.info(f"[TICKET SESSION] Информация о фильме получена, открываем описание")
                         # Формируем existing для передачи в show_film_info_with_buttons
                         existing = (film_id_val, film_title, watched)
                         
@@ -2791,10 +2822,15 @@ def handle_rand_content_type(call):
                             user_id=user_id,
                             info=info,
                             link=link,
-                            kp_id=kp_id,
+                            kp_id=str(kp_id),
                             existing=existing
                         )
+                        logger.info(f"[TICKET SESSION] ===== END: открыто описание фильма =====")
                         return
+                    else:
+                        logger.warning(f"[TICKET SESSION] Не удалось получить информацию о фильме через API")
+                else:
+                    logger.warning(f"[TICKET SESSION] Фильм не найден в БД по kp_id={kp_id}")
             
             # Если есть билеты или это мероприятие без фильма, показываем информацию о сеансе
             # Форматируем дату и время
@@ -2852,6 +2888,7 @@ def handle_rand_content_type(call):
             markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
             
             # Показываем информацию о сеансе
+            logger.info(f"[TICKET SESSION] Показываем информацию о сеансе: plan_id={plan_id}, has_tickets={bool(ticket_file_id)}")
             try:
                 bot.edit_message_text(
                     text,
@@ -2860,9 +2897,11 @@ def handle_rand_content_type(call):
                     reply_markup=markup,
                     parse_mode='HTML'
                 )
-            except telebot.apihelper.ApiTelegramException as e:
+                logger.info(f"[TICKET SESSION] ===== END: успешно показана информация о сеансе =====")
+            except ApiTelegramException as e:
                 error_str = str(e).lower()
                 if "message is not modified" in error_str:
+                    logger.debug(f"[TICKET SESSION] Сообщение не изменилось (это нормально)")
                     # Если сообщение не изменилось, просто обновляем клавиатуру
                     try:
                         bot.edit_message_reply_markup(
