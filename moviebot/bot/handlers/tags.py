@@ -1143,6 +1143,25 @@ def tags_command(message):
                 ''', (user_id, chat_id))
                 tag_ids = cursor.fetchall()
                 logger.info(f"[TAGS] DEBUG: Теги в user_tag_movies: {[row[0] if isinstance(row, tuple) else row.get('tag_id') for row in tag_ids]}")
+                
+                # Проверяем, есть ли фильмы в movies для этих film_id
+                if tag_ids:
+                    tag_id_list = [row[0] if isinstance(row, tuple) else row.get('tag_id') for row in tag_ids]
+                    for tid in tag_id_list:
+                        cursor.execute('''
+                            SELECT utm.film_id, m.id as movie_id, m.chat_id as movie_chat_id
+                            FROM user_tag_movies utm
+                            LEFT JOIN movies m ON utm.film_id = m.id
+                            WHERE utm.user_id = %s AND utm.chat_id = %s AND utm.tag_id = %s
+                            LIMIT 5
+                        ''', (user_id, chat_id, tid))
+                        films = cursor.fetchall()
+                        logger.info(f"[TAGS] DEBUG: Для тега {tid} найдено записей: {len(films)}")
+                        for film_row in films:
+                            film_id = film_row[0] if isinstance(film_row, tuple) else film_row.get('film_id')
+                            movie_id = film_row[1] if isinstance(film_row, tuple) else film_row.get('movie_id')
+                            movie_chat_id = film_row[2] if isinstance(film_row, tuple) else film_row.get('movie_chat_id')
+                            logger.info(f"[TAGS] DEBUG: film_id={film_id}, movie_id={movie_id}, movie_chat_id={movie_chat_id}, expected_chat_id={chat_id}")
     except Exception as e:
         logger.error(f"[TAGS] Ошибка получения списка подборок: {e}", exc_info=True)
     finally:
