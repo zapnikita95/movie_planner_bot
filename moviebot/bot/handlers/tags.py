@@ -1120,6 +1120,25 @@ def tags_command(message):
                 ORDER BY t.name
             ''', (user_id, chat_id, chat_id))
             tags_list = cursor.fetchall()
+            logger.info(f"[TAGS] Найдено подборок для user_id={user_id}, chat_id={chat_id}: {len(tags_list)}")
+            
+            # Если не найдено подборок, проверяем, есть ли вообще записи в user_tag_movies
+            if not tags_list:
+                cursor.execute('''
+                    SELECT COUNT(*) FROM user_tag_movies 
+                    WHERE user_id = %s AND chat_id = %s
+                ''', (user_id, chat_id))
+                count_row = cursor.fetchone()
+                count = count_row[0] if isinstance(count_row, tuple) else count_row.get('count', 0)
+                logger.info(f"[TAGS] DEBUG: Записей в user_tag_movies для user_id={user_id}, chat_id={chat_id}: {count}")
+                
+                # Проверяем, какие теги есть в user_tag_movies
+                cursor.execute('''
+                    SELECT DISTINCT tag_id FROM user_tag_movies 
+                    WHERE user_id = %s AND chat_id = %s
+                ''', (user_id, chat_id))
+                tag_ids = cursor.fetchall()
+                logger.info(f"[TAGS] DEBUG: Теги в user_tag_movies: {[row[0] if isinstance(row, tuple) else row.get('tag_id') for row in tag_ids]}")
     except Exception as e:
         logger.error(f"[TAGS] Ошибка получения списка подборок: {e}", exc_info=True)
     finally:
