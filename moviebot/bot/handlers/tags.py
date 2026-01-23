@@ -1131,6 +1131,15 @@ def tags_command(message):
             # ПРОСТО: Если есть записи в user_tag_movies - показываем подборку
             # Считаем только фильмы, которые реально есть в movies у пользователя
             logger.info(f"[TAGS] Выполняем SQL запрос с параметрами: user_id={user_id}, chat_id={chat_id}")
+            
+            # Сначала проверяем, есть ли вообще записи для этого пользователя
+            cursor.execute('''
+                SELECT COUNT(*) FROM user_tag_movies 
+                WHERE user_id = %s AND chat_id = %s
+            ''', (user_id, chat_id))
+            total_records = cursor.fetchone()[0] if isinstance(cursor.fetchone(), tuple) else cursor.fetchone().get('count', 0)
+            logger.info(f"[TAGS] Всего записей в user_tag_movies для user_id={user_id}, chat_id={chat_id}: {total_records}")
+            
             cursor.execute('''
                 SELECT 
                     t.id, 
