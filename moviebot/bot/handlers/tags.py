@@ -499,7 +499,12 @@ def handle_tag_deep_link(bot, message, short_code):
     user_id = message.from_user.id
     chat_id = message.chat.id
     
-    logger.info(f"[TAG DEEP LINK] Обработка для user_id={user_id}, code={short_code}")
+    # В private чате chat_id должен быть равен user_id
+    if message.chat.type == 'private':
+        chat_id = user_id
+        logger.info(f"[TAG DEEP LINK] Исправлен chat_id для private чата: {chat_id}")
+    
+    logger.info(f"[TAG DEEP LINK] Обработка для user_id={user_id}, chat_id={chat_id}, code={short_code}")
     
     # Проверяем, является ли пользователь новым
     is_new = is_new_user(user_id, chat_id)
