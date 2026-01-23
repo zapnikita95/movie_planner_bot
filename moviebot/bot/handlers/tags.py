@@ -166,22 +166,24 @@ def handle_add_tag_reply(message):
         quote_end_pos = text.rfind('"')
         if quote_end_pos >= 0:
             # Ищем ID только после закрывающей кавычки
-            text_after_quote = text[quote_end_pos + 1:]
-            # Ищем все числа, которые стоят отдельно (окружены пробелами/запятыми)
-            # Паттерн: начало строки/пробел/запятая + цифры (1-3) + пробел/запятая/конец
-            id_pattern_short = r'(?:^|[\s,]+)(\d{1,3})(?:[\s,]+|$)'
-            found_ids_short = re.findall(id_pattern_short, text_after_quote)
-            for found_id in found_ids_short:
-                # Проверяем, что это не часть ссылки (если есть ссылки после кавычек)
-                found_pos_in_full = text.find(found_id, quote_end_pos)
-                if found_pos_in_full > 0:
-                    before = text[max(0, found_pos_in_full-20):found_pos_in_full].lower()
-                    after = text[found_pos_in_full+len(found_id):min(len(text), found_pos_in_full+len(found_id)+5)]
-                    # Если это часть ссылки, пропускаем
-                    if 'kinopoisk' in before or '/' in after:
-                        continue
-                kp_ids.add(found_id)
-                logger.info(f"[ADD TAG] Найден короткий ID: {found_id}")
+            text_after_quote = text[quote_end_pos + 1:].strip()
+            if text_after_quote:
+                # Разбиваем текст после кавычек по запятым и пробелам
+                # Берем все части, которые являются числами длиной 1-3 цифры
+                parts = re.split(r'[\s,]+', text_after_quote)
+                for part in parts:
+                    part = part.strip()
+                    if part and part.isdigit() and 1 <= len(part) <= 3:
+                        # Проверяем, что это не часть ссылки
+                        found_pos_in_full = text.find(part, quote_end_pos)
+                        if found_pos_in_full > 0:
+                            before = text[max(0, found_pos_in_full-20):found_pos_in_full].lower()
+                            after = text[found_pos_in_full+len(part):min(len(text), found_pos_in_full+len(part)+5)]
+                            # Если это часть ссылки, пропускаем
+                            if 'kinopoisk' in before or '/' in after:
+                                continue
+                        kp_ids.add(part)
+                        logger.info(f"[ADD TAG] Найден короткий ID: {part}")
         
         logger.info(f"[ADD TAG] Всего найдено уникальных kp_id: {len(kp_ids)}")
         
