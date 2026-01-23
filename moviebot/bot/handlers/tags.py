@@ -943,6 +943,7 @@ def handle_tag_confirm(call):
                                 ON CONFLICT (user_id, chat_id, tag_id, film_id) DO NOTHING
                             ''', (user_id, chat_id, tag_info['id'], film_id))
                             conn_link.commit()
+                            logger.info(f"[TAG CONFIRM] Добавлена запись в user_tag_movies: user_id={user_id}, chat_id={chat_id}, tag_id={tag_info['id']}, film_id={film_id}")
                     finally:
                         try:
                             cursor_link.close()
@@ -1651,7 +1652,10 @@ def handle_database_action(call):
     action = call.data.split(":")[1]
     
     try:
-        bot.answer_callback_query(call.id)
+        try:
+            bot.answer_callback_query(call.id)
+        except Exception as e:
+            logger.warning(f"[DATABASE ACTION] Не удалось ответить на callback: {e}")
         
         if action == "unwatched":
             # Вызываем /list
