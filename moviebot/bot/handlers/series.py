@@ -1254,6 +1254,311 @@ def show_film_info_with_buttons(
                 message_thread_id=message_thread_id
             )
 
+# ===== TICKET CALLBACK HANDLERS (на верхнем уровне для ранней регистрации) =====
+@bot.callback_query_handler(func=lambda call: call.data.startswith("ticket_session:"))
+def ticket_session_callback(call):
+    """Обработчик выбора сеанса - показывает информацию о сеансе и билеты"""
+    logger.info(f"[TICKET SESSION] ===== START: callback_id={call.id}, data={call.data}, user_id={call.from_user.id}")
+    logger.info(f"[TICKET SESSION] Обработчик вызван! call.data={call.data}")
+    try:
+        from moviebot.utils.helpers import has_tickets_access
+        
+        bot.answer_callback_query(call.id)
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        
+        # Парсим plan_id и file_id (если есть)
+        parts = call.data.split(":")
+        plan_id = int(parts[1])
+        file_id = parts[2] if len(parts) > 2 else None
+        logger.info(f"[TICKET SESSION] Парсинг: plan_id={plan_id}, file_id={file_id}")
+        
+        # Проверяем доступ к функциям билетов
+        if not has_tickets_access(chat_id, user_id):
+            bot.edit_message_text(
+                "🎫 <b>Билеты в кино</b>\n\n"
+                "Вы можете загружать билеты и получать их в боте прямо перед мероприятием с подпиской <b>\"Билеты\"</b>.\n\n"
+                "Используйте /payment для оформления подписки.",
+                chat_id,
+                call.message.message_id,
+                parse_mode='HTML'
+            )
+            return
+        
+        # Получаем информацию о сеансе (включая мероприятия без film_id)
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        plan_row = None
+        try:
+            with db_lock:
+                cursor_local.execute('''
+                    SELECT p.id, p.plan_datetime, p.ticket_file_id, p.film_id,
+                           COALESCE(m.title, 'Мероприятие') as title, 
+                           m.kp_id
+                    FROM plans p
+                    LEFT JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                    WHERE p.id = %s AND p.chat_id = %s AND p.plan_type = 'cinema'
+                ''', (plan_id, chat_id))
+                plan_row = cursor_local.fetchone()
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
+        
+        if not plan_row:
+            logger.error(f"[TICKET SESSION] Сеанс не найден: plan_id={plan_id}, chat_id={chat_id}")
+            bot.answer_callback_query(call.id, "❌ Сеанс не найден", show_alert=True)
+            return
+        
+        if isinstance(plan_row, dict):
+            plan_dt = plan_row.get('plan_datetime')
+            ticket_file_id = plan_row.get('ticket_file_id')
+            film_id = plan_row.get('film_id')
+            title = plan_row.get('title')
+            kp_id = plan_row.get('kp_id')
+        else:
+            plan_dt = plan_row[1]
+            ticket_file_id = plan_row[2]
+            film_id = plan_row[3]
+            title = plan_row[4]
+            kp_id = plan_row[5] if len(plan_row) > 5 else None
+        
+        logger.info(f"[TICKET SESSION] Данные сеанса получены: ticket_file_id={ticket_file_id}, film_id={film_id}, kp_id={kp_id}, title={title}")
+        
+        # Если нет билетов и есть film_id и kp_id, открываем описание фильма напрямую
+        if not ticket_file_id and film_id and kp_id and str(kp_id).strip():
+            logger.info(f"[TICKET SESSION] Нет билетов, но есть film_id и kp_id - открываем описание фильма")
+            conn_film = get_db_connection()
+            cursor_film = get_db_cursor()
+            film_row = None
+            try:
+                with db_lock:
+                    cursor_film.execute('''
+                        SELECT id, title, link, watched
+                        FROM movies
+                        WHERE chat_id = %s AND kp_id = %s
+                    ''', (chat_id, str(kp_id)))
+                    film_row = cursor_film.fetchone()
+            finally:
+                if cursor_film:
+                    try:
+                        cursor_film.close()
+                    except:
+                        pass
+                try:
+                    conn_film.close()
+                except:
+                    pass
+            
+            if film_row:
+                if isinstance(film_row, dict):
+                    film_id_val = film_row.get('id')
+                    film_title = film_row.get('title')
+                    link = film_row.get('link')
+                    watched = film_row.get('watched', 0)
+                else:
+                    film_id_val = film_row[0]
+                    film_title = film_row[1]
+                    link = film_row[2]
+                    watched = film_row[3] if len(film_row) > 3 else 0
+                
+                logger.info(f"[TICKET SESSION] Фильм найден в БД: film_id={film_id_val}, title={film_title}, link={link}")
+                
+                from moviebot.api.kinopoisk_api import extract_movie_info
+                info = extract_movie_info(link)
+                
+                if info:
+                    logger.info(f"[TICKET SESSION] Информация о фильме получена, открываем описание")
+                    existing = (film_id_val, film_title, watched)
+                    show_film_info_with_buttons(
+                        chat_id=chat_id,
+                        user_id=user_id,
+                        info=info,
+                        link=link,
+                        kp_id=str(kp_id),
+                        existing=existing
+                    )
+                    logger.info(f"[TICKET SESSION] ===== END: открыто описание фильма =====")
+                    return
+                else:
+                    logger.warning(f"[TICKET SESSION] Не удалось получить информацию о фильме через API")
+            else:
+                logger.warning(f"[TICKET SESSION] Фильм не найден в БД по kp_id={kp_id}")
+        
+        # Если есть билеты или это мероприятие без фильма, показываем информацию о сеансе
+        user_tz = get_user_timezone_or_default(user_id)
+        if plan_dt:
+            if isinstance(plan_dt, datetime):
+                if plan_dt.tzinfo is None:
+                    dt = pytz.utc.localize(plan_dt).astimezone(user_tz)
+                else:
+                    dt = plan_dt.astimezone(user_tz)
+            else:
+                dt = datetime.fromisoformat(str(plan_dt).replace('Z', '+00:00')).astimezone(user_tz)
+            date_str = dt.strftime('%d.%m.%Y %H:%M')
+        else:
+            date_str = "Не указано"
+        
+        text = f"🎬 <b>{title}</b>\n\n"
+        text += f"📅 <b>Дата и время:</b> {date_str}\n\n"
+        
+        markup = InlineKeyboardMarkup(row_width=1)
+        
+        if ticket_file_id:
+            text += "🎟️ <b>Билеты загружены</b>\n\n"
+            text += "Билеты будут отправлены вам перед событием."
+            markup.add(InlineKeyboardButton("📎 Показать билеты", callback_data=f"show_ticket:{plan_id}"))
+            markup.add(InlineKeyboardButton("➕ Добавить ещё билеты", callback_data=f"add_more_tickets:{plan_id}"))
+            markup.add(InlineKeyboardButton("🔄 Заменить билеты", callback_data=f"add_ticket:{plan_id}"))
+        else:
+            text += "🎟️ <b>Билеты не загружены</b>\n\n"
+            text += "Загрузите билеты, чтобы получать их перед событием."
+            markup.add(InlineKeyboardButton("➕ Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
+        
+        markup.add(InlineKeyboardButton("✏️ Изменить", callback_data=f"ticket_edit_time:{plan_id}"))
+        
+        if not film_id:
+            markup.add(InlineKeyboardButton("🗑️ Удалить из расписания", callback_data=f"remove_from_calendar:{plan_id}"))
+        elif kp_id:
+            markup.add(InlineKeyboardButton("◀️ Вернуться к описанию", callback_data=f"back_to_film:{int(kp_id)}"))
+        
+        if file_id:
+            from moviebot.states import user_ticket_state
+            user_ticket_state[user_id] = {
+                'step': 'upload_ticket',
+                'plan_id': plan_id,
+                'chat_id': chat_id,
+                'file_id': file_id
+            }
+            text += "\n\n📎 Файл готов к добавлению. Нажмите '➕ Добавить билеты' для продолжения."
+        
+        markup.add(InlineKeyboardButton("⬅️ Назад к событиям", callback_data="ticket_back_to_list"))
+        markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
+        
+        logger.info(f"[TICKET SESSION] Показываем информацию о сеансе: plan_id={plan_id}, has_tickets={bool(ticket_file_id)}")
+        try:
+            bot.edit_message_text(
+                text,
+                chat_id,
+                call.message.message_id,
+                reply_markup=markup,
+                parse_mode='HTML'
+            )
+            logger.info(f"[TICKET SESSION] ===== END: успешно показана информация о сеансе =====")
+        except ApiTelegramException as e:
+            error_str = str(e).lower()
+            if "message is not modified" in error_str:
+                logger.debug(f"[TICKET SESSION] Сообщение не изменилось (это нормально)")
+                try:
+                    bot.edit_message_reply_markup(
+                        chat_id=chat_id,
+                        message_id=call.message.message_id,
+                        reply_markup=markup
+                    )
+                except:
+                    pass
+            else:
+                raise
+    except Exception as e:
+        logger.error(f"[TICKET SESSION] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("show_ticket:"))
+def show_ticket_callback(call):
+    """Обработчик кнопки 'Показать билеты' - отправляет билеты пользователю"""
+    logger.info(f"[SHOW TICKET] ===== START: callback_id={call.id}, data={call.data}, user_id={call.from_user.id}")
+    logger.info(f"[SHOW TICKET] Обработчик вызван! call.data={call.data}")
+    try:
+        from moviebot.utils.helpers import has_tickets_access
+        
+        bot.answer_callback_query(call.id)
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        plan_id = int(call.data.split(":")[1])
+        
+        if not has_tickets_access(chat_id, user_id):
+            bot.answer_callback_query(
+                call.id,
+                "🎫 Билеты в кино доступны с подпиской 🎫 Билеты или 📦 Все режимы. Подключите подписку через /payment",
+                show_alert=True
+            )
+            return
+        
+        import json
+        conn_local = get_db_connection()
+        cursor_local = get_db_cursor()
+        ticket_row = None
+        try:
+            with db_lock:
+                cursor_local.execute('SELECT ticket_file_id FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
+                ticket_row = cursor_local.fetchone()
+        finally:
+            try:
+                cursor_local.close()
+            except:
+                pass
+            try:
+                conn_local.close()
+            except:
+                pass
+        
+        if not ticket_row:
+            bot.answer_callback_query(call.id, "❌ Билеты не найдены", show_alert=True)
+            return
+        
+        if isinstance(ticket_row, dict):
+            ticket_data = ticket_row.get('ticket_file_id')
+        else:
+            ticket_data = ticket_row.get("ticket_file_id") if isinstance(ticket_row, dict) else (ticket_row[0] if ticket_row else None)
+        
+        if not ticket_data:
+            bot.answer_callback_query(call.id, "❌ Билеты не загружены", show_alert=True)
+            return
+        
+        ticket_files = []
+        try:
+            ticket_files = json.loads(ticket_data)
+            if not isinstance(ticket_files, list):
+                ticket_files = [ticket_data]
+        except:
+            ticket_files = [ticket_data]
+        
+        sent_count = 0
+        for i, ticket_file_id in enumerate(ticket_files):
+            try:
+                if i == 0:
+                    caption = f"🎟️ Ваши билеты ({len(ticket_files)} шт.)"
+                else:
+                    caption = f"🎟️ Билет {i+1}/{len(ticket_files)}"
+                
+                bot.send_photo(chat_id, ticket_file_id, caption=caption)
+                sent_count += 1
+            except:
+                try:
+                    bot.send_document(chat_id, ticket_file_id, caption=caption)
+                    sent_count += 1
+                except Exception as e:
+                    logger.error(f"[SHOW TICKET] Ошибка отправки билета {i+1}: {e}", exc_info=True)
+        
+        if sent_count > 0:
+            bot.answer_callback_query(call.id, f"✅ Отправлено билетов: {sent_count}/{len(ticket_files)}")
+        else:
+            bot.answer_callback_query(call.id, "❌ Ошибка отправки билетов", show_alert=True)
+    except Exception as e:
+        logger.error(f"[SHOW TICKET] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
+        except:
+            pass
+
 @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("search_type:"))
 def search_type_callback(call):
     """Обработчик выбора типа поиска (фильм или сериал)"""
@@ -2694,235 +2999,7 @@ def handle_rand_content_type(call):
         except Exception as e:
             logger.error(f"[TICKET LOCKED] Ошибка: {e}", exc_info=True)
 
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("ticket_session:"))
-    def ticket_session_callback(call):
-        """Обработчик выбора сеанса - показывает информацию о сеансе и билеты"""
-        logger.info(f"[TICKET SESSION] ===== START: callback_id={call.id}, data={call.data}, user_id={call.from_user.id}")
-        try:
-            from moviebot.utils.helpers import has_tickets_access
-            
-            bot.answer_callback_query(call.id)
-            user_id = call.from_user.id
-            chat_id = call.message.chat.id
-            
-            # Парсим plan_id и file_id (если есть)
-            parts = call.data.split(":")
-            plan_id = int(parts[1])
-            file_id = parts[2] if len(parts) > 2 else None
-            logger.info(f"[TICKET SESSION] Парсинг: plan_id={plan_id}, file_id={file_id}")
-            
-            # Проверяем доступ к функциям билетов
-            if not has_tickets_access(chat_id, user_id):
-                bot.edit_message_text(
-                    "🎫 <b>Билеты в кино</b>\n\n"
-                    "Вы можете загружать билеты и получать их в боте прямо перед мероприятием с подпиской <b>\"Билеты\"</b>.\n\n"
-                    "Используйте /payment для оформления подписки.",
-                    chat_id,
-                    call.message.message_id,
-                    parse_mode='HTML'
-                )
-                return
-            
-            # Получаем информацию о сеансе (включая мероприятия без film_id)
-            conn_local = get_db_connection()
-            cursor_local = get_db_cursor()
-            plan_row = None
-            try:
-                with db_lock:
-                    cursor_local.execute('''
-                        SELECT p.id, p.plan_datetime, p.ticket_file_id, p.film_id,
-                               COALESCE(m.title, 'Мероприятие') as title, 
-                               m.kp_id
-                        FROM plans p
-                        LEFT JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
-                        WHERE p.id = %s AND p.chat_id = %s AND p.plan_type = 'cinema'
-                    ''', (plan_id, chat_id))
-                    plan_row = cursor_local.fetchone()
-            finally:
-                try:
-                    cursor_local.close()
-                except:
-                    pass
-                try:
-                    conn_local.close()
-                except:
-                    pass
-            
-            if not plan_row:
-                logger.error(f"[TICKET SESSION] Сеанс не найден: plan_id={plan_id}, chat_id={chat_id}")
-                bot.answer_callback_query(call.id, "❌ Сеанс не найден", show_alert=True)
-                return
-            
-            if isinstance(plan_row, dict):
-                plan_dt = plan_row.get('plan_datetime')
-                ticket_file_id = plan_row.get('ticket_file_id')
-                film_id = plan_row.get('film_id')
-                title = plan_row.get('title')
-                kp_id = plan_row.get('kp_id')
-            else:
-                plan_dt = plan_row[1]
-                ticket_file_id = plan_row[2]
-                film_id = plan_row[3]
-                title = plan_row[4]
-                kp_id = plan_row[5] if len(plan_row) > 5 else None
-            
-            logger.info(f"[TICKET SESSION] Данные сеанса получены: ticket_file_id={ticket_file_id}, film_id={film_id}, kp_id={kp_id}, title={title}")
-            
-            logger.info(f"[TICKET SESSION] Данные сеанса: ticket_file_id={ticket_file_id}, film_id={film_id}, kp_id={kp_id}, title={title}")
-            
-            # Если нет билетов и есть film_id и kp_id, открываем описание фильма напрямую
-            # Проверяем, что kp_id не None и не пустой
-            if not ticket_file_id and film_id and kp_id and str(kp_id).strip():
-                logger.info(f"[TICKET SESSION] Нет билетов, но есть film_id и kp_id - открываем описание фильма")
-                # Получаем информацию о фильме из базы
-                conn_film = get_db_connection()
-                cursor_film = get_db_cursor()
-                film_row = None
-                try:
-                    with db_lock:
-                        cursor_film.execute('''
-                            SELECT id, title, link, watched
-                            FROM movies
-                            WHERE chat_id = %s AND kp_id = %s
-                        ''', (chat_id, str(kp_id)))
-                        film_row = cursor_film.fetchone()
-                finally:
-                    if cursor_film:
-                        try:
-                            cursor_film.close()
-                        except:
-                            pass
-                    try:
-                        conn_film.close()
-                    except:
-                        pass
-                
-                if film_row:
-                    if isinstance(film_row, dict):
-                        film_id_val = film_row.get('id')
-                        film_title = film_row.get('title')
-                        link = film_row.get('link')
-                        watched = film_row.get('watched', 0)
-                    else:
-                        film_id_val = film_row[0]
-                        film_title = film_row[1]
-                        link = film_row[2]
-                        watched = film_row[3] if len(film_row) > 3 else 0
-                    
-                    logger.info(f"[TICKET SESSION] Фильм найден в БД: film_id={film_id_val}, title={film_title}, link={link}")
-                    
-                    # Получаем информацию о фильме через API
-                    from moviebot.api.kinopoisk_api import extract_movie_info
-                    info = extract_movie_info(link)
-                    
-                    if info:
-                        logger.info(f"[TICKET SESSION] Информация о фильме получена, открываем описание")
-                        # Формируем existing для передачи в show_film_info_with_buttons
-                        existing = (film_id_val, film_title, watched)
-                        
-                        # Показываем описание фильма
-                        show_film_info_with_buttons(
-                            chat_id=chat_id,
-                            user_id=user_id,
-                            info=info,
-                            link=link,
-                            kp_id=str(kp_id),
-                            existing=existing
-                        )
-                        logger.info(f"[TICKET SESSION] ===== END: открыто описание фильма =====")
-                        return
-                    else:
-                        logger.warning(f"[TICKET SESSION] Не удалось получить информацию о фильме через API")
-                else:
-                    logger.warning(f"[TICKET SESSION] Фильм не найден в БД по kp_id={kp_id}")
-            
-            # Если есть билеты или это мероприятие без фильма, показываем информацию о сеансе
-            # Форматируем дату и время
-            user_tz = get_user_timezone_or_default(user_id)
-            if plan_dt:
-                if isinstance(plan_dt, datetime):
-                    if plan_dt.tzinfo is None:
-                        dt = pytz.utc.localize(plan_dt).astimezone(user_tz)
-                    else:
-                        dt = plan_dt.astimezone(user_tz)
-                else:
-                    dt = datetime.fromisoformat(str(plan_dt).replace('Z', '+00:00')).astimezone(user_tz)
-                date_str = dt.strftime('%d.%m.%Y %H:%M')
-            else:
-                date_str = "Не указано"
-            
-            # Формируем текст и кнопки
-            text = f"🎬 <b>{title}</b>\n\n"
-            text += f"📅 <b>Дата и время:</b> {date_str}\n\n"
-            
-            markup = InlineKeyboardMarkup(row_width=1)
-            
-            if ticket_file_id:
-                text += "🎟️ <b>Билеты загружены</b>\n\n"
-                text += "Билеты будут отправлены вам перед событием."
-                markup.add(InlineKeyboardButton("📎 Показать билеты", callback_data=f"show_ticket:{plan_id}"))
-                markup.add(InlineKeyboardButton("➕ Добавить ещё билеты", callback_data=f"add_more_tickets:{plan_id}"))
-                markup.add(InlineKeyboardButton("🔄 Заменить билеты", callback_data=f"add_ticket:{plan_id}"))
-            else:
-                text += "🎟️ <b>Билеты не загружены</b>\n\n"
-                text += "Загрузите билеты, чтобы получать их перед событием."
-                markup.add(InlineKeyboardButton("➕ Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
-            
-            # Добавляем кнопку "✏️ Изменить" для изменения времени сеанса
-            markup.add(InlineKeyboardButton("✏️ Изменить", callback_data=f"ticket_edit_time:{plan_id}"))
-            
-            # Если это мероприятие без film_id, добавляем кнопку "🗑️ Удалить"
-            if not film_id:
-                markup.add(InlineKeyboardButton("🗑️ Удалить из расписания", callback_data=f"remove_from_calendar:{plan_id}"))
-            elif kp_id:
-                # Если это фильм, добавляем кнопку "Вернуться к описанию"
-                markup.add(InlineKeyboardButton("◀️ Вернуться к описанию", callback_data=f"back_to_film:{int(kp_id)}"))
-            
-            if file_id:
-                # Если есть file_id, значит пользователь хочет добавить билеты к этому сеансу
-                user_ticket_state[user_id] = {
-                    'step': 'upload_ticket',
-                    'plan_id': plan_id,
-                    'chat_id': chat_id,
-                    'file_id': file_id
-                }
-                text += "\n\n📎 Файл готов к добавлению. Нажмите '➕ Добавить билеты' для продолжения."
-            
-            markup.add(InlineKeyboardButton("⬅️ Назад к событиям", callback_data="ticket_back_to_list"))
-            markup.add(InlineKeyboardButton("❌ Отмена", callback_data="ticket:cancel"))
-            
-            # Показываем информацию о сеансе
-            logger.info(f"[TICKET SESSION] Показываем информацию о сеансе: plan_id={plan_id}, has_tickets={bool(ticket_file_id)}")
-            try:
-                bot.edit_message_text(
-                    text,
-                    chat_id,
-                    call.message.message_id,
-                    reply_markup=markup,
-                    parse_mode='HTML'
-                )
-                logger.info(f"[TICKET SESSION] ===== END: успешно показана информация о сеансе =====")
-            except ApiTelegramException as e:
-                error_str = str(e).lower()
-                if "message is not modified" in error_str:
-                    logger.debug(f"[TICKET SESSION] Сообщение не изменилось (это нормально)")
-                    # Если сообщение не изменилось, просто обновляем клавиатуру
-                    try:
-                        bot.edit_message_reply_markup(
-                            chat_id=chat_id,
-                            message_id=call.message.message_id,
-                            reply_markup=markup
-                        )
-                    except:
-                        pass
-                else:
-                    raise
-        except Exception as e:
-            logger.error(f"[TICKET SESSION] Ошибка: {e}", exc_info=True)
-            try:
-                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
-            except:
-                pass
+    # Обработчики ticket_session и show_ticket перемещены на верхний уровень модуля для ранней регистрации
 
     @bot.callback_query_handler(func=lambda call: call.data == "ticket:add_event")
     def ticket_add_event_callback(call):
@@ -3011,96 +3088,7 @@ def handle_rand_content_type(call):
             except:
                 pass
 
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("show_ticket:"))
-    def show_ticket_callback(call):
-        """Обработчик кнопки 'Показать билеты' - отправляет билеты пользователю"""
-        try:
-            from moviebot.utils.helpers import has_tickets_access
-            
-            bot.answer_callback_query(call.id)
-            user_id = call.from_user.id
-            chat_id = call.message.chat.id
-            plan_id = int(call.data.split(":")[1])
-            
-            # Проверяем доступ к функциям билетов
-            if not has_tickets_access(chat_id, user_id):
-                bot.answer_callback_query(
-                    call.id,
-                    "🎫 Билеты в кино доступны с подпиской 🎫 Билеты или 📦 Все режимы. Подключите подписку через /payment",
-                    show_alert=True
-                )
-                return
-            
-            # Получаем ticket_file_id (может быть JSON массив или один file_id)
-            import json
-            conn_local = get_db_connection()
-            cursor_local = get_db_cursor()
-            ticket_row = None
-            try:
-                with db_lock:
-                    cursor_local.execute('SELECT ticket_file_id FROM plans WHERE id = %s AND chat_id = %s', (plan_id, chat_id))
-                    ticket_row = cursor_local.fetchone()
-            finally:
-                try:
-                    cursor_local.close()
-                except:
-                    pass
-                try:
-                    conn_local.close()
-                except:
-                    pass
-            
-            if not ticket_row:
-                bot.answer_callback_query(call.id, "❌ Билеты не найдены", show_alert=True)
-                return
-            
-            if isinstance(ticket_row, dict):
-                ticket_data = ticket_row.get('ticket_file_id')
-            else:
-                ticket_data = ticket_row.get("ticket_file_id") if isinstance(ticket_row, dict) else (ticket_row[0] if ticket_row else None)
-            
-            if not ticket_data:
-                bot.answer_callback_query(call.id, "❌ Билеты не загружены", show_alert=True)
-                return
-            
-            # Парсим билеты (может быть JSON массив или один file_id)
-            ticket_files = []
-            try:
-                ticket_files = json.loads(ticket_data)
-                if not isinstance(ticket_files, list):
-                    ticket_files = [ticket_data]
-            except:
-                # Старый формат - один file_id
-                ticket_files = [ticket_data]
-            
-            # Отправляем все билеты
-            sent_count = 0
-            for i, ticket_file_id in enumerate(ticket_files):
-                try:
-                    if i == 0:
-                        caption = f"🎟️ Ваши билеты ({len(ticket_files)} шт.)"
-                    else:
-                        caption = f"🎟️ Билет {i+1}/{len(ticket_files)}"
-                    
-                    bot.send_photo(chat_id, ticket_file_id, caption=caption)
-                    sent_count += 1
-                except:
-                    try:
-                        bot.send_document(chat_id, ticket_file_id, caption=caption)
-                        sent_count += 1
-                    except Exception as e:
-                        logger.error(f"[SHOW TICKET] Ошибка отправки билета {i+1}: {e}", exc_info=True)
-            
-            if sent_count > 0:
-                bot.answer_callback_query(call.id, f"✅ Отправлено билетов: {sent_count}/{len(ticket_files)}")
-            else:
-                bot.answer_callback_query(call.id, "❌ Ошибка отправки билетов", show_alert=True)
-        except Exception as e:
-            logger.error(f"[SHOW TICKET] Ошибка: {e}", exc_info=True)
-            try:
-                bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
-            except:
-                pass
+    # Обработчик show_ticket перемещен на верхний уровень модуля для ранней регистрации
 
     @bot.callback_query_handler(func=lambda call: call.data.startswith("add_more_tickets:"))
     def add_more_tickets_callback(call):
