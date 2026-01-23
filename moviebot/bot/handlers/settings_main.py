@@ -335,7 +335,8 @@ def handle_settings_callback(call):
                     user_name = "участник"
                 
                 markup = InlineKeyboardMarkup(row_width=1)
-                markup.add(InlineKeyboardButton("🎲 Найти фильм", callback_data="rand_final:go"))
+                # Используем p_user_id для ограничения доступа к кнопке только выбранному участнику
+                markup.add(InlineKeyboardButton("🎲 Найти фильм", callback_data=f"rand_final:go:{p_user_id}"))
                 markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
                 markup.add(InlineKeyboardButton("❌ Закрыть", callback_data="random_event:close"))
                 

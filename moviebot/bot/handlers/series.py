@@ -5692,7 +5692,7 @@ def _show_actor_step_group_votes(call, chat_id, user_id):
         nav_buttons = []
         nav_buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data="rand_actor:back"))
         if selected_actors:
-            nav_buttons.append(InlineKeyboardButton("🎲 Найти фильм", callback_data="rand_final:go"))
+            nav_buttons.append(InlineKeyboardButton("🎲 Найти фильм", callback_data=f"rand_final:go:{user_id}"))
         else:
             nav_buttons.append(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_actor:skip"))
         markup.row(*nav_buttons)
@@ -6091,7 +6091,7 @@ def _show_actor_step_my_votes(call, chat_id, user_id):
         nav_buttons = []
         nav_buttons.append(InlineKeyboardButton("⬅️ Назад", callback_data="rand_actor:back"))
         if selected_actors:
-            nav_buttons.append(InlineKeyboardButton("🎲 Найти фильм", callback_data="rand_final:go"))
+            nav_buttons.append(InlineKeyboardButton("🎲 Найти фильм", callback_data=f"rand_final:go:{user_id}"))
         else:
             nav_buttons.append(InlineKeyboardButton("Пропустить ➡️", callback_data="rand_actor:skip"))
         markup.row(*nav_buttons)
