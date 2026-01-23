@@ -885,6 +885,7 @@ def handle_tag_confirm(call):
         errors = []
         
         total_movies = len(tag_movies)
+        logger.info(f"[TAG CONFIRM] Начинаем обработку {total_movies} фильмов для user_id={user_id}, chat_id={chat_id}, tag_id={tag_info['id']}")
         for idx, (kp_id, is_series) in enumerate(tag_movies, 1):
             # Обновляем сообщение о загрузке каждые 5 фильмов
             if loading_msg_id and idx % 5 == 0:
@@ -943,6 +944,7 @@ def handle_tag_confirm(call):
                 if film_id:
                     # Уже в базе
                     already_in_db.append((title, is_watched, has_plan))
+                    logger.info(f"[TAG CONFIRM] Фильм уже в базе: kp_id={kp_id}, film_id={film_id}, title={title}")
                     # Записываем связь с тегом
                     conn_link = get_db_connection()
                     cursor_link = get_db_cursor()
@@ -954,7 +956,7 @@ def handle_tag_confirm(call):
                                 ON CONFLICT (user_id, chat_id, tag_id, film_id) DO NOTHING
                             ''', (user_id, chat_id, tag_info['id'], film_id))
                             conn_link.commit()
-                            logger.info(f"[TAG CONFIRM] Добавлена запись в user_tag_movies: user_id={user_id}, chat_id={chat_id}, tag_id={tag_info['id']}, film_id={film_id}")
+                            logger.info(f"[TAG CONFIRM] Добавлена запись в user_tag_movies (уже в базе): user_id={user_id}, chat_id={chat_id}, tag_id={tag_info['id']}, film_id={film_id}")
                     finally:
                         try:
                             cursor_link.close()
@@ -966,7 +968,9 @@ def handle_tag_confirm(call):
                             pass
                 else:
                     # Добавляем фильм
+                    logger.info(f"[TAG CONFIRM] Фильм не найден в базе, добавляем: kp_id={kp_id}, title={title}")
                     film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
+                    logger.info(f"[TAG CONFIRM] Результат ensure_movie_in_database: film_id={film_id}, was_inserted={was_inserted}")
                     if film_id:
                         if is_series:
                             added_series.append(title)
@@ -984,6 +988,7 @@ def handle_tag_confirm(call):
                                     ON CONFLICT (user_id, chat_id, tag_id, film_id) DO NOTHING
                                 ''', (user_id, chat_id, tag_info['id'], film_id))
                                 conn_link.commit()
+                                logger.info(f"[TAG CONFIRM] Добавлена запись в user_tag_movies (новый фильм): user_id={user_id}, chat_id={chat_id}, tag_id={tag_info['id']}, film_id={film_id}")
                         finally:
                             try:
                                 cursor_link.close()
