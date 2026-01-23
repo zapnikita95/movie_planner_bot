@@ -61,7 +61,17 @@ def clean_command(message):
         "<i>Фильмы и данные других пользователей останутся без изменений.</i>\n\n"
         "Выберите действие:"
     )
-    bot.reply_to(message, help_text, reply_markup=markup, parse_mode='HTML')
+    # Используем send_message вместо reply_to для надежности при вызове из callback
+    try:
+        # Пытаемся использовать reply_to, если это реальное сообщение
+        if hasattr(message, 'message_id') and message.message_id:
+            bot.reply_to(message, help_text, reply_markup=markup, parse_mode='HTML')
+        else:
+            bot.send_message(chat_id, help_text, reply_markup=markup, parse_mode='HTML')
+    except Exception as e:
+        # Если reply_to не работает (например, сообщение удалено), используем send_message
+        logger.warning(f"[CLEAN] Не удалось использовать reply_to, используем send_message: {e}")
+        bot.send_message(chat_id, help_text, reply_markup=markup, parse_mode='HTML')
 
 
 @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("clean:"))
