@@ -1112,7 +1112,8 @@ def tags_command(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
     
-    logger.info(f"[TAGS] Команда /tags от user_id={user_id}, chat_id={chat_id}")
+    logger.info(f"[TAGS] Команда /tags от user_id={user_id}, chat_id={chat_id}, chat_type={message.chat.type}, from_user={message.from_user}")
+    logger.info(f"[TAGS] message.from_user.id={message.from_user.id}, message.chat.id={message.chat.id}")
     
     # В private чате chat_id должен быть равен user_id
     if message.chat.type == 'private':
