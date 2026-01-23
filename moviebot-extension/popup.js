@@ -82,17 +82,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     hasTicketsAccess = ticketsAccess;
     
     // Получаем текущую активную вкладку и автоматически загружаем фильм
-    try {
-      const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tabs && tabs[0] && tabs[0].url) {
-        const currentUrl = tabs[0].url;
-        // Всегда обновляем, даже если URL не изменился (на случай обновления страницы)
-        lastDetectedUrl = currentUrl;
-        await detectAndLoadFilm(currentUrl);
-      }
-    } catch (error) {
-      console.error('Ошибка получения текущей вкладки:', error);
-    }
+    // ВАЖНО: Всегда получаем свежий URL при каждом открытии popup (для SPA)
+    await loadCurrentTabFilm();
     
     // Также проверяем параметры URL (для обратной совместимости)
     const urlParams = new URLSearchParams(window.location.search);
@@ -262,13 +253,48 @@ function checkSpamProtection(url) {
   return true;
 }
 
+// Функция для загрузки фильма с текущей вкладки (всегда получает свежий URL)
+async function loadCurrentTabFilm() {
+  if (!chatId) return;
+  
+  try {
+    // ВСЕГДА получаем свежий URL при каждом открытии popup (критично для SPA)
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tabs && tabs[0] && tabs[0].url) {
+      const currentUrl = tabs[0].url;
+      console.log('[LOAD CURRENT TAB] Получен актуальный URL:', currentUrl, 'Предыдущий:', lastDetectedUrl);
+      
+      // Обновляем lastDetectedUrl
+      const urlChanged = lastDetectedUrl !== currentUrl;
+      lastDetectedUrl = currentUrl;
+      
+      // Загружаем фильм (даже если URL не изменился, т.к. на SPA контент мог измениться)
+      await detectAndLoadFilm(currentUrl, urlChanged);
+    }
+  } catch (error) {
+    console.error('Ошибка получения текущей вкладки:', error);
+  }
+}
+
 // Автоматическое определение и загрузка фильма с текущей страницы
-async function detectAndLoadFilm(url) {
+async function detectAndLoadFilm(url, urlChanged = true) {
   if (!url || !chatId) return;
   
-  // Проверяем защиту от спама
-  if (!checkSpamProtection(url)) {
+  // Проверяем защиту от спама только если URL изменился
+  if (urlChanged && !checkSpamProtection(url)) {
     return;
+  }
+  
+  // Для SPA: если URL не изменился, всё равно загружаем,
+  // т.к. контент на странице мог измениться без изменения URL
+  // Но если это явно тот же URL и мы уже загружали недавно, пропускаем
+  if (!urlChanged) {
+    // Проверяем, не загружали ли мы этот URL совсем недавно (защита от спама)
+    const recentRequest = urlRequestHistory.find(r => r.url === url && Date.now() - r.timestamp < 2000);
+    if (recentRequest) {
+      console.log('[DETECT] Пропускаем повторную загрузку того же URL (защита от спама)');
+      return;
+    }
   }
   
   // ОБЯЗАТЕЛЬНО скрываем поиск и форму планирования ПЕРЕД началом загрузки (с !important)
@@ -508,10 +534,7 @@ async function handleBind() {
         showMainScreen();
         // После привязки автоматически загружаем фильм с текущей страницы
         try {
-          const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-          if (tabs && tabs[0] && tabs[0].url) {
-            await detectAndLoadFilm(tabs[0].url);
-          }
+          await loadCurrentTabFilm();
         } catch (error) {
           console.error('Ошибка загрузки фильма после привязки:', error);
         }
