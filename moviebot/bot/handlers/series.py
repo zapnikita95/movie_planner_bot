@@ -2749,6 +2749,7 @@ def handle_rand_content_type(call):
                     pass
             
             if not plan_row:
+                logger.error(f"[TICKET SESSION] Сеанс не найден: plan_id={plan_id}, chat_id={chat_id}")
                 bot.answer_callback_query(call.id, "❌ Сеанс не найден", show_alert=True)
                 return
             
@@ -2765,10 +2766,13 @@ def handle_rand_content_type(call):
                 title = plan_row[4]
                 kp_id = plan_row[5] if len(plan_row) > 5 else None
             
+            logger.info(f"[TICKET SESSION] Данные сеанса получены: ticket_file_id={ticket_file_id}, film_id={film_id}, kp_id={kp_id}, title={title}")
+            
             logger.info(f"[TICKET SESSION] Данные сеанса: ticket_file_id={ticket_file_id}, film_id={film_id}, kp_id={kp_id}, title={title}")
             
             # Если нет билетов и есть film_id и kp_id, открываем описание фильма напрямую
-            if not ticket_file_id and film_id and kp_id:
+            # Проверяем, что kp_id не None и не пустой
+            if not ticket_file_id and film_id and kp_id and str(kp_id).strip():
                 logger.info(f"[TICKET SESSION] Нет билетов, но есть film_id и kp_id - открываем описание фильма")
                 # Получаем информацию о фильме из базы
                 conn_film = get_db_connection()
