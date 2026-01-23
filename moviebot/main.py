@@ -231,9 +231,11 @@ from moviebot.bot.handlers.payment import register_payment_handlers
 register_payment_handlers(bot)
 logger.info("✅ payment handlers зарегистрированы")
 
+# Импортируем series.py полностью, чтобы зарегистрировались все callback handlers на верхнем уровне модуля
+import moviebot.bot.handlers.series  # noqa: F401
 from moviebot.bot.handlers.series import register_series_handlers
 register_series_handlers(bot)
-logger.info("✅ series handlers зарегистрированы (включая search_type: callback)")
+logger.info("✅ series handlers зарегистрированы (включая search_type: callback и ticket_session)")
 
 try:
     from moviebot.bot.handlers.rate import register_rate_handlers
