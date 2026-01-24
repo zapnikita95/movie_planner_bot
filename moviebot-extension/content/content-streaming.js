@@ -9,6 +9,11 @@
   // ────────────────────────────────────────────────
   // Вспомогательная функция для API запросов через background script
   // ────────────────────────────────────────────────
+  function isContextInvalidated(e) {
+    const msg = (e && e.message) ? String(e.message) : '';
+    return /Extension context invalidated/i.test(msg) || /Message closed/i.test(msg);
+  }
+
   async function apiRequest(method, endpoint, body = null) {
     try {
       const url = `${API_BASE_URL}${endpoint}`;
@@ -21,36 +26,37 @@
       };
       
       return new Promise((resolve, reject) => {
-        chrome.runtime.sendMessage(message, (response) => {
-          if (chrome.runtime.lastError) {
-            console.error('[STREAMING] chrome.runtime.lastError:', chrome.runtime.lastError);
-            reject(new Error(chrome.runtime.lastError.message));
-            return;
-          }
-          
-          if (!response) {
-            console.error('[STREAMING] Нет ответа от background script');
-            reject(new Error('No response from background script'));
-            return;
-          }
-          
-          console.log('[STREAMING] Ответ от background script:', response);
-          
-          if (!response.success) {
-            console.error('[STREAMING] Ошибка в ответе:', response.error);
-            reject(new Error(response.error || 'Unknown error'));
-            return;
-          }
-          
-          resolve({
-            ok: response.status >= 200 && response.status < 300,
-            status: response.status,
-            json: async () => response.data
+        try {
+          chrome.runtime.sendMessage(message, (response) => {
+            try {
+              if (chrome.runtime.lastError) {
+                const err = new Error(chrome.runtime.lastError.message);
+                reject(err);
+                return;
+              }
+              if (!response) {
+                reject(new Error('No response from background script'));
+                return;
+              }
+              if (!response.success) {
+                reject(new Error(response.error || 'Unknown error'));
+                return;
+              }
+              resolve({
+                ok: response.status >= 200 && response.status < 300,
+                status: response.status,
+                json: async () => response.data
+              });
+            } catch (cbErr) {
+              reject(cbErr);
+            }
           });
-        });
+        } catch (sendErr) {
+          reject(sendErr);
+        }
       });
     } catch (error) {
-      console.error('[STREAMING] Ошибка apiRequest:', error);
+      if (isContextInvalidated(error)) throw new Error('Extension context invalidated');
       throw error;
     }
   }
@@ -1131,48 +1137,54 @@
   // ────────────────────────────────────────────────
   // Обработчики действий
   // ────────────────────────────────────────────────
+  function alertReloadPage() {
+    try { alert('Расширение обновилось. Обновите страницу (F5).'); } catch (_) {}
+  }
+
   async function handleAddToDatabase(info, filmData) {
     try {
       const st = storageLocal();
-      if (!st) { alert('Расширение: storage недоступен. Обновите страницу.'); return; }
-      const data = await st.get(['linked_chat_id', 'linked_user_id']);
+      if (!st) { alertReloadPage(); return; }
+      let data;
+      try {
+        data = await st.get(['linked_chat_id', 'linked_user_id']);
+      } catch (se) {
+        if (isContextInvalidated(se)) { alertReloadPage(); return; }
+        throw se;
+      }
       if (!data.linked_chat_id) {
         alert('Сначала привяжите аккаунт в расширении');
         return;
       }
-      
-      // Если kp_id уже есть, добавляем сразу
-      if (filmData?.kp_id) {
-        try {
-          const response = await apiRequest('POST', '/api/extension/add-film', {
-            chat_id: data.linked_chat_id,
-            user_id: data.linked_user_id,
-            kp_id: filmData.kp_id,
-            online_link: info.url
-          });
-          
-          if (response.ok) {
-            const result = await response.json();
-            if (result.success) {
-              // Обновляем данные и перерисовываем кнопки
-              currentFilmData = { ...filmData, film_id: result.film_id, kp_id: filmData.kp_id };
-              await renderButtons(info, currentFilmData);
-            } else {
-              alert('Ошибка: ' + (result.error || 'неизвестная ошибка'));
-            }
-          } else {
-            alert('Ошибка сервера: ' + response.status);
-          }
-        } catch (fetchError) {
-          console.error('[STREAMING] Ошибка fetch при добавлении в базу:', fetchError);
-          alert('Ошибка подключения к серверу. Проверьте интернет-соединение.');
-        }
-      } else {
-        // Нужно сначала найти через API
+      if (!filmData?.kp_id) {
         alert('Поиск фильма... (это займет несколько секунд)');
-        // Логика поиска будет в основной функции checkAndShowOverlay
+        return;
+      }
+      try {
+        const response = await apiRequest('POST', '/api/extension/add-film', {
+          chat_id: data.linked_chat_id,
+          user_id: data.linked_user_id,
+          kp_id: filmData.kp_id,
+          online_link: info.url
+        });
+        if (response.ok) {
+          const result = await response.json();
+          if (result.success) {
+            currentFilmData = { ...filmData, film_id: result.film_id, kp_id: filmData.kp_id };
+            await renderButtons(info, currentFilmData);
+          } else {
+            alert('Ошибка: ' + (result.error || 'неизвестная ошибка'));
+          }
+        } else {
+          alert('Ошибка сервера: ' + response.status);
+        }
+      } catch (fetchError) {
+        if (isContextInvalidated(fetchError)) { alertReloadPage(); return; }
+        console.error('[STREAMING] Ошибка fetch при добавлении в базу:', fetchError);
+        alert('Ошибка подключения к серверу. Проверьте интернет-соединение.');
       }
     } catch (e) {
+      if (isContextInvalidated(e)) { alertReloadPage(); return; }
       console.error('[STREAMING] Ошибка добавления в базу:', e);
       alert('Ошибка добавления в базу: ' + (e.message || 'неизвестная ошибка'));
     }
@@ -1181,13 +1193,18 @@
   async function handleMarkEpisode(info, filmData, markAllPrevious) {
     try {
       const st = storageLocal();
-      if (!st) { alert('Расширение: storage недоступен. Обновите страницу.'); return; }
-      const data = await st.get(['linked_chat_id', 'linked_user_id']);
+      if (!st) { alertReloadPage(); return; }
+      let data;
+      try {
+        data = await st.get(['linked_chat_id', 'linked_user_id']);
+      } catch (se) {
+        if (isContextInvalidated(se)) { alertReloadPage(); return; }
+        throw se;
+      }
       if (!data.linked_chat_id) {
         alert('Сначала привяжите аккаунт в расширении');
         return;
       }
-      
       try {
         const response = await apiRequest('POST', '/api/extension/mark-episode', {
           chat_id: data.linked_chat_id,
@@ -1199,7 +1216,6 @@
           mark_all_previous: markAllPrevious,
           online_link: info.url
         });
-        
         if (response.ok) {
           const result = await response.json();
           if (result.success) {
@@ -1212,25 +1228,32 @@
           alert('Ошибка сервера: ' + response.status);
         }
       } catch (fetchError) {
+        if (isContextInvalidated(fetchError)) { alertReloadPage(); return; }
         console.error('[STREAMING] Ошибка fetch при отметке серии:', fetchError);
         alert('Ошибка подключения к серверу. Проверьте интернет-соединение.');
       }
     } catch (e) {
+      if (isContextInvalidated(e)) { alertReloadPage(); return; }
       console.error('[STREAMING] Ошибка отметки серии:', e);
       alert('Ошибка отметки серии: ' + (e.message || 'неизвестная ошибка'));
     }
   }
-  
+
   async function handleMarkFilmWatched(info, filmData) {
     try {
       const st = storageLocal();
-      if (!st) { alert('Расширение: storage недоступен. Обновите страницу.'); return; }
-      const data = await st.get(['linked_chat_id', 'linked_user_id']);
+      if (!st) { alertReloadPage(); return; }
+      let data;
+      try {
+        data = await st.get(['linked_chat_id', 'linked_user_id']);
+      } catch (se) {
+        if (isContextInvalidated(se)) { alertReloadPage(); return; }
+        throw se;
+      }
       if (!data.linked_chat_id) {
         alert('Сначала привяжите аккаунт в расширении');
         return;
       }
-      
       try {
         const response = await apiRequest('POST', '/api/extension/mark-film-watched', {
           chat_id: data.linked_chat_id,
@@ -1239,11 +1262,9 @@
           film_id: filmData.film_id,
           online_link: info.url
         });
-        
         if (response.ok) {
           const result = await response.json();
           if (result.success) {
-            // Обновляем данные и показываем кнопки оценки
             currentFilmData = { ...filmData, watched: true };
             renderButtons(info, currentFilmData);
           } else {
@@ -1253,10 +1274,12 @@
           alert('Ошибка сервера: ' + response.status);
         }
       } catch (fetchError) {
+        if (isContextInvalidated(fetchError)) { alertReloadPage(); return; }
         console.error('[STREAMING] Ошибка fetch при отметке фильма:', fetchError);
         alert('Ошибка подключения к серверу. Проверьте интернет-соединение.');
       }
     } catch (e) {
+      if (isContextInvalidated(e)) { alertReloadPage(); return; }
       console.error('[STREAMING] Ошибка отметки фильма:', e);
       alert('Ошибка отметки фильма: ' + (e.message || 'неизвестная ошибка'));
     }
@@ -1265,8 +1288,14 @@
   async function handleRating(info, filmData, rating) {
     try {
       const st = storageLocal();
-      if (!st) { alert('Расширение: storage недоступен. Обновите страницу.'); return; }
-      const data = await st.get(['linked_chat_id', 'linked_user_id']);
+      if (!st) { alertReloadPage(); return; }
+      let data;
+      try {
+        data = await st.get(['linked_chat_id', 'linked_user_id']);
+      } catch (se) {
+        if (isContextInvalidated(se)) { alertReloadPage(); return; }
+        throw se;
+      }
       if (!data.linked_chat_id) {
         alert('Сначала привяжите аккаунт в расширении');
         return;
@@ -1311,15 +1340,17 @@
           alert('Ошибка сервера: ' + response.status);
         }
       } catch (fetchError) {
+        if (isContextInvalidated(fetchError)) { alertReloadPage(); return; }
         console.error('[STREAMING] Ошибка fetch при оценке:', fetchError);
         alert('Ошибка подключения к серверу. Проверьте интернет-соединение.');
       }
     } catch (e) {
+      if (isContextInvalidated(e)) { alertReloadPage(); return; }
       console.error('[STREAMING] Ошибка оценки:', e);
       alert('Ошибка оценки: ' + (e.message || 'неизвестная ошибка'));
     }
   }
-  
+
   // ────────────────────────────────────────────────
   // Основная логика проверки и показа плашки
   // ────────────────────────────────────────────────
@@ -1366,7 +1397,13 @@
     try {
       const st = storageLocal();
       if (!st) return;
-      const data = await st.get(['linked_chat_id', 'linked_user_id', 'has_notifications_access']);
+      let data;
+      try {
+        data = await st.get(['linked_chat_id', 'linked_user_id', 'has_notifications_access']);
+      } catch (se) {
+        if (isContextInvalidated(se)) { console.log('[STREAMING] Пропуск: context invalidated'); return; }
+        throw se;
+      }
       if (!data.linked_chat_id) {
         return; // Пользователь не привязан
       }
@@ -1382,11 +1419,12 @@
             }
           }
         } catch (subErr) {
+          if (isContextInvalidated(subErr)) { console.log('[STREAMING] Пропуск: context invalidated'); return; }
           console.error('[STREAMING] Ошибка проверки подписки:', subErr);
           data.has_notifications_access = false;
         }
       }
-      
+
       // Сначала проверяем локальный кэш
       let kpId = await findInLocalCache(info);
       let filmData = null;
@@ -1428,8 +1466,8 @@
             console.error('[STREAMING] HTTP ошибка:', response.status);
           }
         } catch (fetchError) {
+          if (isContextInvalidated(fetchError)) { console.log('[STREAMING] Пропуск: context invalidated'); return; }
           console.error('[STREAMING] Ошибка fetch film-info:', fetchError);
-          // Если есть kp_id в кэше, но запрос упал - пробуем еще раз
           if (kpId) {
             console.log('[STREAMING] Повторная попытка запроса film-info для kp_id:', kpId);
             try {
@@ -1456,8 +1494,8 @@
                 throw new Error(`HTTP ${retryResponse.status}`);
               }
             } catch (retryError) {
+              if (isContextInvalidated(retryError)) { console.log('[STREAMING] Пропуск: context invalidated'); return; }
               console.error('[STREAMING] Повторный запрос тоже упал:', retryError);
-              // Если повторный запрос тоже упал, показываем виджет с kp_id, но БЕЗ кнопки "Добавить в базу"
               // Предполагаем, что фильм может быть в базе, но мы не можем это проверить
               filmData = {
                 kp_id: kpId,
@@ -1522,10 +1560,12 @@
             const fr = filmResponse.ok ? await filmResponse.json() : null;
             filmData = buildFilmData(searchResult, fr?.success ? fr : null);
           } catch (e) {
+            if (isContextInvalidated(e)) { console.log('[STREAMING] Пропуск: context invalidated'); return; }
             console.error('[STREAMING] Ошибка film-info после поиска:', e);
             filmData = buildFilmData(searchResult, null);
           }
         } catch (searchError) {
+          if (isContextInvalidated(searchError)) { console.log('[STREAMING] Пропуск: context invalidated'); return; }
           console.error('[STREAMING] Ошибка поиска:', searchError);
           if (!kpId) {
             console.log('[STREAMING] Пропуск: фильм не найден, нет kp_id');
@@ -1558,8 +1598,11 @@
       console.log('[STREAMING] createOverlay вызван');
       
     } catch (e) {
+      if (isContextInvalidated(e)) {
+        console.log('[STREAMING] Пропуск: context invalidated');
+        return;
+      }
       console.error('[STREAMING] Ошибка проверки:', e);
-      // Даже при ошибке показываем плашку с базовыми данными
       try {
         const filmData = {
           kp_id: null,
@@ -1570,9 +1613,9 @@
           current_episode_watched: false,
           is_series: false
         };
-        console.log('[STREAMING] Вызываем createOverlay с базовыми данными после ошибки:', { info, filmData });
         await createOverlay(info, filmData);
       } catch (overlayError) {
+        if (isContextInvalidated(overlayError)) return;
         console.error('[STREAMING] Ошибка создания плашки:', overlayError);
       }
     }

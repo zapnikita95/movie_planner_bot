@@ -1982,54 +1982,49 @@ def create_web_app(bot):
             
             conn = get_db_connection()
             cursor = get_db_cursor()
+            # Без db_lock как просил пользователь
+            online_link = data.get('online_link')
+            cursor.execute("""
+                INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series, online_link)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (chat_id, kp_id) DO UPDATE SET
+                    title = EXCLUDED.title,
+                    year = EXCLUDED.year,
+                    genres = EXCLUDED.genres,
+                    description = EXCLUDED.description,
+                    director = EXCLUDED.director,
+                    actors = EXCLUDED.actors,
+                    is_series = EXCLUDED.is_series,
+                    link = EXCLUDED.link,
+                    online_link = COALESCE(EXCLUDED.online_link, movies.online_link)
+                RETURNING id
+            """, (
+                chat_id, link, str(kp_id), info.get('title'), info.get('year'),
+                info.get('genres', '—'), info.get('description', 'Нет описания'),
+                info.get('director', 'Не указан'), info.get('actors', '—'),
+                1 if is_series else 0, online_link
+            ))
+            result = cursor.fetchone()
+            film_id = result.get('id') if isinstance(result, dict) else result[0]
+            conn.commit()
+
+            # Отправляем сообщение в Telegram о добавлении фильма
             try:
-                # Без db_lock как просил пользователь
-                online_link = data.get('online_link')
-                cursor.execute("""
-                    INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series, online_link)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (chat_id, kp_id) DO UPDATE SET
-                        title = EXCLUDED.title,
-                        year = EXCLUDED.year,
-                        genres = EXCLUDED.genres,
-                        description = EXCLUDED.description,
-                        director = EXCLUDED.director,
-                        actors = EXCLUDED.actors,
-                        is_series = EXCLUDED.is_series,
-                        link = EXCLUDED.link,
-                        online_link = COALESCE(EXCLUDED.online_link, movies.online_link)
-                    RETURNING id
-                """, (
-                    chat_id, link, str(kp_id), info.get('title'), info.get('year'),
-                    info.get('genres', '—'), info.get('description', 'Нет описания'),
-                    info.get('director', 'Не указан'), info.get('actors', '—'),
-                    1 if is_series else 0, online_link
-                ))
-                result = cursor.fetchone()
-                film_id = result.get('id') if isinstance(result, dict) else result[0]
-                conn.commit()
-                
-                # Отправляем сообщение в Telegram о добавлении фильма
-                try:
-                    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-                    title = info.get('title', 'Неизвестный фильм')
-                    year = info.get('year', '')
-                    type_emoji = "📺" if is_series else "🎬"
-                    type_text = "Сериал" if is_series else "Фильм"
-                    text = f"{type_emoji} <b>{title}</b> ({year})\n\n✅ {type_text} добавлен в базу через расширение браузера"
-                    
-                    markup = InlineKeyboardMarkup()
-                    markup.add(InlineKeyboardButton("📖 К описанию", callback_data=f"show_film:{kp_id}"))
-                    
-                    bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup)
-                    logger.info(f"[EXTENSION API] Сообщение о добавлении фильма отправлено в chat_id={chat_id}")
-                except Exception as e:
-                    logger.error(f"[EXTENSION API] Ошибка отправки сообщения о добавлении фильма: {e}", exc_info=True)
-                    # Не прерываем выполнение, если не удалось отправить сообщение
-                
-                resp = jsonify({"success": True, "film_id": film_id})
-                # after_request hook автоматически добавит CORS заголовки
-                return resp
+                from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+                title = info.get('title', 'Неизвестный фильм')
+                year = info.get('year', '')
+                type_emoji = "📺" if is_series else "🎬"
+                type_text = "Сериал" if is_series else "Фильм"
+                text = f"{type_emoji} <b>{title}</b> ({year})\n\n✅ {type_text} добавлен в базу через расширение браузера"
+                markup = InlineKeyboardMarkup()
+                markup.add(InlineKeyboardButton("📖 К описанию", callback_data=f"show_film:{kp_id}"))
+                bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup)
+                logger.info(f"[EXTENSION API] Сообщение о добавлении фильма отправлено в chat_id={chat_id}")
+            except Exception as e:
+                logger.error(f"[EXTENSION API] Ошибка отправки сообщения о добавлении фильма: {e}", exc_info=True)
+
+            resp = jsonify({"success": True, "film_id": film_id})
+            return resp
         except Exception as e:
             logger.error(f"Ошибка добавления фильма в базу: {str(e)}", exc_info=True)
             resp = jsonify({"success": False, "error": f"server error: {str(e)}"})
@@ -2072,56 +2067,43 @@ def create_web_app(bot):
             from moviebot.database.db_connection import get_db_connection, get_db_cursor
             conn = get_db_connection()
             cursor = get_db_cursor()
-            try:
-                # Без db_lock как просил пользователь
-                # Сначала получаем film_id
-                cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, str(kp_id)))
-                film_row = cursor.fetchone()
-                if not film_row:
-                    resp = jsonify({"success": False, "error": "film not found"})
-                    # after_request hook автоматически добавит CORS заголовки
-                    return resp, 404
-                
-                film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
-                
-                # Получаем информацию о фильме перед удалением для уведомления
-                cursor.execute("SELECT title, kp_id, link FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
-                film_info_row = cursor.fetchone()
-                title_before_delete = None
-                kp_id_for_notification = None
-                link_before_delete = None
-                if film_info_row:
-                    title_before_delete = film_info_row.get('title') if isinstance(film_info_row, dict) else film_info_row[0]
-                    kp_id_for_notification = film_info_row.get('kp_id') if isinstance(film_info_row, dict) else film_info_row[1]
-                    link_before_delete = film_info_row.get('link') if isinstance(film_info_row, dict) else film_info_row[2]
-                
-                # Удаляем связанные данные
-                cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
-                cursor.execute('DELETE FROM plans WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
-                cursor.execute('DELETE FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-                conn.commit()
-                
-                # Отправляем сообщение в Telegram об удалении фильма
-                if title_before_delete and kp_id_for_notification:
-                    try:
-                        from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-                        is_series_del = '/series/' in link_before_delete if link_before_delete else False
-                        type_emoji = "📺" if is_series_del else "🎬"
-                        text = f"{type_emoji} <b>{title_before_delete}</b>\n\n❌ Фильм удален из базы через расширение браузера"
-                        
-                        markup = InlineKeyboardMarkup()
-                        # Кнопка "К описанию" - будет показывать фильм даже если его нет в базе (через API)
-                        markup.add(InlineKeyboardButton("📖 К описанию", callback_data=f"show_film:{kp_id_for_notification}"))
-                        
-                        bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup)
-                        logger.info(f"[EXTENSION API] Сообщение об удалении фильма отправлено в chat_id={chat_id}")
-                    except Exception as e:
-                        logger.error(f"[EXTENSION API] Ошибка отправки сообщения об удалении фильма: {e}", exc_info=True)
-                        # Не прерываем выполнение, если не удалось отправить сообщение
-                
-                resp = jsonify({"success": True})
-                # after_request hook автоматически добавит CORS заголовки
-                return resp
+            cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, str(kp_id)))
+            film_row = cursor.fetchone()
+            if not film_row:
+                resp = jsonify({"success": False, "error": "film not found"})
+                return resp, 404
+
+            film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
+            cursor.execute("SELECT title, kp_id, link FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
+            film_info_row = cursor.fetchone()
+            title_before_delete = None
+            kp_id_for_notification = None
+            link_before_delete = None
+            if film_info_row:
+                title_before_delete = film_info_row.get('title') if isinstance(film_info_row, dict) else film_info_row[0]
+                kp_id_for_notification = film_info_row.get('kp_id') if isinstance(film_info_row, dict) else film_info_row[1]
+                link_before_delete = film_info_row.get('link') if isinstance(film_info_row, dict) else film_info_row[2]
+
+            cursor.execute('DELETE FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+            cursor.execute('DELETE FROM plans WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
+            cursor.execute('DELETE FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+            conn.commit()
+
+            if title_before_delete and kp_id_for_notification:
+                try:
+                    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+                    is_series_del = '/series/' in link_before_delete if link_before_delete else False
+                    type_emoji = "📺" if is_series_del else "🎬"
+                    text = f"{type_emoji} <b>{title_before_delete}</b>\n\n❌ Фильм удален из базы через расширение браузера"
+                    markup = InlineKeyboardMarkup()
+                    markup.add(InlineKeyboardButton("📖 К описанию", callback_data=f"show_film:{kp_id_for_notification}"))
+                    bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup)
+                    logger.info(f"[EXTENSION API] Сообщение об удалении фильма отправлено в chat_id={chat_id}")
+                except Exception as e:
+                    logger.error(f"[EXTENSION API] Ошибка отправки сообщения об удалении фильма: {e}", exc_info=True)
+
+            resp = jsonify({"success": True})
+            return resp
         except Exception as e:
             logger.error("Ошибка удаления фильма из базы", exc_info=True)
             resp = jsonify({"success": False, "error": "server error"})
@@ -2661,83 +2643,71 @@ def create_web_app(bot):
             
             conn = get_db_connection()
             cursor = get_db_cursor()
-            
-            try:
-                # Если film_id не передан, ищем его
-                if not film_id:
-                    with db_lock:
-                        cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, str(kp_id)))
-                        row = cursor.fetchone()
-                        if row:
-                            film_id = row.get('id') if isinstance(row, dict) else row[0]
-                    
-                    if not film_id:
-                        # Фильм не в базе - добавляем автоматически
-                        from moviebot.api.kinopoisk_api import extract_movie_info
-                        from moviebot.config import KP_TOKEN
-                        import requests
-                        
-                        # Получаем информацию о сериале
-                        headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
-                        url_api = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}"
-                        response = requests.get(url_api, headers=headers, timeout=15)
-                        
-                        if response.status_code == 200:
-                            api_data = response.json()
-                            api_type = api_data.get('type', '').upper()
-                            is_series = api_type in ['TV_SERIES', 'MINI_SERIES']
-                            link = f"https://www.kinopoisk.ru/series/{kp_id}/" if is_series else f"https://www.kinopoisk.ru/film/{kp_id}/"
-                            info = extract_movie_info(link)
-                            
-                            if info:
-                                with db_lock:
-                                    cursor.execute("""
-                                        INSERT INTO movies (chat_id, kp_id, title, year, link, is_series, online_link)
-                                        VALUES (%s, %s, %s, %s, %s, %s, %s)
-                                        RETURNING id
-                                    """, (chat_id, str(kp_id), info.get('title'), info.get('year'), link, is_series, online_link))
-                                    film_id = cursor.fetchone()[0] if cursor.rowcount > 0 else None
-                                    conn.commit()
-                
-                if not film_id:
-                    return jsonify({"success": False, "error": "film not found"}), 404
-                
-                # Обновляем online_link
-                if online_link:
-                    with db_lock:
-                        cursor.execute("UPDATE movies SET online_link = %s WHERE id = %s AND chat_id = %s", (online_link, film_id, chat_id))
-                        conn.commit()
-                
-                # Отмечаем серии
+
+            if not film_id:
                 with db_lock:
-                    if mark_all_previous:
-                        # Отмечаем все серии до текущей в том же сезоне
-                        # Используем цикл для отметки каждой серии отдельно
-                        for ep_num in range(1, episode + 1):
-                            cursor.execute("""
-                                INSERT INTO series_tracking (chat_id, film_id, user_id, season_number, episode_number, watched, watched_date)
-                                VALUES (%s, %s, %s, %s, %s, TRUE, CURRENT_TIMESTAMP)
-                                ON CONFLICT (chat_id, film_id, user_id, season_number, episode_number) 
-                                DO UPDATE SET watched = TRUE, watched_date = CURRENT_TIMESTAMP
-                            """, (chat_id, film_id, user_id, season, ep_num))
-                    else:
-                        # Отмечаем только текущую серию
+                    cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, str(kp_id)))
+                    row = cursor.fetchone()
+                    if row:
+                        film_id = row.get('id') if isinstance(row, dict) else row[0]
+
+                if not film_id:
+                    from moviebot.api.kinopoisk_api import extract_movie_info
+                    from moviebot.config import KP_TOKEN
+                    import requests
+                    headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
+                    url_api = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}"
+                    response = requests.get(url_api, headers=headers, timeout=15)
+                    if response.status_code == 200:
+                        api_data = response.json()
+                        api_type = api_data.get('type', '').upper()
+                        is_series = api_type in ['TV_SERIES', 'MINI_SERIES']
+                        link = f"https://www.kinopoisk.ru/series/{kp_id}/" if is_series else f"https://www.kinopoisk.ru/film/{kp_id}/"
+                        info = extract_movie_info(link)
+                        if info:
+                            with db_lock:
+                                cursor.execute("""
+                                    INSERT INTO movies (chat_id, kp_id, title, year, link, is_series, online_link)
+                                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                                    RETURNING id
+                                """, (chat_id, str(kp_id), info.get('title'), info.get('year'), link, is_series, online_link))
+                                row = cursor.fetchone()
+                                film_id = row.get('id') if isinstance(row, dict) else (row[0] if row else None)
+                                conn.commit()
+
+            if not film_id:
+                return jsonify({"success": False, "error": "film not found"}), 404
+
+            if online_link:
+                with db_lock:
+                    cursor.execute("UPDATE movies SET online_link = %s WHERE id = %s AND chat_id = %s", (online_link, film_id, chat_id))
+                    conn.commit()
+
+            with db_lock:
+                if mark_all_previous:
+                    for ep_num in range(1, episode + 1):
                         cursor.execute("""
                             INSERT INTO series_tracking (chat_id, film_id, user_id, season_number, episode_number, watched, watched_date)
                             VALUES (%s, %s, %s, %s, %s, TRUE, CURRENT_TIMESTAMP)
-                            ON CONFLICT (chat_id, film_id, user_id, season_number, episode_number) 
+                            ON CONFLICT (chat_id, film_id, user_id, season_number, episode_number)
                             DO UPDATE SET watched = TRUE, watched_date = CURRENT_TIMESTAMP
-                        """, (chat_id, film_id, user_id, season, episode))
-                    conn.commit()
-                
-                # Отправляем сообщение в бота
-                try:
-                    from moviebot.bot.handlers.series import send_episode_marked_message
-                    send_episode_marked_message(bot, chat_id, user_id, kp_id, film_id, season, episode, mark_all_previous)
-                except Exception as e:
-                    logger.error(f"[EXTENSION API] Ошибка отправки сообщения в бота: {e}", exc_info=True)
-                
-                return jsonify({"success": True})
+                        """, (chat_id, film_id, user_id, season, ep_num))
+                else:
+                    cursor.execute("""
+                        INSERT INTO series_tracking (chat_id, film_id, user_id, season_number, episode_number, watched, watched_date)
+                        VALUES (%s, %s, %s, %s, %s, TRUE, CURRENT_TIMESTAMP)
+                        ON CONFLICT (chat_id, film_id, user_id, season_number, episode_number)
+                        DO UPDATE SET watched = TRUE, watched_date = CURRENT_TIMESTAMP
+                    """, (chat_id, film_id, user_id, season, episode))
+                conn.commit()
+
+            try:
+                from moviebot.bot.handlers.series import send_episode_marked_message
+                send_episode_marked_message(bot, chat_id, user_id, kp_id, film_id, season, episode, mark_all_previous)
+            except Exception as e:
+                logger.error(f"[EXTENSION API] Ошибка отправки сообщения в бота: {e}", exc_info=True)
+
+            return jsonify({"success": True})
         except Exception as e:
             logger.error(f"[EXTENSION API] Ошибка отметки серии: {e}", exc_info=True)
             error_msg = str(e) if e else "server error"
@@ -2766,40 +2736,34 @@ def create_web_app(bot):
             
             conn = get_db_connection()
             cursor = get_db_cursor()
-            
-            try:
-                if not film_id:
-                    with db_lock:
-                        cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, str(kp_id)))
-                        row = cursor.fetchone()
-                    if row:
-                        film_id = row.get('id') if isinstance(row, dict) else row[0]
-                    else:
-                        return jsonify({"success": False, "error": "film not found"}), 404
-                
+
+            if not film_id:
                 with db_lock:
-                    if online_link:
-                        cursor.execute("""
-                            UPDATE movies 
-                            SET watched = 1, online_link = %s 
-                            WHERE id = %s AND chat_id = %s
-                        """, (online_link, film_id, chat_id))
-                    else:
-                        cursor.execute("""
-                            UPDATE movies 
-                            SET watched = 1 
-                            WHERE id = %s AND chat_id = %s
-                        """, (film_id, chat_id))
-                    conn.commit()
-                
-                # Отправляем сообщение в бота
-                try:
-                    from moviebot.bot.handlers.text_messages import send_film_watched_message
-                    send_film_watched_message(bot, chat_id, user_id, kp_id, film_id)
-                except Exception as e:
-                    logger.error(f"[EXTENSION API] Ошибка отправки сообщения в бота: {e}", exc_info=True)
-                
-                return jsonify({"success": True})
+                    cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, str(kp_id)))
+                    row = cursor.fetchone()
+                if row:
+                    film_id = row.get('id') if isinstance(row, dict) else row[0]
+                else:
+                    return jsonify({"success": False, "error": "film not found"}), 404
+
+            with db_lock:
+                if online_link:
+                    cursor.execute("""
+                        UPDATE movies SET watched = 1, online_link = %s WHERE id = %s AND chat_id = %s
+                    """, (online_link, film_id, chat_id))
+                else:
+                    cursor.execute("""
+                        UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s
+                    """, (film_id, chat_id))
+                conn.commit()
+
+            try:
+                from moviebot.bot.handlers.text_messages import send_film_watched_message
+                send_film_watched_message(bot, chat_id, user_id, kp_id, film_id)
+            except Exception as e:
+                logger.error(f"[EXTENSION API] Ошибка отправки сообщения в бота: {e}", exc_info=True)
+
+            return jsonify({"success": True})
         except Exception as e:
             logger.error(f"[EXTENSION API] Ошибка отметки фильма: {e}", exc_info=True)
             return jsonify({"success": False, "error": "server error"}), 500
@@ -2832,59 +2796,51 @@ def create_web_app(bot):
             
             conn = get_db_connection()
             cursor = get_db_cursor()
-            
-            try:
-                # Если film_id не передан, ищем его
-                if not film_id:
-                    with db_lock:
-                        cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, str(kp_id)))
-                        row = cursor.fetchone()
-                        if row:
-                            film_id = row.get('id') if isinstance(row, dict) else row[0]
-                    
-                    if not film_id:
-                        return jsonify({"success": False, "error": "film not found"}), 404
-                
-                # Сохраняем/обновляем оценку
+
+            if not film_id:
                 with db_lock:
-                    cursor.execute("""
-                        INSERT INTO ratings (chat_id, film_id, user_id, rating, is_imported)
-                        VALUES (%s, %s, %s, %s, FALSE)
-                        ON CONFLICT (chat_id, film_id, user_id) 
-                        DO UPDATE SET rating = %s, is_imported = FALSE
-                    """, (chat_id, film_id, user_id, rating, rating))
-                    conn.commit()
-                
-                # Получаем информацию о фильме для отправки в бота
-                cursor.execute("SELECT title FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
-                film_row = cursor.fetchone()
-                film_title = film_row.get('title') if isinstance(film_row, dict) else (film_row[0] if film_row else None)
-                
-                # Отправляем сообщение в бота
+                    cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, str(kp_id)))
+                    row = cursor.fetchone()
+                    if row:
+                        film_id = row.get('id') if isinstance(row, dict) else row[0]
+                if not film_id:
+                    return jsonify({"success": False, "error": "film not found"}), 404
+
+            with db_lock:
+                cursor.execute("""
+                    INSERT INTO ratings (chat_id, film_id, user_id, rating, is_imported)
+                    VALUES (%s, %s, %s, %s, FALSE)
+                    ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = %s, is_imported = FALSE
+                """, (chat_id, film_id, user_id, rating, rating))
+                conn.commit()
+
+            cursor.execute("SELECT title FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
+            film_row = cursor.fetchone()
+            film_title = film_row.get('title') if isinstance(film_row, dict) else (film_row[0] if film_row else None)
+
+            try:
+                from moviebot.bot.callbacks.film_callbacks import send_rating_message
+                send_rating_message(bot, chat_id, user_id, kp_id, film_id, rating, film_title)
+            except Exception as e:
+                logger.error(f"[EXTENSION API] Ошибка отправки сообщения в бота: {e}", exc_info=True)
+
+            recommendations_sent = False
+            if rating >= 7:
                 try:
-                    from moviebot.bot.callbacks.film_callbacks import send_rating_message
-                    send_rating_message(bot, chat_id, user_id, kp_id, film_id, rating, film_title)
+                    from moviebot.api.kinopoisk_api import get_similars
+                    similar = get_similars(kp_id)
+                    if similar:
+                        from moviebot.bot.callbacks.film_callbacks import send_recommendations_message
+                        send_recommendations_message(bot, chat_id, user_id, kp_id, similar)
+                        recommendations_sent = True
                 except Exception as e:
-                    logger.error(f"[EXTENSION API] Ошибка отправки сообщения в бота: {e}", exc_info=True)
-                
-                # Если оценка высокая (≥7), отправляем рекомендации
-                recommendations_sent = False
-                if rating >= 7:
-                    try:
-                        from moviebot.api.kinopoisk_api import get_similars
-                        similar = get_similars(kp_id)
-                        if similar:
-                            from moviebot.bot.callbacks.film_callbacks import send_recommendations_message
-                            send_recommendations_message(bot, chat_id, user_id, kp_id, similar)
-                            recommendations_sent = True
-                    except Exception as e:
-                        logger.error(f"[EXTENSION API] Ошибка получения рекомендаций: {e}", exc_info=True)
-                
-                return jsonify({"success": True, "recommendations": recommendations_sent})
+                    logger.error(f"[EXTENSION API] Ошибка получения рекомендаций: {e}", exc_info=True)
+
+            return jsonify({"success": True, "recommendations": recommendations_sent})
         except Exception as e:
             logger.error(f"[EXTENSION API] Ошибка оценки фильма: {e}", exc_info=True)
             return jsonify({"success": False, "error": "server error"}), 500
-    
+
     logger.info(f"[WEB APP] ===== FLASK ПРИЛОЖЕНИЕ СОЗДАНО =====")
     logger.info(f"[WEB APP] Зарегистрированные роуты: {[str(rule) for rule in app.url_map.iter_rules()]}")
     logger.info(f"[WEB APP] Возвращаем app: {app}")
