@@ -89,10 +89,10 @@
         extract: (el) => el?.content?.match(/\((20\d{2})\)/)?.[1]
       },
       seasonEpisode: {
-        selector: '#player-container div.VideoJS_titleWrapper__RPVJ7 > p.VideoJS_desc__kaIbK, p[class*="VideoJS_desc"]',
+        selector: '#player-container div.VideoJS_titleWrapper__RPVJ7 > p.VideoJS_desc__kaIbK, p[class*="VideoJS_desc"], #trailerCard button div, .MovieCard_content__3a8LO button div',
         extract: (el) => {
           const t = el?.textContent?.trim() || '';
-          const m = t.match(/(\d+)\s*сезон[,\s.]*(\d+)\s*серия/i);
+          const m = t.match(/(\d+)\s*сезон[,\s]+(\d+)\s*серия/i) || t.match(/Продолжить\s+(\d+)\s*сезон[,\s]+(\d+)\s*серия/i);
           return m ? { season: parseInt(m[1]), episode: parseInt(m[2]) } : null;
         }
       }
@@ -839,7 +839,7 @@
           noAccessMsg.style.cssText = 'padding: 12px; background: rgba(255,255,255,0.1); border-radius: 6px; text-align: center; font-size: 13px; margin-bottom: 8px;';
           noAccessMsg.innerHTML = '🔒 Для отметки серий нужна подписка "Уведомления" или "Пакетная"<br><small style="opacity: 0.8;">Доступно только добавление в базу</small>';
           container.appendChild(noAccessMsg);
-        } else {
+        } else if (!filmData.current_episode_watched) {
           const markCurrentBtn = document.createElement('button');
           markCurrentBtn.textContent = `✅ Отметить серию ${info.season || '?'}×${info.episode || '?'}`;
           markCurrentBtn.style.cssText = `
@@ -857,7 +857,7 @@
           container.appendChild(markCurrentBtn);
         }
       }
-      return; // Не показываем "Добавить в базу" если статус неизвестен
+      return;
     }
     
     if (!isInDatabase) {
@@ -891,24 +891,23 @@
           noAccessMsg.innerHTML = '🔒 Для отметки серий нужна подписка "Уведомления" или "Пакетная"<br><small style="opacity: 0.8;">Доступно только добавление в базу</small>';
           container.appendChild(noAccessMsg);
         } else {
-          // Есть подписка - показываем кнопки
-          const markCurrentBtn = document.createElement('button');
-          markCurrentBtn.textContent = `✅ Отметить серию ${info.season || '?'}×${info.episode || '?'}`;
-          markCurrentBtn.style.cssText = `
-            width: 100%;
-            padding: 10px;
-            background: white;
-            color: #667eea;
-            border: none;
-            border-radius: 6px;
-            font-weight: 600;
-            cursor: pointer;
-            margin-bottom: 8px;
-          `;
-          markCurrentBtn.addEventListener('click', () => handleMarkEpisode(info, filmData, false));
-          container.appendChild(markCurrentBtn);
-          
-          // Проверяем, есть ли непросмотренные серии до текущей
+          if (!filmData.current_episode_watched) {
+            const markCurrentBtn = document.createElement('button');
+            markCurrentBtn.textContent = `✅ Отметить серию ${info.season || '?'}×${info.episode || '?'}`;
+            markCurrentBtn.style.cssText = `
+              width: 100%;
+              padding: 10px;
+              background: white;
+              color: #667eea;
+              border: none;
+              border-radius: 6px;
+              font-weight: 600;
+              cursor: pointer;
+              margin-bottom: 8px;
+            `;
+            markCurrentBtn.addEventListener('click', () => handleMarkEpisode(info, filmData, false));
+            container.appendChild(markCurrentBtn);
+          }
           if (info.season && info.episode && filmData.has_unwatched_before) {
             const markAllBtn = document.createElement('button');
             markAllBtn.textContent = '✅ Отметить все предыдущие';
@@ -1292,7 +1291,8 @@
                 film_id: filmId,
                 watched: result.watched || false,
                 rated: result.rated || false,
-                has_unwatched_before: result.has_unwatched_before || false
+                has_unwatched_before: result.has_unwatched_before || false,
+                current_episode_watched: result.current_episode_watched || false
               };
               console.log('[STREAMING] filmData после парсинга:', filmData, 'film_id из result:', result.film_id);
             } else {
@@ -1318,7 +1318,8 @@
                     film_id: filmId,
                     watched: retryResult.watched || false,
                     rated: retryResult.rated || false,
-                    has_unwatched_before: retryResult.has_unwatched_before || false
+                    has_unwatched_before: retryResult.has_unwatched_before || false,
+                    current_episode_watched: retryResult.current_episode_watched || false
                   };
                   console.log('[STREAMING] Повторный запрос успешен, film_id:', filmId);
                 } else {
@@ -1333,10 +1334,11 @@
               // Предполагаем, что фильм может быть в базе, но мы не можем это проверить
               filmData = {
                 kp_id: kpId,
-                film_id: undefined, // undefined означает "неизвестно", null означает "точно нет"
+                film_id: undefined,
                 watched: false,
                 rated: false,
-                has_unwatched_before: false
+                has_unwatched_before: false,
+                current_episode_watched: false
               };
               console.log('[STREAMING] Продолжаем с kp_id, но film_id неизвестен:', kpId);
             }
@@ -1394,7 +1396,8 @@
                       film_id: filmId,
                       watched: filmResult.watched || false,
                       rated: filmResult.rated || false,
-                      has_unwatched_before: filmResult.has_unwatched_before || false
+                      has_unwatched_before: filmResult.has_unwatched_before || false,
+                      current_episode_watched: filmResult.current_episode_watched || false
                     };
                     console.log('[STREAMING] filmData после парсинга (после поиска):', filmData, 'film_id из result:', filmResult.film_id);
                   } else {
@@ -1405,32 +1408,33 @@
                       film_id: null,
                       watched: false,
                       rated: false,
-                      has_unwatched_before: false
+                      has_unwatched_before: false,
+                      current_episode_watched: false
                     };
                   }
                 } else {
                   console.error('[STREAMING] HTTP ошибка после поиска:', filmResponse.status);
-                  // Если ошибка, но kp_id есть - создаем базовые данные
                   if (kpId) {
                     filmData = {
                       kp_id: kpId,
                       film_id: null,
                       watched: false,
                       rated: false,
-                      has_unwatched_before: false
+                      has_unwatched_before: false,
+                      current_episode_watched: false
                     };
                   }
                 }
               } catch (filmFetchError) {
                 console.error('[STREAMING] Ошибка fetch film-info после поиска:', filmFetchError);
-                // Если ошибка, но kp_id есть - создаем базовые данные
                 if (kpId) {
                   filmData = {
                     kp_id: kpId,
                     film_id: null,
                     watched: false,
                     rated: false,
-                    has_unwatched_before: false
+                    has_unwatched_before: false,
+                    current_episode_watched: false
                   };
                 }
               }
@@ -1458,7 +1462,7 @@
                   kpId = retryResult.kp_id;
                   console.log('[STREAMING] Повторный поиск успешен, kp_id:', kpId);
                   // Сохраняем в кэш
-                  await saveToLocalCache({ ...info, kp_id: kpId });
+                  await saveToLocalCache(info, kpId);
                   // Теперь запрашиваем film-info
                   const filmResponse = await apiRequest('GET', `/api/extension/film-info?kp_id=${kpId}&chat_id=${data.linked_chat_id}&user_id=${data.linked_user_id}${info.season && info.episode ? `&season=${info.season}&episode=${info.episode}` : ''}`);
                   if (filmResponse.ok) {
@@ -1470,7 +1474,8 @@
                         film_id: filmId,
                         watched: filmResult.watched || false,
                         rated: filmResult.rated || false,
-                        has_unwatched_before: filmResult.has_unwatched_before || false
+                        has_unwatched_before: filmResult.has_unwatched_before || false,
+                        current_episode_watched: filmResult.current_episode_watched || false
                       };
                     }
                   }
@@ -1500,7 +1505,8 @@
           film_id: null,
           watched: false,
           rated: false,
-          has_unwatched_before: false
+          has_unwatched_before: false,
+          current_episode_watched: false
         };
       }
       
@@ -1518,7 +1524,8 @@
           film_id: null,
           watched: false,
           rated: false,
-          has_unwatched_before: false
+          has_unwatched_before: false,
+          current_episode_watched: false
         };
         console.log('[STREAMING] Вызываем createOverlay с базовыми данными после ошибки:', { info, filmData });
         await createOverlay(info, filmData);
@@ -1614,14 +1621,14 @@
         const currentHash = getContentHash(info);
         if (currentHash !== lastContentHash) {
           console.log('[STREAMING] Обнаружено изменение контента (hash изменился):', lastContentHash, '->', currentHash);
-          lastContentHash = currentHash;
-          // Сбрасываем кулдаун при смене сезона/серии
           const key = getContentKey(info);
-          lastShown[key] = 0; // Сбрасываем кулдаун
+          lastShown[key] = 0; // Сбрасываем кулдаун при смене сезона/серии
           checkAndShowOverlay();
+          // lastContentHash обновляется только в shouldShowOverlay при показе; не трогаем здесь,
+          // иначе checkAndShowOverlay видит «тот же контент» и пропускает показ.
         }
       }
-    }, 5000); // Проверяем каждые 5 секунд вместо 30
+    }, 5000);
   }
   
   // Запускаем при загрузке

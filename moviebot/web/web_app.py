@@ -1691,7 +1691,7 @@ def create_web_app(bot):
         
         logger.info(f"[EXTENSION API] GET /api/extension/film-info - kp_id={request.args.get('kp_id')}, imdb_id={request.args.get('imdb_id')}, chat_id={request.args.get('chat_id')}")
         from moviebot.api.kinopoisk_api import extract_movie_info, get_film_by_imdb_id
-        from moviebot.database.db_connection import get_db_connection, get_db_cursor
+        from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
         import requests
         from moviebot.config import KP_TOKEN
         
@@ -1779,77 +1779,90 @@ def create_web_app(bot):
             
             logger.info(f"[EXTENSION API] Проверка наличия в БД: chat_id={chat_id}, kp_id={kp_id}")
             
-            try:
+            current_episode_watched = False
+            
+            with db_lock:
                 cursor.execute("""
                     SELECT id, watched FROM movies 
                     WHERE chat_id = %s AND kp_id = %s
                 """, (chat_id, str(kp_id)))
                 row = cursor.fetchone()
-                logger.info(f"[EXTENSION API] Результат запроса БД: row={row}")
-                if row:
-                    film_in_db = True
-                    film_id = row.get('id') if isinstance(row, dict) else row[0]
-                    watched = bool(row.get('watched') if isinstance(row, dict) else row[1])
-                    logger.info(f"[EXTENSION API] Фильм найден в БД: film_id={film_id}, watched={watched}")
-                else:
-                    logger.info(f"[EXTENSION API] Фильм НЕ найден в БД для kp_id={kp_id}")
-                
-                # Проверяем наличие в расписании и тип плана
-                plan_type = None
-                plan_id = None
-                if film_id:
+            logger.info(f"[EXTENSION API] Результат запроса БД: row={row}")
+            if row:
+                film_in_db = True
+                film_id = row.get('id') if isinstance(row, dict) else row[0]
+                watched = bool(row.get('watched') if isinstance(row, dict) else row[1])
+                logger.info(f"[EXTENSION API] Фильм найден в БД: film_id={film_id}, watched={watched}")
+            else:
+                logger.info(f"[EXTENSION API] Фильм НЕ найден в БД для kp_id={kp_id}")
+            
+            plan_type = None
+            plan_id = None
+            if film_id:
+                with db_lock:
                     cursor.execute("""
                         SELECT id, plan_type FROM plans 
                         WHERE chat_id = %s AND film_id = %s
                         LIMIT 1
                     """, (chat_id, film_id))
                     plan_row = cursor.fetchone()
-                    if plan_row:
-                        has_plan = True
-                        plan_id = plan_row.get('id') if isinstance(plan_row, dict) else plan_row[0]
-                        plan_type = plan_row.get('plan_type') if isinstance(plan_row, dict) else plan_row[1]
-                    
-                    # Проверяем, есть ли оценка
-                    if user_id:
+                if plan_row:
+                    has_plan = True
+                    plan_id = plan_row.get('id') if isinstance(plan_row, dict) else plan_row[0]
+                    plan_type = plan_row.get('plan_type') if isinstance(plan_row, dict) else plan_row[1]
+                
+                if user_id:
+                    with db_lock:
                         cursor.execute("""
                             SELECT rating FROM ratings 
                             WHERE chat_id = %s AND film_id = %s AND user_id = %s
                         """, (chat_id, film_id, user_id))
                         rating_row = cursor.fetchone()
-                        rated = rating_row is not None
+                    rated = rating_row is not None
+                
+                if is_series and user_id:
+                    current_season = request.args.get('season', type=int)
+                    current_episode = request.args.get('episode', type=int)
                     
-                    # Для сериалов: проверяем, есть ли непросмотренные серии до текущей
-                    if is_series and user_id:
-                        # Получаем текущую серию из запроса (если передана)
-                        current_season = request.args.get('season', type=int)
-                        current_episode = request.args.get('episode', type=int)
-                        
-                        if current_season and current_episode:
-                            # Проверяем, есть ли непросмотренные серии до текущей в том же сезоне
-                            cursor.execute("""
-                                SELECT COUNT(*) FROM (
-                                    SELECT generate_series(1, %s) as ep_num
-                                ) episodes
-                                WHERE NOT EXISTS (
+                    if current_season and current_episode:
+                        try:
+                            with db_lock:
+                                cursor.execute("""
                                     SELECT 1 FROM series_tracking 
                                     WHERE chat_id = %s AND film_id = %s AND user_id = %s 
-                                    AND season_number = %s AND episode_number = episodes.ep_num 
-                                    AND watched = TRUE
-                                )
-                            """, (current_episode - 1, chat_id, film_id, user_id, current_season))
-                            unwatched_result = cursor.fetchone()
-                            unwatched_count = unwatched_result[0] if unwatched_result else 0
-                            has_unwatched_before = unwatched_count > 0
-                            logger.info(f"[EXTENSION API] Проверка непросмотренных серий: film_id={film_id}, season={current_season}, episode={current_episode}, unwatched_count={unwatched_count}, has_unwatched_before={has_unwatched_before}")
-            finally:
-                try:
-                    cursor.close()
-                except:
-                    pass
-                try:
-                    conn.close()
-                except:
-                    pass
+                                    AND season_number = %s AND episode_number = %s AND watched = TRUE
+                                """, (chat_id, film_id, user_id, current_season, current_episode))
+                                cur_ep_row = cursor.fetchone()
+                            current_episode_watched = cur_ep_row is not None
+                        except Exception as unw_err:
+                            logger.warning(f"[EXTENSION API] Ошибка проверки current_episode_watched: {unw_err}")
+                        
+                        unwatched_count = 0
+                        try:
+                            if current_episode >= 2:
+                                with db_lock:
+                                    cursor.execute("""
+                                        SELECT COUNT(*) as cnt FROM (
+                                            SELECT generate_series(1, %s) as ep_num
+                                        ) episodes
+                                        WHERE NOT EXISTS (
+                                            SELECT 1 FROM series_tracking 
+                                            WHERE chat_id = %s AND film_id = %s AND user_id = %s 
+                                            AND season_number = %s AND episode_number = episodes.ep_num 
+                                            AND watched = TRUE
+                                        )
+                                    """, (current_episode - 1, chat_id, film_id, user_id, current_season))
+                                    unwatched_result = cursor.fetchone()
+                                if unwatched_result is None:
+                                    unwatched_count = 0
+                                elif isinstance(unwatched_result, dict):
+                                    unwatched_count = int(unwatched_result.get('cnt', 0) or 0)
+                                else:
+                                    unwatched_count = int(unwatched_result[0] or 0)
+                                has_unwatched_before = unwatched_count > 0
+                            logger.info(f"[EXTENSION API] Серии: film_id={film_id}, s={current_season}, e={current_episode}, current_watched={current_episode_watched}, has_unwatched_before={has_unwatched_before}")
+                        except Exception as unw_err:
+                            logger.warning(f"[EXTENSION API] Ошибка проверки unwatched_before: {unw_err}")
             
             logger.info(f"[EXTENSION API] Возвращаем film-info: film_id={film_id}, film_in_db={film_in_db}, watched={watched}, kp_id={kp_id}, chat_id={chat_id}")
             resp = jsonify({
@@ -1865,10 +1878,11 @@ def create_web_app(bot):
                     "description": info.get('description')
                 },
                 "in_database": film_in_db,
-                "film_id": film_id,  # ВАЖНО: возвращаем film_id, даже если он None (но должен быть числом, если найден)
+                "film_id": film_id,
                 "watched": watched,
                 "rated": rated,
                 "has_unwatched_before": has_unwatched_before,
+                "current_episode_watched": current_episode_watched,
                 "has_plan": has_plan,
                 "plan_type": plan_type,
                 "plan_id": plan_id
@@ -2580,15 +2594,15 @@ def create_web_app(bot):
                         films = [f for f in films if f.get('type', '').upper() == 'FILM']
                         logger.info(f"[EXTENSION API] После фильтрации по типу FILM: {len(films)}")
                 
-                # Фильтруем по году, если указан
-                if year and films:
-                    # Пробуем найти точное совпадение по году
-                    year_matched = [f for f in films if f.get('year') == year]
+                # Фильтруем по году, если указан (API возвращает year как строка "2026")
+                if year is not None and films:
+                    year_str = str(year)
+                    year_matched = [f for f in films if str(f.get('year') or '').strip() == year_str]
                     if year_matched:
                         films = year_matched
                         logger.info(f"[EXTENSION API] После фильтрации по году {year}: {len(films)}")
                     else:
-                        logger.warning(f"[EXTENSION API] Не найдено фильмов с годом {year}, используем все результаты")
+                        logger.warning(f"[EXTENSION API] Нет фильмов с годом {year}, используем все результаты без фильтра по году")
                 
                 if films and len(films) > 0:
                     # Берем первый результат

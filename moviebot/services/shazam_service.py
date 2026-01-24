@@ -416,6 +416,19 @@ def _replace_russian_actor_names(text):
         ('сергея бодрова', 'Sergei Bodrov Jr.'),
         ('сергею бодрову', 'Sergei Bodrov Jr.'),
         ('сергеем бодровым', 'Sergei Bodrov Jr.'),
+        # Режиссёры (часто ищут по фамилии или полному имени)
+        ('пол томас андерсон', 'Paul Thomas Anderson'),
+        ('пола томаса андерсона', 'Paul Thomas Anderson'),
+        ('тарантино', 'Quentin Tarantino'),  # Только фамилия — подставляем полное имя
+        ('тарнтино', 'Quentin Tarantino'),   # Опечатка
+        ('квентин тарантино', 'Quentin Tarantino'),
+        ('квентина тарантино', 'Quentin Tarantino'),
+        ('кристофер нолан', 'Christopher Nolan'),
+        ('кристофера нолана', 'Christopher Nolan'),
+        ('нолан', 'Christopher Nolan'),
+        ('денни виллнев', 'Denis Villeneuve'),
+        ('дени виллнев', 'Denis Villeneuve'),
+        ('денис виллнев', 'Denis Villeneuve'),
     ]
     
     result_text = text
@@ -1127,6 +1140,18 @@ def load_top_actors_and_directors():
         logger.error(f"❌ Файл топ-режиссёров не найден: {TOP_DIRECTORS_PATH}")
         logger.error(f"   Абсолютный путь: {TOP_DIRECTORS_PATH.absolute()}")
     
+    # Всегда добавляем кураторский список известных режиссёров (могут отсутствовать в топ‑100)
+    curated_directors = {
+        'paul thomas anderson', 'quentin tarantino', 'christopher nolan',
+        'denis villeneuve', 'david fincher', 'martin scorsese', 'steven spielberg',
+        'ridley scott', 'james cameron', 'danny boyle',
+        'joel coen', 'ethan coen', 'wes anderson', 'spike jonze', 'darren aronofsky',
+    }
+    before = len(_top_directors_set)
+    _top_directors_set |= curated_directors
+    if len(_top_directors_set) > before:
+        logger.info(f"[LOAD TOP LISTS] Добавлено {len(_top_directors_set) - before} режиссёров из кураторского списка")
+    
     return _top_actors_set, _top_directors_set
 
 
@@ -1234,6 +1259,28 @@ def _find_name_in_set_with_typos(name, name_set, max_distance=2):
         if distance <= max_distance:
             return (True, candidate)
     
+    return (False, None)
+
+
+def _find_name_by_surname(word, name_set):
+    """
+    Ищет полное имя по фамилии (одно слово). Например, 'tarantino' → 'quentin tarantino'.
+    Проверяет: имя заканчивается на ' ' + word или равно word.
+    
+    Returns:
+        tuple: (found, matched_name) или (False, None)
+    """
+    if not word or not name_set:
+        return (False, None)
+    w = word.lower().strip()
+    if len(w) < 3:  # Слишком короткие слова (a, no, jo) не считаем фамилиями
+        return (False, None)
+    for name in name_set:
+        n = name.strip().lower()
+        if n == w:
+            return (True, name)
+        if n.endswith(' ' + w):
+            return (True, name)
     return (False, None)
 
 
@@ -1668,16 +1715,35 @@ def search_movies(query, top_k=15):
         # Сначала пытаемся найти в топ-списках (если они не пустые)
         if top_actors_set or top_directors_set:
             found_names = set()  # Используем set для исключения дубликатов
+            stopwords_1word = {'a', 'an', 'the', 'this', 'is', 'it', 'to', 'in', 'on', 'at', 'by', 'of', 'or', 'and', 'film', 'movie'}
+            # 1) Проверяем однословные фамилии (например, "Tarantino", "Нолан")
+            for i in range(len(query_en_words)):
+                w = _normalize_text(query_en_words[i])
+                if not w or w in stopwords_1word:
+                    continue
+                added_this_word = False
+                if top_actors_set:
+                    found_actor, matched_actor_name = _find_name_by_surname(w, top_actors_set)
+                    if found_actor and matched_actor_name not in found_names:
+                        found_names.add(matched_actor_name)
+                        mentioned_actors_en.append(('actor', matched_actor_name))
+                        logger.info(f"[SEARCH MOVIES] Найдено имя актёра по фамилии (1 слово): '{w}' → '{matched_actor_name}'")
+                        added_this_word = True
+                if not added_this_word and top_directors_set:
+                    found_director, matched_director_name = _find_name_by_surname(w, top_directors_set)
+                    if found_director and matched_director_name not in found_names:
+                        found_names.add(matched_director_name)
+                        mentioned_actors_en.append(('director', matched_director_name))
+                        logger.info(f"[SEARCH MOVIES] Найдено имя режиссёра по фамилии (1 слово): '{w}' → '{matched_director_name}'")
+            # 2) Комбинации 2–4 слова
             for word_count in range(2, min(5, len(query_en_words) + 1)):
                 for i in range(len(query_en_words) - word_count + 1):
                     potential_name = ' '.join(query_en_words[i:i+word_count])
                     potential_name_normalized = _normalize_text(potential_name)
                     
-                    # Проверяем в топ-актёрах (приоритет №1) с учётом опечаток (расстояние Левенштейна <= 2)
                     if top_actors_set:
                         found_actor, matched_actor_name = _find_name_in_set_with_typos(potential_name_normalized, top_actors_set, max_distance=2)
                         if found_actor:
-                            # Используем правильное имя из топ-списка (может отличаться от запроса из-за опечаток)
                             if matched_actor_name not in found_names:
                                 found_names.add(matched_actor_name)
                                 mentioned_actors_en.append(('actor', matched_actor_name))
@@ -1686,11 +1752,9 @@ def search_movies(query, top_k=15):
                                 else:
                                     logger.info(f"[SEARCH MOVIES] Найдено имя актёра в топ-{TOP_ACTORS_COUNT}: '{matched_actor_name}' ({word_count} слова)")
                     
-                    # Проверяем в топ-режиссёрах (приоритет №2, только если не актёр) с учётом опечаток
                     elif top_directors_set:
                         found_director, matched_director_name = _find_name_in_set_with_typos(potential_name_normalized, top_directors_set, max_distance=2)
                         if found_director:
-                            # Режиссёры добавляем только если это не актёр (проверяем, не найден ли как актёр)
                             if matched_director_name not in found_names:
                                 found_names.add(matched_director_name)
                                 mentioned_actors_en.append(('director', matched_director_name))
