@@ -3,7 +3,6 @@ from moviebot.bot.bot_init import bot
 Callback handlers для работы с премьерами
 """
 import logging
-import re
 import requests
 from datetime import datetime, date, time, timedelta
 
@@ -327,94 +326,66 @@ def premieres_genre_page_callback(call):
         except Exception:
             pass
 
+def _parse_premiere_date_from_detail(data, kp_id):
+    """Дата премьеры в РФ: сначала premiereRu из API, затем distributions."""
+    for key in ('premiereRu', 'premiereRuDate', 'premiereWorld', 'premiereWorldDate'):
+        val = data.get(key)
+        if val:
+            try:
+                s = str(val).split('T')[0] if 'T' in str(val) else str(val)
+                d = datetime.strptime(s, '%Y-%m-%d').date()
+                return d, d.strftime('%d.%m.%Y')
+            except Exception:
+                pass
+    russia = get_film_distribution(str(kp_id))
+    if russia and russia.get('date'):
+        rd = russia['date']
+        return rd, russia.get('date_str', rd.strftime('%d.%m.%Y'))
+    return None, ''
+
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("premiere_detail:"))
 def premiere_detail_handler(call):
-    """Показывает детали премьеры с постером и трейлером"""
+    """Детали премьеры: постер, описание, Уведомить о премьере, Добавить, Перейти к описанию, Назад."""
     try:
         bot.answer_callback_query(call.id)
         parts = call.data.split(":")
         kp_id = parts[1]
-        period = parts[2] if len(parts) > 2 else 'current_month'  # Период для возврата назад
+        if len(parts) >= 4:
+            source, ref = parts[2], parts[3]
+        elif len(parts) == 3:
+            source, ref = 'date', parts[2]
+        else:
+            source, ref = 'date', 'current_month'
         chat_id = call.message.chat.id
-        
-        # Получаем полную информацию о фильме
+
         headers = {'X-API-KEY': KP_TOKEN}
         url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}"
-        
         response = requests.get(url, headers=headers, timeout=15)
         if response.status_code != 200:
             bot.answer_callback_query(call.id, "Не удалось загрузить данные фильма", show_alert=True)
             return
-        
+
         data = response.json()
-        
         title = data.get('nameRu') or data.get('nameOriginal') or "Без названия"
         year = data.get('year') or '—'
         poster_url = data.get('posterUrlPreview') or data.get('posterUrl')
-#        trailer_url = None
-        
-        # Получаем трейлер через отдельный запрос к API
-#        try:
-#            videos_url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}/videos"
-#            videos_headers = {'X-API-KEY': KP_TOKEN, 'accept': 'application/json'}
-#            videos_response = requests.get(videos_url, headers=videos_headers, timeout=15)
-#            if videos_response.status_code == 200:
-#                videos_data = videos_response.json()
-#                items = videos_data.get('items', [])
-#                if items:
-#                    trailer_url = items[0].get('url')
-#                    logger.info(f"[PREMIERES DETAIL] Найден трейлер для {kp_id}: {trailer_url}")
-#        except Exception as e:
-#            logger.error(f"[PREMIERES DETAIL] Ошибка получения трейлера: {e}", exc_info=True)
-        
-#        if not trailer_url:
-#            videos = data.get('videos', {}).get('trailers', [])
-#            if videos:
-#                trailer_url = videos[0].get('url')
-        
         description = data.get('description') or data.get('shortDescription') or "Нет описания"
         genres = ', '.join([g['genre'] for g in data.get('genres', [])]) or '—'
         countries = ', '.join([c['country'] for c in data.get('countries', [])]) or '—'
-        
         directors = data.get('directors', [])
         director_str = ', '.join([d.get('nameRu') or d.get('nameEn', '') for d in directors if d.get('nameRu') or d.get('nameEn')]) or '—'
-        
-        russia_release = get_film_distribution(kp_id)
-        premiere_date = None
-        premiere_date_str = ""
-        
-        if russia_release and russia_release.get('date'):
-            premiere_date = russia_release['date']
-            premiere_date_str = russia_release.get('date_str', premiere_date.strftime('%d.%m.%Y'))
-        else:
-            for date_field in ['premiereWorld', 'premiereRu', 'premiereWorldDate', 'premiereRuDate']:
-                date_value = data.get(date_field)
-                if date_value:
-                    try:
-                        if 'T' in str(date_value):
-                            premiere_date = datetime.strptime(str(date_value).split('T')[0], '%Y-%m-%d').date()
-                        else:
-                            premiere_date = datetime.strptime(str(date_value), '%Y-%m-%d').date()
-                        premiere_date_str = premiere_date.strftime('%d.%m.%Y')
-                        break
-                    except:
-                        continue
-        
+
+        premiere_date, premiere_date_str = _parse_premiere_date_from_detail(data, kp_id)
         text = f"<b>{title}</b> ({year})\n\n"
         if premiere_date_str:
-            if russia_release:
-                text += f"📅 Премьера в России: {premiere_date_str}\n"
-            else:
-                text += f"📅 Премьера: {premiere_date_str}\n"
+            text += f"📅 Премьера в России: {premiere_date_str}\n"
         if director_str != '—':
-            text += f"🎥 Режиссёр: {director_str}\n"
+            text += f"🎬 Режиссёр: {director_str}\n"
         if countries != '—':
-            text += f"🌍 {countries}"
+            text += f"🌍 {countries}\n"
+        text += f"\n{description}\n\n🎭 {genres}"
 
-        text += f"\n{description}\n\n"
-        text += f"🎭 {genres}\n"
-        
-        # Улучшенная проверка: получаем id, title и watched за один запрос
         existing_row = None
         conn_local = get_db_connection()
         cursor_local = get_db_cursor()
@@ -428,99 +399,62 @@ def premiere_detail_handler(call):
         finally:
             try:
                 cursor_local.close()
-            except:
+            except Exception:
                 pass
             try:
                 conn_local.close()
-            except:
+            except Exception:
                 pass
-        
+
         in_database = existing_row is not None
-        
-        # Опционально: добавляем статус в текст (очень полезно для пользователя)
         if in_database:
-            watched_emoji = " ✅" if existing_row[2] else ""
-            text += f"\n\n🎬 Фильм уже в твоём списке{watched_emoji}"
-        
+            w = existing_row[2] if not isinstance(existing_row, dict) else existing_row.get('watched')
+            text += f"\n\n🎬 Фильм уже в твоём списке{' ✅' if w else ''}"
+
         markup = InlineKeyboardMarkup(row_width=1)
-        
         today = date.today()
-        show_notify_button = False
-        date_for_callback = ''
-        
-        if premiere_date:
-            if premiere_date > today:
-                show_notify_button = True
-                date_for_callback = premiere_date_str.replace(':', '-') if premiere_date_str else ''
-        elif not premiere_date:
-            year_val = data.get('year')
-            if year_val:
-                try:
-                    year_int = int(year_val)
-                    current_year = today.year
-                    if year_int > current_year or (year_int == current_year and today.month < 12):
-                        show_notify_button = True
-                except:
-                    pass
-        
-        if show_notify_button:
-            markup.add(InlineKeyboardButton("🔔 Уведомить о премьере", callback_data=f"premiere_notify:{kp_id}:{date_for_callback}:{period}"))
-        
-        # Кнопки добавить / удалить
+        show_notify = bool(
+            premiere_date and premiere_date > today and not in_database
+        )
+        date_cb = premiere_date_str.replace(':', '-') if premiere_date_str else ''
+
+        if show_notify:
+            markup.add(InlineKeyboardButton(
+                "🔔 Уведомить о премьере",
+                callback_data=f"premiere_notify:{kp_id}:{date_cb}:{ref}"
+            ))
+
         if in_database:
             markup.add(InlineKeyboardButton("🗑️ Удалить из базы", callback_data=f"remove_from_database:{int(kp_id)}"))
         else:
             markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_database:{int(kp_id)}"))
-        
-        markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"premieres_back:{period}"))
-        
-        # Отправка с постером
+
+        markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"back_to_film:{int(kp_id)}"))
+        markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"premieres_back:{source}:{ref}"))
+
         if poster_url:
             try:
-                bot.send_photo(
-                    chat_id,
-                    poster_url,
-                    caption=text,
-                    parse_mode='HTML',
-                    reply_markup=markup
-                )
-                bot.delete_message(chat_id, call.message.message_id)
+                bot.send_photo(chat_id, poster_url, caption=text, parse_mode='HTML', reply_markup=markup)
+                try:
+                    bot.delete_message(chat_id, call.message.message_id)
+                except Exception:
+                    pass
             except Exception as e:
-                logger.error(f"[PREMIERES DETAIL] Ошибка отправки фото: {e}")
-                bot.edit_message_text(
-                    text,
-                    chat_id,
-                    call.message.message_id,
-                    parse_mode='HTML',
-                    reply_markup=markup,
-                    disable_web_page_preview=False
-                )
+                logger.warning(f"[PREMIERES DETAIL] send_photo: {e}")
+                try:
+                    bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                except Exception:
+                    bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
         else:
-            bot.edit_message_text(
-                text,
-                chat_id,
-                call.message.message_id,
-                parse_mode='HTML',
-                reply_markup=markup,
-                disable_web_page_preview=False
-            )
-        
-        # Трейлер
-#        if trailer_url:
-#            try:
-#                bot.send_video(chat_id, trailer_url, caption=f"📺 Трейлер: <b>{title}</b>", parse_mode='HTML')
-#            except Exception as e:
-#                logger.error(f"[PREMIERES DETAIL] Ошибка отправки трейлера как видео: {e}")
-#                try:
-#                    bot.send_message(chat_id, f"📺 <a href='{trailer_url}'>Смотреть трейлер: {title}</a>", parse_mode='HTML')
-#                except Exception as e2:
-#                    logger.error(f"[PREMIERES DETAIL] Ошибка отправки трейлера как ссылки: {e2}")
-        
+            try:
+                bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+            except Exception:
+                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
     except Exception as e:
         logger.error(f"[PREMIERES DETAIL] Ошибка: {e}", exc_info=True)
         try:
             bot.answer_callback_query(call.id, "Ошибка загрузки фильма", show_alert=True)
-        except:
+        except Exception:
             pass
         
 @bot.callback_query_handler(func=lambda call: call.data.startswith("premiere_add:"))
@@ -1034,45 +968,54 @@ def premiere_cancel_handler(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("premieres_back:"))
 def premieres_back_handler(call):
-    """Обработчик возврата к списку премьер"""
+    """Возврат из детали к списку: по датам (period) или по жанру (genre)."""
     try:
         bot.answer_callback_query(call.id)
-        parts = call.data.split(":")
-        period = parts[1] if len(parts) > 1 else 'current_month'
+        parts = call.data.split(":", 2)
+        if len(parts) >= 3:
+            source, ref = parts[1], parts[2]
+        elif len(parts) == 2:
+            source, ref = 'date', parts[1]
+        else:
+            source, ref = 'date', 'current_month'
         chat_id = call.message.chat.id
-        message_id = call.message.message_id
-        
-        # Удаляем сообщение о фильме
+
         try:
-            bot.delete_message(chat_id, message_id)
+            bot.delete_message(chat_id, call.message.message_id)
         except Exception as e:
-            logger.warning(f"[PREMIERES BACK] Не удалось удалить сообщение: {e}")
-        
-        # Получаем премьеры для периода
-        premieres = get_premieres_for_period(period)
-        
-        if not premieres:
-            try:
-                bot.send_message(chat_id, "❌ Не удалось получить список премьер.")
-            except:
-                pass
-            return
-        
-        # Показываем первую страницу - отправляем новое сообщение
-        # Создаем фиктивный call объект для show_premieres_page
+            logger.warning(f"[PREMIERES BACK] delete_message: {e}")
+
         class FakeCall:
-            def __init__(self, chat_id):
-                self.message = type('obj', (object,), {'chat': type('obj', (object,), {'id': chat_id})(), 'message_id': None})()
+            def __init__(self, cid):
+                self.message = type('M', (), {'chat': type('C', (), {'id': cid})(), 'message_id': None})()
                 self.id = None
-        
-        fake_call = FakeCall(chat_id)
-        show_premieres_page(fake_call, premieres, period, page=0)
-        
+
+        fake = FakeCall(chat_id)
+        if source == 'date':
+            premieres = get_premieres_for_period(ref)
+            if not premieres:
+                try:
+                    bot.send_message(chat_id, "❌ Не удалось получить список премьер.")
+                except Exception:
+                    pass
+                return
+            show_premieres_page(fake, premieres, ref, page=0, mode='date')
+        else:
+            all_p = get_premieres_for_period("6_months")
+            gl = ref.lower()
+            filtered = [p for p in all_p if any((g.get("genre") or "").lower() == gl for g in (p.get("genres") or []))]
+            if not filtered:
+                try:
+                    bot.send_message(chat_id, f"❌ Нет премьер в жанре «{ref}».")
+                except Exception:
+                    pass
+                return
+            show_premieres_page(fake, filtered, None, page=0, mode='genre', genre_name=ref)
     except Exception as e:
         logger.error(f"[PREMIERES BACK] Ошибка: {e}", exc_info=True)
         try:
-            bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
-        except:
+            bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+        except Exception:
             pass
 
 # Дублирующий обработчик удален - используется premiere_show_description выше

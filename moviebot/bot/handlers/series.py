@@ -2049,7 +2049,7 @@ def premieres_command(message):
         markup.add(InlineKeyboardButton("🎭 По жанрам", callback_data="premieres_mode:genre"))
         markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
         
-        bot.reply_to(message, "Выберите вариант сортировки:", reply_markup=markup, parse_mode='HTML')
+        bot.reply_to(message, "Выберите вариант сортировки:", reply_markup=markup)
 
 
 def ticket_command(message):
