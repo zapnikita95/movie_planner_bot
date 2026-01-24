@@ -6,6 +6,45 @@
   
   const API_BASE_URL = 'https://web-production-3921c.up.railway.app';
   
+  // ────────────────────────────────────────────────
+  // Вспомогательная функция для API запросов через background script
+  // ────────────────────────────────────────────────
+  async function apiRequest(method, endpoint, body = null) {
+    try {
+      const url = `${API_BASE_URL}${endpoint}`;
+      const message = {
+        action: 'streaming_api_request',
+        method: method,
+        url: url,
+        headers: { 'Content-Type': 'application/json' },
+        body: body
+      };
+      
+      return new Promise((resolve, reject) => {
+        chrome.runtime.sendMessage(message, (response) => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+            return;
+          }
+          
+          if (!response || !response.success) {
+            reject(new Error(response?.error || 'Unknown error'));
+            return;
+          }
+          
+          resolve({
+            ok: response.status >= 200 && response.status < 300,
+            status: response.status,
+            json: async () => response.data
+          });
+        });
+      });
+    } catch (error) {
+      console.error('[STREAMING] Ошибка apiRequest:', error);
+      throw error;
+    }
+  }
+  
   // Поддерживаемые сайты
   const supportedHosts = [
     'tvoe.live', 'ivi.ru', 'okko.tv', 'kinopoisk.ru', 'hd.kinopoisk.ru',
@@ -856,17 +895,11 @@
       // Если kp_id уже есть, добавляем сразу
       if (filmData?.kp_id) {
         try {
-          const response = await fetch(`${API_BASE_URL}/api/extension/add-film`, {
-            method: 'POST',
-            mode: 'cors',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              chat_id: data.linked_chat_id,
-              user_id: data.linked_user_id,
-              kp_id: filmData.kp_id,
-              online_link: info.url
-            }),
-            credentials: 'omit'
+          const response = await apiRequest('POST', '/api/extension/add-film', {
+            chat_id: data.linked_chat_id,
+            user_id: data.linked_user_id,
+            kp_id: filmData.kp_id,
+            online_link: info.url
           });
           
           if (response.ok) {
@@ -905,21 +938,15 @@
       }
       
       try {
-        const response = await fetch(`${API_BASE_URL}/api/extension/mark-episode`, {
-          method: 'POST',
-          mode: 'cors',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            chat_id: data.linked_chat_id,
-            user_id: data.linked_user_id,
-            kp_id: filmData.kp_id,
-            film_id: filmData.film_id,
-            season: info.season,
-            episode: info.episode,
-            mark_all_previous: markAllPrevious,
-            online_link: info.url
-          }),
-          credentials: 'omit'
+        const response = await apiRequest('POST', '/api/extension/mark-episode', {
+          chat_id: data.linked_chat_id,
+          user_id: data.linked_user_id,
+          kp_id: filmData.kp_id,
+          film_id: filmData.film_id,
+          season: info.season,
+          episode: info.episode,
+          mark_all_previous: markAllPrevious,
+          online_link: info.url
         });
         
         if (response.ok) {
@@ -952,18 +979,12 @@
       }
       
       try {
-        const response = await fetch(`${API_BASE_URL}/api/extension/mark-film-watched`, {
-          method: 'POST',
-          mode: 'cors',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            chat_id: data.linked_chat_id,
-            user_id: data.linked_user_id,
-            kp_id: filmData.kp_id,
-            film_id: filmData.film_id,
-            online_link: info.url
-          }),
-          credentials: 'omit'
+        const response = await apiRequest('POST', '/api/extension/mark-film-watched', {
+          chat_id: data.linked_chat_id,
+          user_id: data.linked_user_id,
+          kp_id: filmData.kp_id,
+          film_id: filmData.film_id,
+          online_link: info.url
         });
         
         if (response.ok) {
@@ -997,18 +1018,12 @@
       }
       
       try {
-        const response = await fetch(`${API_BASE_URL}/api/extension/rate-film`, {
-          method: 'POST',
-          mode: 'cors',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            chat_id: data.linked_chat_id,
-            user_id: data.linked_user_id,
-            kp_id: filmData.kp_id,
-            film_id: filmData.film_id,
-            rating: rating
-          }),
-          credentials: 'omit'
+        const response = await apiRequest('POST', '/api/extension/rate-film', {
+          chat_id: data.linked_chat_id,
+          user_id: data.linked_user_id,
+          kp_id: filmData.kp_id,
+          film_id: filmData.film_id,
+          rating: rating
         });
         
         if (response.ok) {
@@ -1084,16 +1099,9 @@
           
           console.log('[STREAMING] Запрос film-info из кэша:', { kpId, url });
           
-          const response = await fetch(url, {
-            method: 'GET',
-            mode: 'cors',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            credentials: 'omit'
-          });
+          const response = await apiRequest('GET', `/api/extension/film-info?kp_id=${kpId}&chat_id=${data.linked_chat_id}&user_id=${data.linked_user_id}${info.season && info.episode ? `&season=${info.season}&episode=${info.episode}` : ''}`);
           
-          console.log('[STREAMING] Ответ film-info из кэша:', { status: response.status, ok: response.ok, statusText: response.statusText });
+          console.log('[STREAMING] Ответ film-info из кэша:', { status: response.status, ok: response.ok });
           
           if (response.ok) {
             const result = await response.json();
@@ -1120,14 +1128,7 @@
           
           console.log('[STREAMING] Поиск фильма:', { searchKeyword, searchType, url: searchUrl });
           
-          const searchResponse = await fetch(searchUrl, {
-            method: 'GET',
-            mode: 'cors',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            credentials: 'omit'
-          });
+          const searchResponse = await apiRequest('GET', `/api/extension/search-film-by-keyword?keyword=${encodeURIComponent(searchKeyword)}&year=${info.year || ''}&type=${searchType}`);
           
           console.log('[STREAMING] Ответ поиска:', { status: searchResponse.status, ok: searchResponse.ok });
           
@@ -1148,14 +1149,7 @@
                 
                 console.log('[STREAMING] Получение данных о фильме:', { kpId, url });
                 
-                const filmResponse = await fetch(url, {
-                  method: 'GET',
-                  mode: 'cors',
-                  headers: {
-                    'Content-Type': 'application/json'
-                  },
-                  credentials: 'omit'
-                });
+                const filmResponse = await apiRequest('GET', `/api/extension/film-info?kp_id=${kpId}&chat_id=${data.linked_chat_id}&user_id=${data.linked_user_id}${info.season && info.episode ? `&season=${info.season}&episode=${info.episode}` : ''}`);
                 
                 console.log('[STREAMING] Ответ film-info:', { status: filmResponse.status, ok: filmResponse.ok });
                 

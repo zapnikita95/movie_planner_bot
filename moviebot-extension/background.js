@@ -49,6 +49,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // Обработка добавления билетов к плану
       handleAddTicketsToPlan(message, sender.tab, sendResponse);
       return true; // Асинхронный ответ
+    } else if (message.action === "streaming_api_request") {
+      // Обработка API запросов для streaming content script
+      handleStreamingApiRequest(message, sendResponse);
+      return true; // Асинхронный ответ
     }
   } catch (error) {
     console.error('Ошибка обработки сообщения:', error);
@@ -135,5 +139,40 @@ async function handleTicketSite(tab) {
     chrome.action.setPopup({ popup: 'popup.html?ticket_site=' + encodeURIComponent(tab.url) });
   } catch (error) {
     console.error('Ошибка обработки сайта с билетами:', error);
+  }
+}
+
+// Обработка API запросов для streaming content script
+async function handleStreamingApiRequest(message, sendResponse) {
+  try {
+    const { method, url, body, headers } = message;
+    
+    console.log('[BACKGROUND] Streaming API request:', { method, url });
+    
+    const fetchOptions = {
+      method: method || 'GET',
+      headers: headers || { 'Content-Type': 'application/json' }
+    };
+    
+    if (body) {
+      fetchOptions.body = typeof body === 'string' ? body : JSON.stringify(body);
+    }
+    
+    const response = await fetch(url, fetchOptions);
+    const responseData = await response.json();
+    
+    console.log('[BACKGROUND] Streaming API response:', { status: response.status, ok: response.ok });
+    
+    sendResponse({
+      success: response.ok,
+      status: response.status,
+      data: responseData
+    });
+  } catch (error) {
+    console.error('[BACKGROUND] Ошибка API запроса:', error);
+    sendResponse({
+      success: false,
+      error: error.message
+    });
   }
 }
