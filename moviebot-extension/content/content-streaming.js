@@ -587,12 +587,18 @@
       const saved = localStorage.getItem('movieplanner_streaming_overlay_position');
       if (saved) {
         const pos = JSON.parse(saved);
-        return { top: pos.top, right: pos.right, left: pos.left, bottom: pos.bottom };
+        // Возвращаем только валидные числовые значения
+        const result = {};
+        if (typeof pos.top === 'number' && !isNaN(pos.top)) result.top = pos.top;
+        if (typeof pos.right === 'number' && !isNaN(pos.right)) result.right = pos.right;
+        if (typeof pos.left === 'number' && !isNaN(pos.left)) result.left = pos.left;
+        if (typeof pos.bottom === 'number' && !isNaN(pos.bottom)) result.bottom = pos.bottom;
+        return result;
       }
     } catch (e) {
       console.error('[STREAMING] Ошибка загрузки позиции плашки:', e);
     }
-    return { top: null, right: 20, bottom: 20, left: null };
+    return {}; // Возвращаем пустой объект, чтобы использовались значения по умолчанию
   }
   
   // Функция сохранения позиции плашки в localStorage
