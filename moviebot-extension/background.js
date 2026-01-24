@@ -147,7 +147,7 @@ async function handleStreamingApiRequest(message, sendResponse) {
   try {
     const { method, url, body, headers } = message;
     
-    console.log('[BACKGROUND] Streaming API request:', { method, url });
+    console.log('[BACKGROUND] Streaming API request:', { method, url, body });
     
     const fetchOptions = {
       method: method || 'GET',
@@ -159,9 +159,23 @@ async function handleStreamingApiRequest(message, sendResponse) {
     }
     
     const response = await fetch(url, fetchOptions);
-    const responseData = await response.json();
     
-    console.log('[BACKGROUND] Streaming API response:', { status: response.status, ok: response.ok });
+    let responseData;
+    try {
+      responseData = await response.json();
+    } catch (jsonError) {
+      console.error('[BACKGROUND] Ошибка парсинга JSON ответа:', jsonError);
+      const text = await response.text();
+      console.error('[BACKGROUND] Текст ответа:', text);
+      sendResponse({
+        success: false,
+        status: response.status,
+        error: 'Invalid JSON response: ' + text.substring(0, 100)
+      });
+      return;
+    }
+    
+    console.log('[BACKGROUND] Streaming API response:', { status: response.status, ok: response.ok, data: responseData });
     
     sendResponse({
       success: response.ok,
@@ -170,9 +184,10 @@ async function handleStreamingApiRequest(message, sendResponse) {
     });
   } catch (error) {
     console.error('[BACKGROUND] Ошибка API запроса:', error);
+    console.error('[BACKGROUND] Stack trace:', error.stack);
     sendResponse({
       success: false,
-      error: error.message
+      error: error.message || 'Unknown error'
     });
   }
 }

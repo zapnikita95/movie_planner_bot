@@ -23,12 +23,22 @@
       return new Promise((resolve, reject) => {
         chrome.runtime.sendMessage(message, (response) => {
           if (chrome.runtime.lastError) {
+            console.error('[STREAMING] chrome.runtime.lastError:', chrome.runtime.lastError);
             reject(new Error(chrome.runtime.lastError.message));
             return;
           }
           
-          if (!response || !response.success) {
-            reject(new Error(response?.error || 'Unknown error'));
+          if (!response) {
+            console.error('[STREAMING] Нет ответа от background script');
+            reject(new Error('No response from background script'));
+            return;
+          }
+          
+          console.log('[STREAMING] Ответ от background script:', response);
+          
+          if (!response.success) {
+            console.error('[STREAMING] Ошибка в ответе:', response.error);
+            reject(new Error(response.error || 'Unknown error'));
             return;
           }
           
@@ -107,7 +117,16 @@
         selector: 'title, meta[property="og:title"]',
         extract: (el) => {
           const text = el?.textContent || el?.content || '';
-          return text.split(/[:|]/)[0]?.trim() || null;
+          // Убираем лишний текст типа "Сериал ... смотреть онлайн все серии подряд в хорошем HD качестве"
+          let cleanTitle = text.split(/[:|]/)[0]?.trim() || '';
+          // Убираем "Сериал" в начале, если есть
+          cleanTitle = cleanTitle.replace(/^Сериал\s+/i, '');
+          // Убираем все после "смотреть" или "в хорошем"
+          cleanTitle = cleanTitle.split(/\s+смотреть/i)[0]?.trim() || cleanTitle;
+          cleanTitle = cleanTitle.split(/\s+в хорошем/i)[0]?.trim() || cleanTitle;
+          // Убираем год в конце, если он есть (он будет в отдельном поле)
+          cleanTitle = cleanTitle.replace(/\s+\d{4}\s*$/, '').trim();
+          return cleanTitle || null;
         }
       },
       year: {
@@ -624,6 +643,7 @@
       user-select: none;
     `;
     
+    // Устанавливаем позицию (обязательно указываем и left/right, и top/bottom)
     if (savedPos.left !== undefined) {
       initialStyle += `left: ${savedPos.left}px; right: auto;`;
     } else if (savedPos.right !== undefined) {
@@ -639,6 +659,9 @@
     } else {
       initialStyle += `bottom: 20px; top: auto;`;
     }
+    
+    // Убеждаемся, что overlay видим
+    initialStyle += `display: block; visibility: visible; opacity: 1;`;
     
     overlayElement.style.cssText = initialStyle;
     
