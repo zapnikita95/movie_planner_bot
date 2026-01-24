@@ -819,9 +819,46 @@
     container.innerHTML = '';
     
     // ВАЖНО: проверяем film_id явно (может быть 0, null, undefined)
-    const isInDatabase = filmData && filmData.film_id !== null && filmData.film_id !== undefined;
+    // undefined означает "неизвестно" (ошибка API), null означает "точно нет в базе"
+    const filmId = filmData?.film_id;
+    const isInDatabase = filmId !== null && filmId !== undefined;
+    const isUnknown = filmId === undefined; // Не знаем статус из-за ошибки API
     
-    console.log('[STREAMING] renderButtons: isInDatabase=', isInDatabase, 'film_id=', filmData?.film_id);
+    console.log('[STREAMING] renderButtons: isInDatabase=', isInDatabase, 'isUnknown=', isUnknown, 'film_id=', filmId);
+    
+    // Если статус неизвестен (ошибка API), но есть kp_id - показываем кнопки для отметки
+    // Предполагаем, что фильм может быть в базе
+    if (isUnknown && filmData?.kp_id) {
+      // Показываем кнопки для отметки, но не кнопку "Добавить в базу"
+      if (info.isSeries) {
+        const storageData = await chrome.storage.local.get(['has_notifications_access']);
+        const hasNotificationsAccess = storageData.has_notifications_access || false;
+        
+        if (!hasNotificationsAccess) {
+          const noAccessMsg = document.createElement('div');
+          noAccessMsg.style.cssText = 'padding: 12px; background: rgba(255,255,255,0.1); border-radius: 6px; text-align: center; font-size: 13px; margin-bottom: 8px;';
+          noAccessMsg.innerHTML = '🔒 Для отметки серий нужна подписка "Уведомления" или "Пакетная"<br><small style="opacity: 0.8;">Доступно только добавление в базу</small>';
+          container.appendChild(noAccessMsg);
+        } else {
+          const markCurrentBtn = document.createElement('button');
+          markCurrentBtn.textContent = `✅ Отметить серию ${info.season || '?'}×${info.episode || '?'}`;
+          markCurrentBtn.style.cssText = `
+            width: 100%;
+            padding: 10px;
+            background: white;
+            color: #667eea;
+            border: none;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-bottom: 8px;
+          `;
+          markCurrentBtn.addEventListener('click', () => handleMarkEpisode(info, filmData, false));
+          container.appendChild(markCurrentBtn);
+        }
+      }
+      return; // Не показываем "Добавить в базу" если статус неизвестен
+    }
     
     if (!isInDatabase) {
       // Фильм/сериал не в базе - показываем кнопку "Добавить в базу"
@@ -1255,17 +1292,43 @@
           }
         } catch (fetchError) {
           console.error('[STREAMING] Ошибка fetch film-info:', fetchError);
-          // Если есть kp_id в кэше, но запрос упал - все равно показываем виджет с kp_id
-          // Пользователь сможет добавить фильм вручную или отметить серию
+          // Если есть kp_id в кэше, но запрос упал - пробуем еще раз
           if (kpId) {
-            filmData = {
-              kp_id: kpId,
-              film_id: null, // Не знаем film_id из-за ошибки, но kp_id есть
-              watched: false,
-              rated: false,
-              has_unwatched_before: false
-            };
-            console.log('[STREAMING] Продолжаем с kp_id несмотря на ошибку film-info:', kpId);
+            console.log('[STREAMING] Повторная попытка запроса film-info для kp_id:', kpId);
+            try {
+              // Повторный запрос с таймаутом
+              const retryResponse = await apiRequest('GET', `/api/extension/film-info?kp_id=${kpId}&chat_id=${data.linked_chat_id}&user_id=${data.linked_user_id}${info.season && info.episode ? `&season=${info.season}&episode=${info.episode}` : ''}`);
+              if (retryResponse.ok) {
+                const retryResult = await retryResponse.json();
+                if (retryResult.success) {
+                  const filmId = (retryResult.film_id !== undefined && retryResult.film_id !== null) ? retryResult.film_id : null;
+                  filmData = {
+                    kp_id: kpId,
+                    film_id: filmId,
+                    watched: retryResult.watched || false,
+                    rated: retryResult.rated || false,
+                    has_unwatched_before: retryResult.has_unwatched_before || false
+                  };
+                  console.log('[STREAMING] Повторный запрос успешен, film_id:', filmId);
+                } else {
+                  throw new Error(retryResult.error || 'Unknown error');
+                }
+              } else {
+                throw new Error(`HTTP ${retryResponse.status}`);
+              }
+            } catch (retryError) {
+              console.error('[STREAMING] Повторный запрос тоже упал:', retryError);
+              // Если повторный запрос тоже упал, показываем виджет с kp_id, но БЕЗ кнопки "Добавить в базу"
+              // Предполагаем, что фильм может быть в базе, но мы не можем это проверить
+              filmData = {
+                kp_id: kpId,
+                film_id: undefined, // undefined означает "неизвестно", null означает "точно нет"
+                watched: false,
+                rated: false,
+                has_unwatched_before: false
+              };
+              console.log('[STREAMING] Продолжаем с kp_id, но film_id неизвестен:', kpId);
+            }
           } else {
             // Нет kp_id - не показываем виджет
             console.log('[STREAMING] Пропуск: нет kp_id и ошибка film-info');
@@ -1370,7 +1433,45 @@
           }
         } catch (searchError) {
           console.error('[STREAMING] Ошибка fetch search-film-by-keyword:', searchError);
-          // Продолжаем с базовыми данными
+          // Если поиск не удался, пробуем еще раз с другим форматом
+          if (info.title && info.year) {
+            try {
+              console.log('[STREAMING] Повторная попытка поиска с другим форматом');
+              const retryKeyword = `${info.title} ${info.year}`.trim();
+              const retryResponse = await apiRequest('GET', `/api/extension/search-film-by-keyword?keyword=${encodeURIComponent(retryKeyword)}&year=${info.year || ''}&type=${info.isSeries ? 'TV_SERIES' : 'FILM'}`);
+              if (retryResponse.ok) {
+                const retryResult = await retryResponse.json();
+                if (retryResult.success && retryResult.kp_id) {
+                  kpId = retryResult.kp_id;
+                  console.log('[STREAMING] Повторный поиск успешен, kp_id:', kpId);
+                  // Сохраняем в кэш
+                  await saveToLocalCache({ ...info, kp_id: kpId });
+                  // Теперь запрашиваем film-info
+                  const filmResponse = await apiRequest('GET', `/api/extension/film-info?kp_id=${kpId}&chat_id=${data.linked_chat_id}&user_id=${data.linked_user_id}${info.season && info.episode ? `&season=${info.season}&episode=${info.episode}` : ''}`);
+                  if (filmResponse.ok) {
+                    const filmResult = await filmResponse.json();
+                    if (filmResult.success) {
+                      const filmId = (filmResult.film_id !== undefined && filmResult.film_id !== null) ? filmResult.film_id : null;
+                      filmData = {
+                        kp_id: kpId,
+                        film_id: filmId,
+                        watched: filmResult.watched || false,
+                        rated: filmResult.rated || false,
+                        has_unwatched_before: filmResult.has_unwatched_before || false
+                      };
+                    }
+                  }
+                }
+              }
+            } catch (retryError) {
+              console.error('[STREAMING] Повторный поиск тоже упал:', retryError);
+            }
+          }
+          // Если все равно не нашли - не показываем виджет
+          if (!kpId) {
+            console.log('[STREAMING] Пропуск: фильм не найден, нет kp_id');
+            return;
+          }
         }
       }
       
