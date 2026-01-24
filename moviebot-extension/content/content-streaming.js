@@ -910,7 +910,7 @@
       
       if (kpId) {
         // Нашли в кэше - получаем данные о фильме
-        const url = `${API_BASE_URL}/api/extension/film-info?kp_id=${kpId}&chat_id=${data.linked_chat_id}&user_id=${data.linked_user_id}`;
+        let url = `${API_BASE_URL}/api/extension/film-info?kp_id=${kpId}&chat_id=${data.linked_chat_id}&user_id=${data.linked_user_id}`;
         if (info.season && info.episode) {
           url += `&season=${info.season}&episode=${info.episode}`;
         }
