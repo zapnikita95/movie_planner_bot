@@ -2588,8 +2588,18 @@ def create_web_app(bot):
             user_id = data.get('user_id')
             kp_id = data.get('kp_id')
             film_id = data.get('film_id')
-            season = data.get('season', type=int)
-            episode = data.get('episode', type=int)
+            season = data.get('season')
+            if season is not None:
+                try:
+                    season = int(season)
+                except (ValueError, TypeError):
+                    season = None
+            episode = data.get('episode')
+            if episode is not None:
+                try:
+                    episode = int(episode)
+                except (ValueError, TypeError):
+                    episode = None
             mark_all_previous = data.get('mark_all_previous', False)
             online_link = data.get('online_link')
             

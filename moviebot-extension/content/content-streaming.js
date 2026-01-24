@@ -1126,11 +1126,20 @@
   // Основная логика проверки и показа плашки
   // ────────────────────────────────────────────────
   async function checkAndShowOverlay() {
+    // Удаляем overlay при смене URL
+    removeOverlay();
+    
     const info = getContentInfo();
     console.log('[STREAMING] getContentInfo результат:', info);
     
     if (!info || !info.title) {
       console.log('[STREAMING] Пропуск: нет info или title');
+      return;
+    }
+    
+    // Для сериалов: показываем виджет ТОЛЬКО если определены сезон и серия
+    if (info.isSeries && (!info.season || !info.episode)) {
+      console.log('[STREAMING] Пропуск: сериал, но нет сезона/серии');
       return;
     }
     
@@ -1308,6 +1317,8 @@
     
     history.pushState = function(...args) {
       originalPushState.apply(history, args);
+      // Удаляем overlay при смене URL
+      removeOverlay();
       setTimeout(() => {
         checkAndShowOverlay();
       }, 1000);
@@ -1315,12 +1326,16 @@
     
     history.replaceState = function(...args) {
       originalReplaceState.apply(history, args);
+      // Удаляем overlay при смене URL
+      removeOverlay();
       setTimeout(() => {
         checkAndShowOverlay();
       }, 1000);
     };
     
     window.addEventListener('popstate', () => {
+      // Удаляем overlay при смене URL
+      removeOverlay();
       setTimeout(() => {
         checkAndShowOverlay();
       }, 1000);

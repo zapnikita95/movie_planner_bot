@@ -750,6 +750,30 @@ def show_film_info_with_buttons(
                 markup.add(InlineKeyboardButton("👁️ Просмотрено", callback_data=f"mark_watched_from_description_kp:{int(kp_id)}"))
         
         logger.info(f"[BUTTONS] film_id={film_id}, has_plan={has_plan}, watched={watched}, has_sources={has_sources}")
+        
+        # Инициализируем online_link ДО использования (ВАЖНО: до всех проверок кнопок!)
+        online_link = None
+        if film_id:
+            try:
+                conn_online = get_db_connection()
+                cursor_online = get_db_cursor()
+                try:
+                    with db_lock:
+                        cursor_online.execute("SELECT online_link FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
+                        online_row = cursor_online.fetchone()
+                        if online_row:
+                            online_link = online_row.get('online_link') if isinstance(online_row, dict) else (online_row[0] if len(online_row) > 0 else None)
+                finally:
+                    try:
+                        cursor_online.close()
+                    except:
+                        pass
+                    try:
+                        conn_online.close()
+                    except:
+                        pass
+            except Exception as e:
+                logger.warning(f"[SHOW FILM INFO] Ошибка получения online_link: {e}", exc_info=True)
 
         # Если уже запланирован — не добавляем кнопку планирования
         if has_plan:
@@ -940,30 +964,7 @@ def show_film_info_with_buttons(
 
         logger.info(f"[SHOW FILM INFO] Обработка сериала завершена")
         
-        # Проверяем наличие online_link для замены кнопки "Выбрать онлайн-кинотеатр" на прямую ссылку
-        # Инициализируем ДО использования в кнопках (строка 793)
-        online_link = None
-        if film_id:  # Убрали проверку existing, т.к. film_id уже получен выше
-            try:
-                conn_online = get_db_connection()
-                cursor_online = get_db_cursor()
-                try:
-                    with db_lock:
-                        cursor_online.execute("SELECT online_link FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
-                        online_row = cursor_online.fetchone()
-                        if online_row:
-                            online_link = online_row.get('online_link') if isinstance(online_row, dict) else (online_row[0] if len(online_row) > 0 else None)
-                finally:
-                    try:
-                        cursor_online.close()
-                    except:
-                        pass
-                    try:
-                        conn_online.close()
-                    except:
-                        pass
-            except Exception as e:
-                logger.warning(f"[SHOW FILM INFO] Ошибка получения online_link: {e}", exc_info=True)
+        # online_link уже инициализирован выше (до использования в кнопках)
         
         logger.info(f"[SHOW FILM INFO] ===== ФИНАЛЬНАЯ ПОДГОТОВКА =====")
         # Проверяем длину текста перед отправкой
