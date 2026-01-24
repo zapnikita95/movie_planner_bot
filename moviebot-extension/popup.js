@@ -2,6 +2,28 @@
 
 const API_BASE_URL = 'https://web-production-3921c.up.railway.app';
 
+function streamingApiRequest(method, url, body = null) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage({
+      action: 'streaming_api_request',
+      method: method || 'GET',
+      url,
+      headers: { 'Content-Type': 'application/json' },
+      body: body ?? null
+    }, (r) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      if (!r) {
+        reject(new Error('Нет ответа от расширения'));
+        return;
+      }
+      resolve({ ok: r.status >= 200 && r.status < 300, status: r.status, data: r.data || {}, error: r.error });
+    });
+  });
+}
+
 let chatId = null;
 let userId = null;
 let currentFilm = null;
@@ -36,15 +58,19 @@ function resetExtensionState() {
     if (actionsEl) actionsEl.innerHTML = '';
   }
   
-  // Скрываем результаты поиска
   const searchResults = document.getElementById('search-results');
   if (searchResults) searchResults.classList.add('hidden');
   
-  // Скрываем секцию поиска (она показывается ТОЛЬКО после определения, что фильм не опознался)
   const searchSection = document.getElementById('search-section');
   if (searchSection) {
     searchSection.classList.add('hidden');
     searchSection.style.display = 'none';
+  }
+  
+  const streamingMarkLast = document.getElementById('streaming-mark-last');
+  if (streamingMarkLast) {
+    streamingMarkLast.classList.add('hidden');
+    streamingMarkLast.style.display = 'none';
   }
   
   // Очищаем поле поиска
@@ -309,8 +335,12 @@ async function detectAndLoadFilm(url, urlChanged = true) {
     planningForm.classList.add('hidden');
     planningForm.style.display = 'none';
   }
+  const streamingMarkLastEl = document.getElementById('streaming-mark-last');
+  if (streamingMarkLastEl) {
+    streamingMarkLastEl.classList.add('hidden');
+    streamingMarkLastEl.style.display = 'none';
+  }
   
-  // Получаем элемент filmInfo один раз для всей функции
   const filmInfo = document.getElementById('film-info');
   
   try {
@@ -429,22 +459,94 @@ async function detectAndLoadFilm(url, urlChanged = true) {
       }
       return;
     }
-    
-    // Если не распознан - скрываем информацию о фильме
+
+    const streamingHosts = ['tvoe.live', 'ivi.ru', 'okko.tv', 'kinopoisk.ru', 'hd.kinopoisk.ru', 'premier.one', 'wink.ru', 'start.ru', 'amediateka.ru', 'rezka.ag', 'rezka.ad', 'hdrezka', 'lordfilm', 'allserial', 'boxserial'];
+    let hostname = '';
+    try {
+      hostname = new URL(url).hostname.toLowerCase();
+    } catch (_) {}
+    const isStreaming = streamingHosts.some(h => hostname.includes(h));
+
+    if (isStreaming && chatId && userId) {
+      try {
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tabs && tabs[0]) {
+          const pageInfo = await new Promise((resolve) => {
+            chrome.tabs.sendMessage(tabs[0].id, { action: 'get_streaming_page_info' }, (r) => {
+              if (chrome.runtime.lastError) resolve(null);
+              else resolve(r || null);
+            });
+          });
+          if (pageInfo && pageInfo.title) {
+            const ok = !pageInfo.isSeries || (pageInfo.season != null && pageInfo.episode != null);
+            if (ok) {
+              await loadFromStreamingPage(pageInfo);
+              return;
+            }
+          }
+        }
+      } catch (e) {
+        console.log('[POPUP] get_streaming_page_info:', e);
+      }
+    }
+
     if (filmInfo) {
       filmInfo.classList.add('hidden');
       filmInfo.style.display = 'none';
     }
+    let showMarkLast = false;
+    if (isStreaming && chatId && userId) {
+      const data = await chrome.storage.local.get(['movieplanner_last_streaming_overlay']);
+      const last = data.movieplanner_last_streaming_overlay;
+      if (last && last.hostname === hostname && last.season != null && last.episode != null && last.kp_id) {
+        showMarkLast = true;
+        const wrap = document.getElementById('streaming-mark-last');
+        const label = document.getElementById('streaming-mark-last-label');
+        const btn = document.getElementById('streaming-mark-last-btn');
+        if (wrap && label && btn) {
+          label.textContent = `${last.title || 'Сериал'} — ${last.season} сезон, ${last.episode} серия`;
+          wrap.classList.remove('hidden');
+          wrap.style.display = '';
+          btn.replaceWith(btn.cloneNode(true));
+          const newBtn = document.getElementById('streaming-mark-last-btn');
+          newBtn.addEventListener('click', async () => {
+            try {
+              const r = await fetch(`${API_BASE_URL}/api/extension/mark-episode`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  chat_id: chatId,
+                  user_id: userId,
+                  kp_id: last.kp_id,
+                  film_id: last.film_id,
+                  season: last.season,
+                  episode: last.episode
+                })
+              });
+              const j = await r.json();
+              if (j.success) {
+                label.textContent = 'Отмечено ✓';
+                newBtn.disabled = true;
+              }
+            } catch (e) {
+              console.error('Ошибка отметки серии:', e);
+            }
+          });
+        }
+      }
+    }
+    if (!showMarkLast) {
+      const wrap = document.getElementById('streaming-mark-last');
+      if (wrap) { wrap.classList.add('hidden'); wrap.style.display = 'none'; }
+    }
     
-    // Показываем поиск ТОЛЬКО после того, как стало понятно, что фильм не опознался
-    // Даем задержку, чтобы пользователь увидел, что загрузка завершена
     setTimeout(() => {
       const searchSection = document.getElementById('search-section');
       if (searchSection) {
         searchSection.classList.remove('hidden');
         searchSection.style.display = '';
       }
-    }, 500); // Увеличил задержку до 500ms для надежности
+    }, 500);
   } catch (error) {
     console.error('Ошибка определения фильма:', error);
     if (filmInfo) {
@@ -730,6 +832,128 @@ async function loadFilmByKeyword(keyword, year, source) {
     const yearEl = document.getElementById('film-year');
     if (titleEl) titleEl.textContent = 'Ошибка поиска';
     if (yearEl) yearEl.textContent = 'Проверьте подключение к интернету';
+  }
+}
+
+async function loadFromStreamingPage(info) {
+  const filmInfo = document.getElementById('film-info');
+  const titleEl = document.getElementById('film-title');
+  const yearEl = document.getElementById('film-year');
+  if (filmInfo) {
+    filmInfo.classList.remove('hidden');
+    filmInfo.style.display = '';
+  }
+  if (titleEl) titleEl.textContent = 'Ищем на странице...';
+  if (yearEl) yearEl.textContent = '';
+
+  let baseTitle = (info.title || '').replace(/\s*[—\-].*$/, '').replace(/\s*\([^)]*[Чч]асть\s*\d+[^)]*\)\s*$/i, '').replace(/\s*\([^)]*[Сс]езон[^)]*\)\s*$/i, '').replace(/\s+серия\s+\d+$/i, '').trim();
+  baseTitle = baseTitle || info.title;
+  const keyword = baseTitle;
+  const year = info.year || '';
+  const type = info.isSeries ? 'TV_SERIES' : 'FILM';
+  const searchUrl = `${API_BASE_URL}/api/extension/search-film-by-keyword?keyword=${encodeURIComponent(keyword)}&type=${type}${year ? `&year=${encodeURIComponent(year)}` : ''}`;
+
+  try {
+    let searchRes;
+    try {
+      searchRes = await streamingApiRequest('GET', searchUrl);
+    } catch (e) {
+      if (titleEl) titleEl.textContent = 'Ошибка загрузки';
+      if (yearEl) yearEl.textContent = (e && e.message) || 'Проверьте подключение';
+      return;
+    }
+    const searchJson = searchRes.data || {};
+    if (!searchJson.success || !searchJson.kp_id) {
+      if (titleEl) titleEl.textContent = 'Не найден';
+      if (yearEl) yearEl.textContent = 'Попробуйте другую страницу';
+      return;
+    }
+
+    let filmUrl = `${API_BASE_URL}/api/extension/film-info?kp_id=${searchJson.kp_id}&chat_id=${chatId}&user_id=${userId}`;
+    if (info.season != null && info.episode != null) filmUrl += `&season=${info.season}&episode=${info.episode}`;
+    let filmRes;
+    try {
+      filmRes = await streamingApiRequest('GET', filmUrl);
+    } catch (e) {
+      if (titleEl) titleEl.textContent = 'Ошибка загрузки';
+      if (yearEl) yearEl.textContent = (e && e.message) || 'Проверьте подключение';
+      return;
+    }
+    const filmJson = filmRes.data || {};
+    if (!filmJson.success || !filmJson.film) {
+      if (titleEl) titleEl.textContent = 'Ошибка загрузки';
+      if (yearEl) yearEl.textContent = filmJson.error || filmRes.error || '';
+      return;
+    }
+
+    try {
+      displayFilmInfo(filmJson.film, filmJson);
+    } catch (e) {
+      console.error('Ошибка displayFilmInfo:', e);
+      if (titleEl) titleEl.textContent = 'Ошибка отображения';
+      if (yearEl) yearEl.textContent = '';
+      return;
+    }
+
+    const actionsEl = document.getElementById('film-actions');
+    if (actionsEl) {
+      if (info.isSeries && info.season != null && info.episode != null) {
+        const markBtn = document.createElement('button');
+        markBtn.textContent = `Отметить серию ${info.season}×${info.episode}`;
+        markBtn.className = 'btn btn-primary';
+        markBtn.style.marginTop = '8px';
+        const kpId = searchJson.kp_id;
+        const filmId = filmJson.film_id;
+        markBtn.addEventListener('click', async () => {
+          markBtn.disabled = true;
+          try {
+            const r = await streamingApiRequest('POST', `${API_BASE_URL}/api/extension/mark-episode`, {
+              chat_id: chatId,
+              user_id: userId,
+              kp_id: kpId,
+              film_id: filmId,
+              season: info.season,
+              episode: info.episode
+            });
+            if (r.data && r.data.success) markBtn.textContent = 'Отмечено ✓';
+            else markBtn.disabled = false;
+          } catch (e) {
+            console.error('Ошибка отметки серии:', e);
+            markBtn.disabled = false;
+          }
+        });
+        actionsEl.appendChild(markBtn);
+      } else if (!info.isSeries) {
+        const markBtn = document.createElement('button');
+        markBtn.textContent = 'Отметить фильм просмотренным';
+        markBtn.className = 'btn btn-primary';
+        markBtn.style.marginTop = '8px';
+        const kpId = searchJson.kp_id;
+        const filmId = filmJson.film_id;
+        markBtn.addEventListener('click', async () => {
+          markBtn.disabled = true;
+          try {
+            const r = await streamingApiRequest('POST', `${API_BASE_URL}/api/extension/mark-film-watched`, {
+              chat_id: chatId,
+              user_id: userId,
+              kp_id: kpId,
+              film_id: filmId,
+              online_link: info.url || undefined
+            });
+            if (r.data && r.data.success) markBtn.textContent = 'Отмечено ✓';
+            else markBtn.disabled = false;
+          } catch (e) {
+            console.error('Ошибка отметки фильма:', e);
+            markBtn.disabled = false;
+          }
+        });
+        actionsEl.appendChild(markBtn);
+      }
+    }
+  } catch (err) {
+    console.error('Ошибка loadFromStreamingPage:', err);
+    if (titleEl) titleEl.textContent = 'Ошибка загрузки';
+    if (yearEl) yearEl.textContent = (err && err.message) || 'Попробуйте позже';
   }
 }
 

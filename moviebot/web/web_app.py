@@ -1958,8 +1958,8 @@ def create_web_app(bot):
             
             is_series = False
             if response.status_code == 200:
-                data = response.json()
-                api_type = data.get('type', '').upper()
+                api_data = response.json()
+                api_type = api_data.get('type', '').upper()
                 if api_type in ['TV_SERIES', 'MINI_SERIES']:
                     is_series = True
             
@@ -2030,15 +2030,6 @@ def create_web_app(bot):
                 resp = jsonify({"success": True, "film_id": film_id})
                 # after_request hook автоматически добавит CORS заголовки
                 return resp
-            finally:
-                try:
-                    cursor.close()
-                except:
-                    pass
-                try:
-                    conn.close()
-                except:
-                    pass
         except Exception as e:
             logger.error(f"Ошибка добавления фильма в базу: {str(e)}", exc_info=True)
             resp = jsonify({"success": False, "error": f"server error: {str(e)}"})
@@ -2131,15 +2122,6 @@ def create_web_app(bot):
                 resp = jsonify({"success": True})
                 # after_request hook автоматически добавит CORS заголовки
                 return resp
-            finally:
-                try:
-                    cursor.close()
-                except:
-                    pass
-                try:
-                    conn.close()
-                except:
-                    pass
         except Exception as e:
             logger.error("Ошибка удаления фильма из базы", exc_info=True)
             resp = jsonify({"success": False, "error": "server error"})
@@ -2565,18 +2547,17 @@ def create_web_app(bot):
             
             headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
             
-            # Используем тот же формат, что и в боте: просто название без года
-            # Год передаем отдельно и фильтруем результаты
-            search_query = keyword.strip()
+            # Как в боте /search и Letterboxd fallback: "название год" даёт лучшие результаты
+            base = keyword.strip()
+            if year is not None:
+                search_query = f"{base} {year}".strip()
+            else:
+                search_query = base
             
-            # Используем API v2.1 для поиска
             url = "https://kinopoiskapiunofficial.tech/api/v2.1/films/search-by-keyword"
-            params = {
-                'keyword': search_query,
-                'page': 1
-            }
+            params = {'keyword': search_query, 'page': 1}
             
-            logger.info(f"[EXTENSION API] Поиск фильма: keyword={search_query}, year={year}, type={search_type}")
+            logger.info(f"[EXTENSION API] Поиск фильма: keyword={search_query} (base={base}, year={year}), type={search_type}")
             
             response = requests.get(url, headers=headers, params=params, timeout=15)
             
@@ -2757,15 +2738,6 @@ def create_web_app(bot):
                     logger.error(f"[EXTENSION API] Ошибка отправки сообщения в бота: {e}", exc_info=True)
                 
                 return jsonify({"success": True})
-            finally:
-                try:
-                    cursor.close()
-                except:
-                    pass
-                try:
-                    conn.close()
-                except:
-                    pass
         except Exception as e:
             logger.error(f"[EXTENSION API] Ошибка отметки серии: {e}", exc_info=True)
             error_msg = str(e) if e else "server error"
@@ -2796,27 +2768,26 @@ def create_web_app(bot):
             cursor = get_db_cursor()
             
             try:
-                # Если film_id не передан, ищем его
                 if not film_id:
-                    cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, str(kp_id)))
-                    row = cursor.fetchone()
+                    with db_lock:
+                        cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, str(kp_id)))
+                        row = cursor.fetchone()
                     if row:
                         film_id = row.get('id') if isinstance(row, dict) else row[0]
                     else:
                         return jsonify({"success": False, "error": "film not found"}), 404
                 
-                # Обновляем watched и online_link
                 with db_lock:
                     if online_link:
                         cursor.execute("""
                             UPDATE movies 
-                            SET watched = TRUE, online_link = %s 
+                            SET watched = 1, online_link = %s 
                             WHERE id = %s AND chat_id = %s
                         """, (online_link, film_id, chat_id))
                     else:
                         cursor.execute("""
                             UPDATE movies 
-                            SET watched = TRUE 
+                            SET watched = 1 
                             WHERE id = %s AND chat_id = %s
                         """, (film_id, chat_id))
                     conn.commit()
@@ -2829,15 +2800,6 @@ def create_web_app(bot):
                     logger.error(f"[EXTENSION API] Ошибка отправки сообщения в бота: {e}", exc_info=True)
                 
                 return jsonify({"success": True})
-            finally:
-                try:
-                    cursor.close()
-                except:
-                    pass
-                try:
-                    conn.close()
-                except:
-                    pass
         except Exception as e:
             logger.error(f"[EXTENSION API] Ошибка отметки фильма: {e}", exc_info=True)
             return jsonify({"success": False, "error": "server error"}), 500
@@ -2919,15 +2881,6 @@ def create_web_app(bot):
                         logger.error(f"[EXTENSION API] Ошибка получения рекомендаций: {e}", exc_info=True)
                 
                 return jsonify({"success": True, "recommendations": recommendations_sent})
-            finally:
-                try:
-                    cursor.close()
-                except:
-                    pass
-                try:
-                    conn.close()
-                except:
-                    pass
         except Exception as e:
             logger.error(f"[EXTENSION API] Ошибка оценки фильма: {e}", exc_info=True)
             return jsonify({"success": False, "error": "server error"}), 500

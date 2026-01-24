@@ -66,6 +66,12 @@
   if (!supportedHosts.some(h => hostname.includes(h))) {
     return; // Сайт не поддерживается
   }
+
+  function storageLocal() {
+    try {
+      return (typeof chrome !== 'undefined' && chrome?.storage?.local) ? chrome.storage.local : null;
+    } catch (e) { return null; }
+  }
   
   // ────────────────────────────────────────────────
   // Конфигурации парсинга для каждого сайта
@@ -73,6 +79,10 @@
   const siteConfigs = {
     'tvoe.live': {
       isSeries: () => {
+        const btn = document.querySelector('#headNav > div > button:nth-child(2) > div');
+        const t = btn?.textContent?.trim() || '';
+        if (/О сериале/i.test(t)) return true;
+        if (/О фильме/i.test(t)) return false;
         const meta = document.querySelector('meta[name="description"]');
         return meta?.content?.includes('сериал') || false;
       },
@@ -117,21 +127,23 @@
         selector: 'title, meta[property="og:title"]',
         extract: (el) => {
           const text = el?.textContent || el?.content || '';
-          // Убираем лишний текст типа "Сериал ... смотреть онлайн все серии подряд в хорошем HD качестве"
           let cleanTitle = text.split(/[:|]/)[0]?.trim() || '';
-          // Убираем "Сериал" в начале, если есть
           cleanTitle = cleanTitle.replace(/^Сериал\s+/i, '');
-          // Убираем все после "смотреть" или "в хорошем"
           cleanTitle = cleanTitle.split(/\s+смотреть/i)[0]?.trim() || cleanTitle;
           cleanTitle = cleanTitle.split(/\s+в хорошем/i)[0]?.trim() || cleanTitle;
-          // Убираем сезон/серию из названия (например "1 сезон 2 серия")
           cleanTitle = cleanTitle.replace(/\s+\d+\s*сезон\s*\d+\s*серия/i, '').trim();
           cleanTitle = cleanTitle.replace(/\s+\d+\s*сезон/i, '').trim();
           cleanTitle = cleanTitle.replace(/\s+\d+\s*серия/i, '').trim();
-          // Убираем год в конце, если он есть (он будет в отдельном поле)
           cleanTitle = cleanTitle.replace(/\s+\d{4}\s*$/, '').trim();
           return cleanTitle || null;
         }
+      },
+      searchBaseTitle: (title) => {
+        if (!title) return null;
+        let base = title.replace(/\s*—\s*[^(]+(\s*\([^)]*\))?\s*$/i, '').trim();
+        base = base.replace(/\s*\([^)]*[Чч]асть\s*\d+[^)]*\)\s*$/i, '').trim();
+        base = base.replace(/\s*\([^)]*[Сс]езон\s*\d+[^)]*\)\s*$/i, '').trim();
+        return base || title;
       },
       year: {
         selector: '.paramsList__container a[href*="/movies/"], .paramsList__container a[href*="/series/"]',
@@ -149,22 +161,37 @@
     
     'okko.tv': {
       isSeries: () => {
+        const path = window.location.pathname || '';
+        if (path.includes('/serial/')) return true;
+        const meta = document.querySelector('meta[property="og:title"]');
+        const c = meta?.content || '';
+        if (/сезон|серии/i.test(c)) return true;
         const title = document.querySelector('title');
-        return title?.textContent?.includes('сезон') || title?.textContent?.includes('серии') || false;
+        return !!(title?.textContent?.includes('сезон') || title?.textContent?.includes('серии'));
       },
       title: {
-        selector: 'title',
-        extract: (el) => el?.textContent?.split(/[\(\[]/)[0]?.trim() || null
+        selector: 'meta[property="og:title"]',
+        extract: (el) => {
+          const c = (el?.content || '').trim();
+          const before = c.split(/\s+[Сс]езон\s*\d/i)[0]?.trim();
+          return before || c.split(/[\(\[]/)[0]?.trim() || null;
+        }
       },
       year: {
         selector: 'span[test-id="meta_release_date"]',
-        extract: (el) => el?.textContent?.split('-')[0]?.trim()
+        extract: (el) => {
+          const raw = el?.textContent?.trim() || '';
+          const y = raw.split('-')[0]?.trim();
+          return /^\d{4}$/.test(y) ? y : (raw.match(/\d{4}/)?.[0] || null);
+        }
       },
       seasonEpisode: {
-        selector: '[test-id="player_content_title"], h4[test-id="content_progress_title"]',
+        selector: '[test-id="player_content_title"], h4[test-id="content_progress_title"], span.RQ6wn_Q0, img[alt*="Сезон"]',
         extract: (el) => {
-          const t = el?.textContent?.trim() || '';
-          const m = t.match(/(\d+)\s*сезон.*?(\d+)\s*серия/i);
+          const t = (el?.textContent || el?.alt || '').trim();
+          let m = t.match(/(\d+)\s*сезон[.\s]*(\d+)\s*серия/i) || t.match(/сезон\s*(\d+)[.\s]*серия\s*(\d+)/i);
+          if (m) return { season: parseInt(m[1]), episode: parseInt(m[2]) };
+          m = t.match(/Сезон\s*(\d+)[.\s]*Серия\s*(\d+)/i);
           return m ? { season: parseInt(m[1]), episode: parseInt(m[2]) } : null;
         }
       }
@@ -187,10 +214,10 @@
         extract: (el) => el?.textContent?.match(/(\d{4})/)?.[1]
       },
       seasonEpisode: {
-        selector: '.styles_subtitle__PPaVH, .styles_extraInfo__A3zOn div',
+        selector: '.styles_subtitle__PPaVH, .styles_extraInfo__A3zOn div, [data-tid="ContentInfoItem"], .styles_info-item_subtitle__zFUmG, .ContentInfoItem_root__J1fBw span',
         extract: (el) => {
           const t = el?.textContent?.trim() || '';
-          const m = t.match(/(\d+)\s*сезон.*?(\d+)\s*серия/i);
+          const m = t.match(/(\d+)\s*сезон[.\s]*(\d+)\s*серия/i);
           return m ? { season: parseInt(m[1]), episode: parseInt(m[2]) } : null;
         }
       }
@@ -233,19 +260,30 @@
     
     'wink.ru': {
       isSeries: () => {
-        const title = document.querySelector('title');
-        return title?.textContent?.includes('сериал') || false;
+        const meta = document.querySelector('meta[property="og:title"]');
+        const t = meta?.content || document.querySelector('title')?.textContent || '';
+        return /сериал/i.test(t) || false;
       },
       title: {
-        selector: 'title',
+        selector: 'meta[property="og:title"]',
         extract: (el) => {
-          const text = el?.textContent || '';
-          return text.replace(/Плеер (?:сериал|фильм) /, '').split(/[,（(]/)[0]?.trim() || null;
+          const text = (el?.content || el?.getAttribute?.('content') || '').trim();
+          const m = text.match(/Плеер\s+(?:сериал|фильм)\s+(.+?)\s+серия\s+\d+/i);
+          if (m) return m[1].trim();
+          return text.replace(/Плеер\s+(?:сериал|фильм)\s+/i, '').split(/\s+серия\s+\d+/i)[0]?.trim()
+            || text.split(/[,(（]/)[0]?.replace(/Плеер\s+(?:сериал|фильм)\s+/i, '').trim() || null;
         }
       },
       year: {
-        selector: 'title',
-        extract: (el) => el?.textContent?.match(/(\d{4})/)?.[1]
+        selector: 'meta[property="og:title"]',
+        extract: (el) => {
+          const text = el?.content || el?.getAttribute?.('content') || '';
+          const m = text.match(/сезон\s*\d+\s*,\s*(\d{4})/i);
+          return m ? m[1] : (text.match(/(\d{4})/)?.[1] || null);
+        }
+      },
+      searchBaseTitle: (title) => {
+        return (title || '').replace(/\s+серия\s+\d+$/i, '').trim() || title;
       },
       seasonEpisode: {
         fromUrl: () => {
@@ -439,9 +477,58 @@
     return null;
   }
   
-  // ────────────────────────────────────────────────
-  // Парсинг информации о контенте
-  // ────────────────────────────────────────────────
+  function getUrlBase() {
+    const path = (window.location.pathname || '').replace(/\/$/, '');
+    if (hostname.includes('ivi.ru')) {
+      const m = path.match(/\/watch\/([^/]+)/);
+      return m ? `ivi:/watch/${m[1]}` : null;
+    }
+    if (hostname.includes('okko.tv')) {
+      const m = path.match(/\/serial\/([^/]+)/);
+      return m ? `okko:/serial/${m[1]}` : null;
+    }
+    if (hostname.includes('amediateka')) {
+      const m = path.match(/\/watch\/([^/]+)/);
+      return m ? `amediateka:/watch/${m[1]}` : null;
+    }
+    return null;
+  }
+
+  function isCatalogOrMainPage() {
+    const path = (window.location.pathname || '').replace(/\/$/, '') || '/';
+    if (hostname.includes('amediateka')) {
+      if (path === '' || path === '/') return true;
+      if (path === '/series' || path.startsWith('/series/')) return true;
+      return false;
+    }
+    if (hostname.includes('premier.one')) {
+      if (path.startsWith('/series') || path === '/movies' || path.startsWith('/movies')) return true;
+      if (!/\/show\/[^/]+\/season\/\d+\/episode\/\d+/.test(path)) return true;
+      return false;
+    }
+    if (hostname.includes('hd.kinopoisk')) {
+      if (path === '' || path === '/') {
+        const q = new URLSearchParams(window.location.search || '');
+        if (!q.has('continueWatching') && !q.has('playingContentId')) return true;
+      }
+      return false;
+    }
+    return false;
+  }
+  
+  function getSearchBaseTitle(info) {
+    const config = getSiteConfig();
+    const title = info?.title?.trim();
+    if (!title) return null;
+    if (config?.searchBaseTitle && typeof config.searchBaseTitle === 'function') {
+      return config.searchBaseTitle(title) || title;
+    }
+    let base = title.replace(/\s*—\s*[^(]+(\s*\([^)]*\))?\s*$/i, '').trim();
+    base = base.replace(/\s*\([^)]*[Чч]асть\s*\d+[^)]*\)\s*$/i, '').trim();
+    base = base.replace(/\s*\([^)]*[Сс]езон\s*\d+[^)]*\)\s*$/i, '').trim();
+    return base || title;
+  }
+  
   function getContentInfo() {
     const config = getSiteConfig();
     if (!config) return null;
@@ -451,49 +538,33 @@
     let seasonEpisode = null;
     let isSeries = false;
     
-    // Парсинг названия
     if (config.title?.selector) {
       const el = document.querySelector(config.title.selector);
-      if (el && config.title.extract) {
-        title = config.title.extract(el);
-      }
+      if (el && config.title.extract) title = config.title.extract(el);
     }
-    
-    // Парсинг года
     if (config.year?.selector) {
       const el = document.querySelector(config.year.selector);
-      if (el && config.year.extract) {
-        year = config.year.extract(el);
-      }
+      if (el && config.year.extract) year = config.year.extract(el);
     }
-    
-    // Парсинг сезона/серии
     if (config.seasonEpisode) {
-      if (config.seasonEpisode.fromUrl) {
-        seasonEpisode = config.seasonEpisode.fromUrl();
-      }
+      if (config.seasonEpisode.fromUrl) seasonEpisode = config.seasonEpisode.fromUrl();
       if (!seasonEpisode && config.seasonEpisode.selector) {
         const el = document.querySelector(config.seasonEpisode.selector);
-        if (el && config.seasonEpisode.extract) {
-          seasonEpisode = config.seasonEpisode.extract(el);
-        }
+        if (el && config.seasonEpisode.extract) seasonEpisode = config.seasonEpisode.extract(el);
       }
     }
+    if (typeof config.isSeries === 'function') isSeries = config.isSeries();
+    else isSeries = config.isSeries || !!seasonEpisode;
     
-    // Определение типа (сериал/фильм)
-    if (typeof config.isSeries === 'function') {
-      isSeries = config.isSeries();
-    } else {
-      isSeries = config.isSeries || !!seasonEpisode;
-    }
-    
+    const rawTitle = title || document.title.split(/[-|]/)[0].trim();
     return {
-      title: title || document.title.split(/[-|]/)[0].trim(),
+      title: rawTitle,
       year: year,
       season: seasonEpisode?.season || null,
       episode: seasonEpisode?.episode || null,
       isSeries: isSeries,
-      url: window.location.href
+      url: window.location.href,
+      url_base: getUrlBase()
     };
   }
   
@@ -509,11 +580,36 @@
   
   // Кэш локальных данных (последние 100 просмотров)
   const CACHE_KEY = 'movieplanner_streaming_cache';
+  const LAST_STREAMING_KEY = 'movieplanner_last_streaming_overlay';
   const MAX_CACHE_SIZE = 100;
   
-  async function getLocalCache() {
+  async function saveLastStreamingOverlay(info, filmData) {
+    if (!info || !filmData?.kp_id || !info.season || !info.episode) return;
+    const st = storageLocal();
+    if (!st) return;
     try {
-      const data = await chrome.storage.local.get([CACHE_KEY]);
+      await st.set({
+        [LAST_STREAMING_KEY]: {
+          hostname,
+          url: info.url,
+          title: info.title,
+          year: info.year,
+          season: info.season,
+          episode: info.episode,
+          kp_id: filmData.kp_id,
+          film_id: filmData.film_id
+        }
+      });
+    } catch (e) {
+      console.error('[STREAMING] Ошибка сохранения lastStreamingOverlay:', e);
+    }
+  }
+  
+  async function getLocalCache() {
+    const st = storageLocal();
+    if (!st) return [];
+    try {
+      const data = await st.get([CACHE_KEY]);
       return data[CACHE_KEY] || [];
     } catch (e) {
       console.error('[STREAMING] Ошибка получения кэша:', e);
@@ -522,15 +618,21 @@
   }
   
   async function saveToLocalCache(info, kpId) {
+    const st = storageLocal();
+    if (!st) return;
     try {
       const cache = await getLocalCache();
-      // Добавляем в начало
-      cache.unshift({ title: info.title, year: info.year, kp_id: kpId, timestamp: Date.now() });
-      // Оставляем только последние MAX_CACHE_SIZE записей
-      if (cache.length > MAX_CACHE_SIZE) {
-        cache.splice(MAX_CACHE_SIZE);
-      }
-      await chrome.storage.local.set({ [CACHE_KEY]: cache });
+      const year = (info.year != null && info.year !== '') ? String(info.year) : null;
+      cache.unshift({
+        title: info.title,
+        year: year,
+        kp_id: kpId,
+        url_base: info.url_base || null,
+        hostname: hostname,
+        timestamp: Date.now()
+      });
+      if (cache.length > MAX_CACHE_SIZE) cache.splice(MAX_CACHE_SIZE);
+      await st.set({ [CACHE_KEY]: cache });
     } catch (e) {
       console.error('[STREAMING] Ошибка сохранения в кэш:', e);
     }
@@ -539,11 +641,23 @@
   async function findInLocalCache(info) {
     try {
       const cache = await getLocalCache();
-      const match = cache.find(item => 
-        item.title?.toLowerCase() === info.title?.toLowerCase() && 
-        item.year === info.year
+      const year = (info.year != null && info.year !== '') ? String(info.year) : null;
+      const titleLower = (info.title || '').toLowerCase();
+      let match = cache.find(item =>
+        item.title?.toLowerCase() === titleLower && String(item.year || '') === String(year || '')
       );
-      return match?.kp_id || null;
+      if (match) return match.kp_id;
+      if (info.url_base && year) {
+        match = cache.find(item =>
+          item.url_base === info.url_base && item.hostname === hostname && String(item.year || '') === year
+        );
+        if (match) return match.kp_id;
+      }
+      if (info.url_base) {
+        match = cache.find(item => item.url_base === info.url_base && item.hostname === hostname);
+        if (match) return match.kp_id;
+      }
+      return null;
     } catch (e) {
       console.error('[STREAMING] Ошибка поиска в кэше:', e);
       return null;
@@ -660,6 +774,8 @@
       z-index: 999998;
       box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
       max-width: 320px;
+      max-height: 70vh;
+      overflow-y: auto;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       font-size: 14px;
       line-height: 1.4;
@@ -697,9 +813,11 @@
     
     overlayElement.style.cssText = initialStyle;
     
-    const titleText = info.isSeries 
-      ? `${info.title} ${info.year ? `(${info.year})` : ''} - ${info.season || '?'} сезон, ${info.episode || '?'} серия`
-      : `${info.title} ${info.year ? `(${info.year})` : ''}`;
+    let safeTitle = (info.title || '').replace(/\s*\(\d{4}\)\s*$/, '').trim();
+    const yearPart = info.year ? ` (${info.year})` : '';
+    const titleText = info.isSeries
+      ? `${safeTitle}${yearPart} - ${info.season || '?'} сезон, ${info.episode || '?'} серия`
+      : `${safeTitle}${yearPart}`;
     
     overlayElement.innerHTML = `
       <div style="margin-bottom: 12px;">
@@ -713,9 +831,9 @@
     document.body.appendChild(overlayElement);
     console.log('[STREAMING] Overlay добавлен в DOM:', overlayElement);
     
-    // Кнопка закрытия
-    overlayElement.querySelector('#mpp-close').addEventListener('click', (e) => {
+    overlayElement.querySelector('#mpp-close').addEventListener('click', async (e) => {
       e.stopPropagation();
+      await saveLastStreamingOverlay(currentInfo, currentFilmData);
       removeOverlay();
     });
     
@@ -802,8 +920,8 @@
       }
     });
     
-    // Рендерим кнопки
     await renderButtons(info, filmData);
+    await saveLastStreamingOverlay(info, filmData);
     console.log('[STREAMING] createOverlay завершен, renderButtons вызван');
   }
   
@@ -822,16 +940,15 @@
     // undefined означает "неизвестно" (ошибка API), null означает "точно нет в базе"
     const filmId = filmData?.film_id;
     const isInDatabase = filmId !== null && filmId !== undefined;
-    const isUnknown = filmId === undefined; // Не знаем статус из-за ошибки API
+    const isUnknown = filmId === undefined;
+    const showSeriesUi = !!(info.isSeries && (filmData?.is_series === undefined || filmData?.is_series === true));
     
-    console.log('[STREAMING] renderButtons: isInDatabase=', isInDatabase, 'isUnknown=', isUnknown, 'film_id=', filmId);
+    console.log('[STREAMING] renderButtons: isInDatabase=', isInDatabase, 'isUnknown=', isUnknown, 'film_id=', filmId, 'showSeriesUi=', showSeriesUi);
     
-    // Если статус неизвестен (ошибка API), но есть kp_id - показываем кнопки для отметки
-    // Предполагаем, что фильм может быть в базе
     if (isUnknown && filmData?.kp_id) {
-      // Показываем кнопки для отметки, но не кнопку "Добавить в базу"
-      if (info.isSeries) {
-        const storageData = await chrome.storage.local.get(['has_notifications_access']);
+      if (showSeriesUi) {
+        const st = storageLocal();
+        const storageData = st ? await st.get(['has_notifications_access']) : {};
         const hasNotificationsAccess = storageData.has_notifications_access || false;
         
         if (!hasNotificationsAccess) {
@@ -878,12 +995,11 @@
       addBtn.addEventListener('click', () => handleAddToDatabase(info, filmData));
       container.appendChild(addBtn);
     } else {
-      // Фильм/сериал в базе - проверяем подписку
-      const storageData = await chrome.storage.local.get(['has_notifications_access']);
+      const st = storageLocal();
+      const storageData = st ? await st.get(['has_notifications_access']) : {};
       const hasNotificationsAccess = storageData.has_notifications_access || false;
       
-      if (info.isSeries) {
-        // Сериал
+      if (showSeriesUi) {
         if (!hasNotificationsAccess) {
           // Нет подписки - показываем только информацию
           const noAccessMsg = document.createElement('div');
@@ -1017,7 +1133,9 @@
   // ────────────────────────────────────────────────
   async function handleAddToDatabase(info, filmData) {
     try {
-      const data = await chrome.storage.local.get(['linked_chat_id', 'linked_user_id']);
+      const st = storageLocal();
+      if (!st) { alert('Расширение: storage недоступен. Обновите страницу.'); return; }
+      const data = await st.get(['linked_chat_id', 'linked_user_id']);
       if (!data.linked_chat_id) {
         alert('Сначала привяжите аккаунт в расширении');
         return;
@@ -1062,7 +1180,9 @@
   
   async function handleMarkEpisode(info, filmData, markAllPrevious) {
     try {
-      const data = await chrome.storage.local.get(['linked_chat_id', 'linked_user_id']);
+      const st = storageLocal();
+      if (!st) { alert('Расширение: storage недоступен. Обновите страницу.'); return; }
+      const data = await st.get(['linked_chat_id', 'linked_user_id']);
       if (!data.linked_chat_id) {
         alert('Сначала привяжите аккаунт в расширении');
         return;
@@ -1103,7 +1223,9 @@
   
   async function handleMarkFilmWatched(info, filmData) {
     try {
-      const data = await chrome.storage.local.get(['linked_chat_id', 'linked_user_id']);
+      const st = storageLocal();
+      if (!st) { alert('Расширение: storage недоступен. Обновите страницу.'); return; }
+      const data = await st.get(['linked_chat_id', 'linked_user_id']);
       if (!data.linked_chat_id) {
         alert('Сначала привяжите аккаунт в расширении');
         return;
@@ -1142,7 +1264,9 @@
   
   async function handleRating(info, filmData, rating) {
     try {
-      const data = await chrome.storage.local.get(['linked_chat_id', 'linked_user_id']);
+      const st = storageLocal();
+      if (!st) { alert('Расширение: storage недоступен. Обновите страницу.'); return; }
+      const data = await st.get(['linked_chat_id', 'linked_user_id']);
       if (!data.linked_chat_id) {
         alert('Сначала привяжите аккаунт в расширении');
         return;
@@ -1200,12 +1324,13 @@
   // Основная логика проверки и показа плашки
   // ────────────────────────────────────────────────
   async function checkAndShowOverlay() {
-    // Удаляем overlay при смене URL
     removeOverlay();
-    
+    if (isCatalogOrMainPage()) {
+      console.log('[STREAMING] Пропуск: каталог или главная, не отправляем запросы');
+      return;
+    }
     const info = getContentInfo();
     console.log('[STREAMING] getContentInfo результат:', info);
-    
     if (!info || !info.title) {
       console.log('[STREAMING] Пропуск: нет info или title');
       return;
@@ -1239,25 +1364,25 @@
     }
     
     try {
-      const data = await chrome.storage.local.get(['linked_chat_id', 'linked_user_id', 'has_notifications_access']);
+      const st = storageLocal();
+      if (!st) return;
+      const data = await st.get(['linked_chat_id', 'linked_user_id', 'has_notifications_access']);
       if (!data.linked_chat_id) {
         return; // Пользователь не привязан
       }
       
-      // Проверяем подписку для функционала отметки серий (если еще не проверяли)
       if (data.has_notifications_access === undefined) {
         try {
           const subResponse = await apiRequest('GET', `/api/extension/check-subscription?chat_id=${data.linked_chat_id}&user_id=${data.linked_user_id}`);
           if (subResponse.ok) {
             const subResult = await subResponse.json();
             if (subResult.success) {
-              await chrome.storage.local.set({ has_notifications_access: subResult.has_notifications_access || false });
+              await st.set({ has_notifications_access: subResult.has_notifications_access || false });
               data.has_notifications_access = subResult.has_notifications_access || false;
             }
           }
         } catch (subErr) {
           console.error('[STREAMING] Ошибка проверки подписки:', subErr);
-          // Продолжаем работу, но без функционала отметки серий
           data.has_notifications_access = false;
         }
       }
@@ -1292,9 +1417,10 @@
                 watched: result.watched || false,
                 rated: result.rated || false,
                 has_unwatched_before: result.has_unwatched_before || false,
-                current_episode_watched: result.current_episode_watched || false
+                current_episode_watched: result.current_episode_watched || false,
+                is_series: !!result.film?.is_series
               };
-              console.log('[STREAMING] filmData после парсинга:', filmData, 'film_id из result:', result.film_id);
+              console.log('[STREAMING] filmData после парсинга:', filmData);
             } else {
               console.error('[STREAMING] API вернул success: false:', result);
             }
@@ -1319,7 +1445,8 @@
                     watched: retryResult.watched || false,
                     rated: retryResult.rated || false,
                     has_unwatched_before: retryResult.has_unwatched_before || false,
-                    current_episode_watched: retryResult.current_episode_watched || false
+                    current_episode_watched: retryResult.current_episode_watched || false,
+                    is_series: !!retryResult.film?.is_series
                   };
                   console.log('[STREAMING] Повторный запрос успешен, film_id:', filmId);
                 } else {
@@ -1338,7 +1465,8 @@
                 watched: false,
                 rated: false,
                 has_unwatched_before: false,
-                current_episode_watched: false
+                current_episode_watched: false,
+                is_series: true
               };
               console.log('[STREAMING] Продолжаем с kp_id, но film_id неизвестен:', kpId);
             }
@@ -1349,143 +1477,56 @@
           }
         }
       } else {
-        // Не нашли в кэше - ищем через API
+        const searchType = info.isSeries ? 'TV_SERIES' : 'FILM';
+        const baseTitle = (getSearchBaseTitle(info) || info.title || '').trim();
+        const yearParam = info.year ? `&year=${info.year}` : '';
+        const searchKeyword = baseTitle;
+        console.log('[STREAMING] Поиск (название + год, как /search и Letterboxd):', { keyword: searchKeyword, year: info.year, type: searchType });
+        async function doSearch(keyw, yParam) {
+          try {
+            const r = await apiRequest('GET', `/api/extension/search-film-by-keyword?keyword=${encodeURIComponent(keyw)}${yParam}&type=${searchType}`);
+            if (!r.ok) return null;
+            const j = await r.json();
+            return (j.success && j.kp_id) ? j : null;
+          } catch (_) {
+            return null;
+          }
+        }
+        function buildFilmData(sr, fr) {
+          const fid = (fr?.film_id != null) ? fr.film_id : null;
+          const isSer = !!(fr?.film?.is_series ?? sr?.film?.is_series);
+          return {
+            kp_id: kpId,
+            film_id: fid,
+            watched: fr?.watched || false,
+            rated: fr?.rated || false,
+            has_unwatched_before: fr?.has_unwatched_before || false,
+            current_episode_watched: fr?.current_episode_watched || false,
+            is_series: isSer
+          };
+        }
         try {
-          // Используем тот же формат, что и в боте: просто название, год передаем отдельно
-          const searchKeyword = info.title.trim();
-          const searchType = info.isSeries ? 'TV_SERIES' : 'FILM';
-          const yearParam = info.year ? `&year=${info.year}` : '';
-          const searchUrl = `${API_BASE_URL}/api/extension/search-film-by-keyword?keyword=${encodeURIComponent(searchKeyword)}${yearParam}&type=${searchType}`;
-          
-          console.log('[STREAMING] Поиск фильма:', { searchKeyword, searchType, year: info.year, url: searchUrl });
-          
-          const searchResponse = await apiRequest('GET', `/api/extension/search-film-by-keyword?keyword=${encodeURIComponent(searchKeyword)}${yearParam}&type=${searchType}`);
-          
-          console.log('[STREAMING] Ответ поиска:', { status: searchResponse.status, ok: searchResponse.ok });
-          
-          if (searchResponse.ok) {
-            const searchResult = await searchResponse.json();
-            console.log('[STREAMING] Результат поиска:', searchResult);
-            if (searchResult.success && searchResult.kp_id) {
-              kpId = searchResult.kp_id;
-              
-              // Сохраняем в кэш
-              await saveToLocalCache(info, kpId);
-              
-              // Получаем данные о фильме
-              try {
-                let url = `${API_BASE_URL}/api/extension/film-info?kp_id=${kpId}&chat_id=${data.linked_chat_id}&user_id=${data.linked_user_id}`;
-                if (info.season && info.episode) {
-                  url += `&season=${info.season}&episode=${info.episode}`;
-                }
-                
-                console.log('[STREAMING] Получение данных о фильме:', { kpId, url });
-                
-                const filmResponse = await apiRequest('GET', `/api/extension/film-info?kp_id=${kpId}&chat_id=${data.linked_chat_id}&user_id=${data.linked_user_id}${info.season && info.episode ? `&season=${info.season}&episode=${info.episode}` : ''}`);
-                
-                console.log('[STREAMING] Ответ film-info:', { status: filmResponse.status, ok: filmResponse.ok });
-                
-                if (filmResponse.ok) {
-                  const filmResult = await filmResponse.json();
-                  console.log('[STREAMING] Результат film-info после поиска:', filmResult);
-                  if (filmResult.success) {
-                    // ВАЖНО: film_id может быть 0 или null, проверяем явно
-                    const filmId = (filmResult.film_id !== undefined && filmResult.film_id !== null) ? filmResult.film_id : null;
-                    filmData = {
-                      kp_id: kpId,
-                      film_id: filmId,
-                      watched: filmResult.watched || false,
-                      rated: filmResult.rated || false,
-                      has_unwatched_before: filmResult.has_unwatched_before || false,
-                      current_episode_watched: filmResult.current_episode_watched || false
-                    };
-                    console.log('[STREAMING] filmData после парсинга (после поиска):', filmData, 'film_id из result:', filmResult.film_id);
-                  } else {
-                    console.error('[STREAMING] API вернул success: false после поиска:', filmResult);
-                    // Если фильм не найден в БД, но kp_id есть - создаем базовые данные
-                    filmData = {
-                      kp_id: kpId,
-                      film_id: null,
-                      watched: false,
-                      rated: false,
-                      has_unwatched_before: false,
-                      current_episode_watched: false
-                    };
-                  }
-                } else {
-                  console.error('[STREAMING] HTTP ошибка после поиска:', filmResponse.status);
-                  if (kpId) {
-                    filmData = {
-                      kp_id: kpId,
-                      film_id: null,
-                      watched: false,
-                      rated: false,
-                      has_unwatched_before: false,
-                      current_episode_watched: false
-                    };
-                  }
-                }
-              } catch (filmFetchError) {
-                console.error('[STREAMING] Ошибка fetch film-info после поиска:', filmFetchError);
-                if (kpId) {
-                  filmData = {
-                    kp_id: kpId,
-                    film_id: null,
-                    watched: false,
-                    rated: false,
-                    has_unwatched_before: false,
-                    current_episode_watched: false
-                  };
-                }
-              }
-            } else {
-              console.log('[STREAMING] Фильм не найден в Kinopoisk API:', searchResult);
-              // Фильм не найден - не показываем виджет
-              return;
-            }
-          } else {
-            console.error('[STREAMING] HTTP ошибка поиска:', searchResponse.status);
-            // Если ошибка поиска - не показываем виджет
+          let searchResult = await doSearch(searchKeyword, yearParam);
+          if (!searchResult && info.year && searchKeyword) {
+            console.log('[STREAMING] Повторная попытка поиска без года (как fallback)');
+            searchResult = await doSearch(searchKeyword, '');
+          }
+          if (!searchResult || !searchResult.kp_id) {
+            console.log('[STREAMING] Фильм не найден: keyword=' + searchKeyword + (info.year ? ' year=' + info.year : ''));
             return;
           }
-        } catch (searchError) {
-          console.error('[STREAMING] Ошибка fetch search-film-by-keyword:', searchError);
-          // Если поиск не удался, пробуем еще раз с другим форматом (как в боте: "название год")
-          if (info.title && info.year) {
-            try {
-              console.log('[STREAMING] Повторная попытка поиска с форматом "название год"');
-              const retryKeyword = `${info.title} ${info.year}`.trim();
-              const retryResponse = await apiRequest('GET', `/api/extension/search-film-by-keyword?keyword=${encodeURIComponent(retryKeyword)}&type=${info.isSeries ? 'TV_SERIES' : 'FILM'}`);
-              if (retryResponse.ok) {
-                const retryResult = await retryResponse.json();
-                if (retryResult.success && retryResult.kp_id) {
-                  kpId = retryResult.kp_id;
-                  console.log('[STREAMING] Повторный поиск успешен, kp_id:', kpId);
-                  // Сохраняем в кэш
-                  await saveToLocalCache(info, kpId);
-                  // Теперь запрашиваем film-info
-                  const filmResponse = await apiRequest('GET', `/api/extension/film-info?kp_id=${kpId}&chat_id=${data.linked_chat_id}&user_id=${data.linked_user_id}${info.season && info.episode ? `&season=${info.season}&episode=${info.episode}` : ''}`);
-                  if (filmResponse.ok) {
-                    const filmResult = await filmResponse.json();
-                    if (filmResult.success) {
-                      const filmId = (filmResult.film_id !== undefined && filmResult.film_id !== null) ? filmResult.film_id : null;
-                      filmData = {
-                        kp_id: kpId,
-                        film_id: filmId,
-                        watched: filmResult.watched || false,
-                        rated: filmResult.rated || false,
-                        has_unwatched_before: filmResult.has_unwatched_before || false,
-                        current_episode_watched: filmResult.current_episode_watched || false
-                      };
-                    }
-                  }
-                }
-              }
-            } catch (retryError) {
-              console.error('[STREAMING] Повторный поиск тоже упал:', retryError);
-            }
+          kpId = searchResult.kp_id;
+          await saveToLocalCache(info, kpId);
+          try {
+            const filmResponse = await apiRequest('GET', `/api/extension/film-info?kp_id=${kpId}&chat_id=${data.linked_chat_id}&user_id=${data.linked_user_id}${info.season && info.episode ? `&season=${info.season}&episode=${info.episode}` : ''}`);
+            const fr = filmResponse.ok ? await filmResponse.json() : null;
+            filmData = buildFilmData(searchResult, fr?.success ? fr : null);
+          } catch (e) {
+            console.error('[STREAMING] Ошибка film-info после поиска:', e);
+            filmData = buildFilmData(searchResult, null);
           }
-          // Если все равно не нашли - не показываем виджет
+        } catch (searchError) {
+          console.error('[STREAMING] Ошибка поиска:', searchError);
           if (!kpId) {
             console.log('[STREAMING] Пропуск: фильм не найден, нет kp_id');
             return;
@@ -1506,7 +1547,8 @@
           watched: false,
           rated: false,
           has_unwatched_before: false,
-          current_episode_watched: false
+          current_episode_watched: false,
+          is_series: filmData?.is_series ?? info.isSeries
         };
       }
       
@@ -1525,7 +1567,8 @@
           watched: false,
           rated: false,
           has_unwatched_before: false,
-          current_episode_watched: false
+          current_episode_watched: false,
+          is_series: false
         };
         console.log('[STREAMING] Вызываем createOverlay с базовыми данными после ошибки:', { info, filmData });
         await createOverlay(info, filmData);
@@ -1631,12 +1674,21 @@
     }, 5000);
   }
   
-  // Запускаем при загрузке
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {
     init();
   }
-  
+
+  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    if (msg.action !== 'get_streaming_page_info') return;
+    if (isCatalogOrMainPage()) {
+      sendResponse(null);
+      return true;
+    }
+    const info = getContentInfo();
+    sendResponse(info || null);
+    return true;
+  });
 })();
 
