@@ -343,9 +343,11 @@ def premieres_genre_toggle_callback(call):
     """Включить/выключить жанр в мультивыборе."""
     try:
         bot.answer_callback_query(call.id)
-        parts = call.data.split(":", 2)
-        genre = parts[1]
-        page = int(parts[2])
+        parts = call.data.split(":")
+        if len(parts) < 3:
+            return
+        page = int(parts[-1])
+        genre = ":".join(parts[2:-1])
         user_id = call.from_user.id
         sel = user_premiere_genre_selection.get(user_id) or set()
         if genre in sel:

@@ -2603,11 +2603,13 @@ def create_web_app(bot):
             try:
                 # Если film_id не передан, ищем его
                 if not film_id:
-                    cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, str(kp_id)))
-                    row = cursor.fetchone()
-                    if row:
-                        film_id = row.get('id') if isinstance(row, dict) else row[0]
-                    else:
+                    with db_lock:
+                        cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, str(kp_id)))
+                        row = cursor.fetchone()
+                        if row:
+                            film_id = row.get('id') if isinstance(row, dict) else row[0]
+                    
+                    if not film_id:
                         # Фильм не в базе - добавляем автоматически
                         from moviebot.api.kinopoisk_api import extract_movie_info
                         from moviebot.config import KP_TOKEN
@@ -2785,11 +2787,13 @@ def create_web_app(bot):
             try:
                 # Если film_id не передан, ищем его
                 if not film_id:
-                    cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, str(kp_id)))
-                    row = cursor.fetchone()
-                    if row:
-                        film_id = row.get('id') if isinstance(row, dict) else row[0]
-                    else:
+                    with db_lock:
+                        cursor.execute("SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s", (chat_id, str(kp_id)))
+                        row = cursor.fetchone()
+                        if row:
+                            film_id = row.get('id') if isinstance(row, dict) else row[0]
+                    
+                    if not film_id:
                         return jsonify({"success": False, "error": "film not found"}), 404
                 
                 # Сохраняем/обновляем оценку
