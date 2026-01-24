@@ -1827,7 +1827,7 @@ def create_web_app(bot):
                 except:
                     pass
             
-            logger.info(f"[EXTENSION API] Возвращаем film-info: film_id={film_id}, film_in_db={film_in_db}, watched={watched}")
+            logger.info(f"[EXTENSION API] Возвращаем film-info: film_id={film_id}, film_in_db={film_in_db}, watched={watched}, kp_id={kp_id}, chat_id={chat_id}")
             resp = jsonify({
                 "success": True,
                 "film": {
@@ -1841,7 +1841,7 @@ def create_web_app(bot):
                     "description": info.get('description')
                 },
                 "in_database": film_in_db,
-                "film_id": film_id,  # ВАЖНО: возвращаем film_id, даже если он None
+                "film_id": film_id,  # ВАЖНО: возвращаем film_id, даже если он None (но должен быть числом, если найден)
                 "watched": watched,
                 "rated": rated,
                 "has_unwatched_before": has_unwatched_before,
@@ -1849,6 +1849,7 @@ def create_web_app(bot):
                 "plan_type": plan_type,
                 "plan_id": plan_id
             })
+            logger.info(f"[EXTENSION API] JSON ответ сформирован: film_id={film_id} (type: {type(film_id)})")
             # after_request hook автоматически добавит CORS заголовки
             return resp
         except Exception as e:
