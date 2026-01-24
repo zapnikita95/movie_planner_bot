@@ -1181,15 +1181,21 @@
             const result = await response.json();
             console.log('[STREAMING] Результат film-info из кэша:', result);
             if (result.success) {
+              // ВАЖНО: film_id может быть 0 или null, проверяем явно
+              const filmId = (result.film_id !== undefined && result.film_id !== null) ? result.film_id : null;
               filmData = {
                 kp_id: kpId,
-                film_id: result.film_id || null,
+                film_id: filmId,
                 watched: result.watched || false,
                 rated: result.rated || false,
                 has_unwatched_before: result.has_unwatched_before || false
               };
-              console.log('[STREAMING] filmData после парсинга:', filmData);
+              console.log('[STREAMING] filmData после парсинга:', filmData, 'film_id из result:', result.film_id);
+            } else {
+              console.error('[STREAMING] API вернул success: false:', result);
             }
+          } else {
+            console.error('[STREAMING] HTTP ошибка:', response.status);
           }
         } catch (fetchError) {
           console.error('[STREAMING] Ошибка fetch film-info:', fetchError);
@@ -1233,15 +1239,21 @@
                   const filmResult = await filmResponse.json();
                   console.log('[STREAMING] Результат film-info после поиска:', filmResult);
                   if (filmResult.success) {
+                    // ВАЖНО: film_id может быть 0 или null, проверяем явно
+                    const filmId = (filmResult.film_id !== undefined && filmResult.film_id !== null) ? filmResult.film_id : null;
                     filmData = {
                       kp_id: kpId,
-                      film_id: filmResult.film_id || null,
+                      film_id: filmId,
                       watched: filmResult.watched || false,
                       rated: filmResult.rated || false,
                       has_unwatched_before: filmResult.has_unwatched_before || false
                     };
-                    console.log('[STREAMING] filmData после парсинга (после поиска):', filmData);
+                    console.log('[STREAMING] filmData после парсинга (после поиска):', filmData, 'film_id из result:', filmResult.film_id);
+                  } else {
+                    console.error('[STREAMING] API вернул success: false после поиска:', filmResult);
                   }
+                } else {
+                  console.error('[STREAMING] HTTP ошибка после поиска:', filmResponse.status);
                 }
               } catch (filmFetchError) {
                 console.error('[STREAMING] Ошибка fetch film-info после поиска:', filmFetchError);
