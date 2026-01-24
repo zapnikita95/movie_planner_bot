@@ -855,24 +855,34 @@
       
       // Если kp_id уже есть, добавляем сразу
       if (filmData?.kp_id) {
-        const response = await fetch(`${API_BASE_URL}/api/extension/add-film`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            chat_id: data.linked_chat_id,
-            user_id: data.linked_user_id,
-            kp_id: filmData.kp_id,
-            online_link: info.url
-          })
-        });
-        
-        if (response.ok) {
-          const result = await response.json();
-          if (result.success) {
-            // Обновляем данные и перерисовываем кнопки
-            currentFilmData = { ...filmData, film_id: result.film_id, kp_id: filmData.kp_id };
-            renderButtons(info, currentFilmData);
+        try {
+          const response = await fetch(`${API_BASE_URL}/api/extension/add-film`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: data.linked_chat_id,
+              user_id: data.linked_user_id,
+              kp_id: filmData.kp_id,
+              online_link: info.url
+            }),
+            credentials: 'omit'
+          });
+          
+          if (response.ok) {
+            const result = await response.json();
+            if (result.success) {
+              // Обновляем данные и перерисовываем кнопки
+              currentFilmData = { ...filmData, film_id: result.film_id, kp_id: filmData.kp_id };
+              renderButtons(info, currentFilmData);
+            } else {
+              alert('Ошибка: ' + (result.error || 'неизвестная ошибка'));
+            }
+          } else {
+            alert('Ошибка сервера: ' + response.status);
           }
+        } catch (fetchError) {
+          console.error('[STREAMING] Ошибка fetch при добавлении в базу:', fetchError);
+          alert('Ошибка подключения к серверу. Проверьте интернет-соединение.');
         }
       } else {
         // Нужно сначала найти через API
@@ -881,7 +891,7 @@
       }
     } catch (e) {
       console.error('[STREAMING] Ошибка добавления в базу:', e);
-      alert('Ошибка добавления в базу');
+      alert('Ошибка добавления в базу: ' + (e.message || 'неизвестная ошибка'));
     }
   }
   
@@ -893,33 +903,41 @@
         return;
       }
       
-      const response = await fetch(`${API_BASE_URL}/api/extension/mark-episode`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: data.linked_chat_id,
-          user_id: data.linked_user_id,
-          kp_id: filmData.kp_id,
-          film_id: filmData.film_id,
-          season: info.season,
-          episode: info.episode,
-          mark_all_previous: markAllPrevious,
-          online_link: info.url
-        })
-      });
-      
-      if (response.ok) {
-        const result = await response.json();
-        if (result.success) {
-          alert('✅ Серия отмечена как просмотренная!');
-          removeOverlay();
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/extension/mark-episode`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: data.linked_chat_id,
+            user_id: data.linked_user_id,
+            kp_id: filmData.kp_id,
+            film_id: filmData.film_id,
+            season: info.season,
+            episode: info.episode,
+            mark_all_previous: markAllPrevious,
+            online_link: info.url
+          }),
+          credentials: 'omit'
+        });
+        
+        if (response.ok) {
+          const result = await response.json();
+          if (result.success) {
+            alert('✅ Серия отмечена как просмотренная!');
+            removeOverlay();
+          } else {
+            alert('Ошибка: ' + (result.error || 'неизвестная ошибка'));
+          }
         } else {
-          alert('Ошибка: ' + (result.error || 'неизвестная ошибка'));
+          alert('Ошибка сервера: ' + response.status);
         }
+      } catch (fetchError) {
+        console.error('[STREAMING] Ошибка fetch при отметке серии:', fetchError);
+        alert('Ошибка подключения к серверу. Проверьте интернет-соединение.');
       }
     } catch (e) {
       console.error('[STREAMING] Ошибка отметки серии:', e);
-      alert('Ошибка отметки серии');
+      alert('Ошибка отметки серии: ' + (e.message || 'неизвестная ошибка'));
     }
   }
   
@@ -931,31 +949,39 @@
         return;
       }
       
-      const response = await fetch(`${API_BASE_URL}/api/extension/mark-film-watched`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: data.linked_chat_id,
-          user_id: data.linked_user_id,
-          kp_id: filmData.kp_id,
-          film_id: filmData.film_id,
-          online_link: info.url
-        })
-      });
-      
-      if (response.ok) {
-        const result = await response.json();
-        if (result.success) {
-          // Обновляем данные и показываем кнопки оценки
-          currentFilmData = { ...filmData, watched: true };
-          renderButtons(info, currentFilmData);
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/extension/mark-film-watched`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: data.linked_chat_id,
+            user_id: data.linked_user_id,
+            kp_id: filmData.kp_id,
+            film_id: filmData.film_id,
+            online_link: info.url
+          }),
+          credentials: 'omit'
+        });
+        
+        if (response.ok) {
+          const result = await response.json();
+          if (result.success) {
+            // Обновляем данные и показываем кнопки оценки
+            currentFilmData = { ...filmData, watched: true };
+            renderButtons(info, currentFilmData);
+          } else {
+            alert('Ошибка: ' + (result.error || 'неизвестная ошибка'));
+          }
         } else {
-          alert('Ошибка: ' + (result.error || 'неизвестная ошибка'));
+          alert('Ошибка сервера: ' + response.status);
         }
+      } catch (fetchError) {
+        console.error('[STREAMING] Ошибка fetch при отметке фильма:', fetchError);
+        alert('Ошибка подключения к серверу. Проверьте интернет-соединение.');
       }
     } catch (e) {
       console.error('[STREAMING] Ошибка отметки фильма:', e);
-      alert('Ошибка отметки фильма');
+      alert('Ошибка отметки фильма: ' + (e.message || 'неизвестная ошибка'));
     }
   }
   
@@ -967,48 +993,56 @@
         return;
       }
       
-      const response = await fetch(`${API_BASE_URL}/api/extension/rate-film`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: data.linked_chat_id,
-          user_id: data.linked_user_id,
-          kp_id: filmData.kp_id,
-          film_id: filmData.film_id,
-          rating: rating
-        })
-      });
-      
-      if (response.ok) {
-        const result = await response.json();
-        if (result.success) {
-          // Показываем сообщение об успехе
-          const container = overlayElement.querySelector('#mpp-buttons-container');
-          if (container) {
-            container.innerHTML = `
-              <div style="text-align: center; padding: 20px;">
-                <div style="font-size: 24px; margin-bottom: 8px;">✅</div>
-                <div style="font-weight: 600;">Оценка принята!</div>
-              </div>
-            `;
-          }
-          
-          // Закрываем через 2 секунды
-          setTimeout(() => {
-            removeOverlay();
-          }, 2000);
-          
-          // Если оценка высокая (≥7), отправляем рекомендации
-          if (rating >= 7 && result.recommendations) {
-            // Рекомендации уже отправлены в бота через API
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/extension/rate-film`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: data.linked_chat_id,
+            user_id: data.linked_user_id,
+            kp_id: filmData.kp_id,
+            film_id: filmData.film_id,
+            rating: rating
+          }),
+          credentials: 'omit'
+        });
+        
+        if (response.ok) {
+          const result = await response.json();
+          if (result.success) {
+            // Показываем сообщение об успехе
+            const container = overlayElement.querySelector('#mpp-buttons-container');
+            if (container) {
+              container.innerHTML = `
+                <div style="text-align: center; padding: 20px;">
+                  <div style="font-size: 24px; margin-bottom: 8px;">✅</div>
+                  <div style="font-weight: 600;">Оценка принята!</div>
+                </div>
+              `;
+            }
+            
+            // Закрываем через 2 секунды
+            setTimeout(() => {
+              removeOverlay();
+            }, 2000);
+            
+            // Если оценка высокая (≥7), отправляем рекомендации
+            if (rating >= 7 && result.recommendations) {
+              // Рекомендации уже отправлены в бота через API
+            }
+          } else {
+            alert('Ошибка: ' + (result.error || 'неизвестная ошибка'));
           }
         } else {
-          alert('Ошибка: ' + (result.error || 'неизвестная ошибка'));
+          alert('Ошибка сервера: ' + response.status);
         }
+      } catch (fetchError) {
+        console.error('[STREAMING] Ошибка fetch при оценке:', fetchError);
+        alert('Ошибка подключения к серверу. Проверьте интернет-соединение.');
       }
     } catch (e) {
       console.error('[STREAMING] Ошибка оценки:', e);
-      alert('Ошибка оценки');
+      alert('Ошибка оценки: ' + (e.message || 'неизвестная ошибка'));
     }
   }
   
@@ -1038,56 +1072,89 @@
       
       if (kpId) {
         // Нашли в кэше - получаем данные о фильме
-        let url = `${API_BASE_URL}/api/extension/film-info?kp_id=${kpId}&chat_id=${data.linked_chat_id}&user_id=${data.linked_user_id}`;
-        if (info.season && info.episode) {
-          url += `&season=${info.season}&episode=${info.episode}`;
-        }
-        const response = await fetch(url);
-        if (response.ok) {
-          const result = await response.json();
-          if (result.success) {
-            filmData = {
-              kp_id: kpId,
-              film_id: result.film_id || null,
-              watched: result.watched || false,
-              rated: result.rated || false,
-              has_unwatched_before: result.has_unwatched_before || false
-            };
+        try {
+          let url = `${API_BASE_URL}/api/extension/film-info?kp_id=${kpId}&chat_id=${data.linked_chat_id}&user_id=${data.linked_user_id}`;
+          if (info.season && info.episode) {
+            url += `&season=${info.season}&episode=${info.episode}`;
           }
+          const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            credentials: 'omit'
+          });
+          if (response.ok) {
+            const result = await response.json();
+            if (result.success) {
+              filmData = {
+                kp_id: kpId,
+                film_id: result.film_id || null,
+                watched: result.watched || false,
+                rated: result.rated || false,
+                has_unwatched_before: result.has_unwatched_before || false
+              };
+            }
+          }
+        } catch (fetchError) {
+          console.error('[STREAMING] Ошибка fetch film-info:', fetchError);
+          // Продолжаем с базовыми данными
         }
       } else {
         // Не нашли в кэше - ищем через API
-        const searchKeyword = `${info.title} ${info.year || ''}`.trim();
-        const searchType = info.isSeries ? 'TV_SERIES' : 'FILM';
-        
-        const searchResponse = await fetch(`${API_BASE_URL}/api/extension/search-film-by-keyword?keyword=${encodeURIComponent(searchKeyword)}&year=${info.year || ''}&type=${searchType}`);
-        if (searchResponse.ok) {
-          const searchResult = await searchResponse.json();
-          if (searchResult.success && searchResult.kp_id) {
-            kpId = searchResult.kp_id;
-            
-            // Сохраняем в кэш
-            await saveToLocalCache(info, kpId);
-            
-            // Получаем данные о фильме
-            let url = `${API_BASE_URL}/api/extension/film-info?kp_id=${kpId}&chat_id=${data.linked_chat_id}&user_id=${data.linked_user_id}`;
-            if (info.season && info.episode) {
-              url += `&season=${info.season}&episode=${info.episode}`;
-            }
-            const filmResponse = await fetch(url);
-            if (filmResponse.ok) {
-              const filmResult = await filmResponse.json();
-              if (filmResult.success) {
-                filmData = {
-                  kp_id: kpId,
-                  film_id: filmResult.film_id || null,
-                  watched: filmResult.watched || false,
-                  rated: filmResult.rated || false,
-                  has_unwatched_before: filmResult.has_unwatched_before || false
-                };
+        try {
+          const searchKeyword = `${info.title} ${info.year || ''}`.trim();
+          const searchType = info.isSeries ? 'TV_SERIES' : 'FILM';
+          
+          const searchResponse = await fetch(`${API_BASE_URL}/api/extension/search-film-by-keyword?keyword=${encodeURIComponent(searchKeyword)}&year=${info.year || ''}&type=${searchType}`, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            credentials: 'omit'
+          });
+          if (searchResponse.ok) {
+            const searchResult = await searchResponse.json();
+            if (searchResult.success && searchResult.kp_id) {
+              kpId = searchResult.kp_id;
+              
+              // Сохраняем в кэш
+              await saveToLocalCache(info, kpId);
+              
+              // Получаем данные о фильме
+              try {
+                let url = `${API_BASE_URL}/api/extension/film-info?kp_id=${kpId}&chat_id=${data.linked_chat_id}&user_id=${data.linked_user_id}`;
+                if (info.season && info.episode) {
+                  url += `&season=${info.season}&episode=${info.episode}`;
+                }
+                const filmResponse = await fetch(url, {
+                  method: 'GET',
+                  headers: {
+                    'Content-Type': 'application/json'
+                  },
+                  credentials: 'omit'
+                });
+                if (filmResponse.ok) {
+                  const filmResult = await filmResponse.json();
+                  if (filmResult.success) {
+                    filmData = {
+                      kp_id: kpId,
+                      film_id: filmResult.film_id || null,
+                      watched: filmResult.watched || false,
+                      rated: filmResult.rated || false,
+                      has_unwatched_before: filmResult.has_unwatched_before || false
+                    };
+                  }
+                }
+              } catch (filmFetchError) {
+                console.error('[STREAMING] Ошибка fetch film-info после поиска:', filmFetchError);
+                // Продолжаем с базовыми данными
               }
             }
           }
+        } catch (searchError) {
+          console.error('[STREAMING] Ошибка fetch search-film-by-keyword:', searchError);
+          // Продолжаем с базовыми данными
         }
       }
       
@@ -1102,11 +1169,24 @@
         };
       }
       
-      // Показываем плашку
+      // Показываем плашку (даже если были ошибки API)
       createOverlay(info, filmData);
       
     } catch (e) {
       console.error('[STREAMING] Ошибка проверки:', e);
+      // Даже при ошибке показываем плашку с базовыми данными
+      try {
+        const filmData = {
+          kp_id: null,
+          film_id: null,
+          watched: false,
+          rated: false,
+          has_unwatched_before: false
+        };
+        createOverlay(info, filmData);
+      } catch (overlayError) {
+        console.error('[STREAMING] Ошибка создания плашки:', overlayError);
+      }
     }
   }
   
