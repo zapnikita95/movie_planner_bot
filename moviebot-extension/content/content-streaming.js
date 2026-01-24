@@ -1212,6 +1212,17 @@
       return;
     }
     
+    // Для kinopoisk.ru - проверяем наличие видеоплеера
+    if (hostname.includes('kinopoisk.ru') && !hostname.includes('hd.kinopoisk')) {
+      // На kinopoisk.ru фильмы смотрятся на hd.kinopoisk.ru, здесь только описания
+      // Проверяем наличие видеоплеера
+      const hasVideoPlayer = document.querySelector('video, iframe[src*="player"], .player, [class*="player"]');
+      if (!hasVideoPlayer) {
+        console.log('[STREAMING] Пропуск: kinopoisk.ru без видеоплеера');
+        return;
+      }
+    }
+    
     // Для сериалов: показываем виджет ТОЛЬКО если определены сезон и серия
     // Для фильмов: показываем всегда (если есть title)
     if (info.isSeries && (!info.season || !info.episode)) {
@@ -1338,13 +1349,15 @@
       } else {
         // Не нашли в кэше - ищем через API
         try {
-          const searchKeyword = `${info.title} ${info.year || ''}`.trim();
+          // Используем тот же формат, что и в боте: просто название, год передаем отдельно
+          const searchKeyword = info.title.trim();
           const searchType = info.isSeries ? 'TV_SERIES' : 'FILM';
-          const searchUrl = `${API_BASE_URL}/api/extension/search-film-by-keyword?keyword=${encodeURIComponent(searchKeyword)}&year=${info.year || ''}&type=${searchType}`;
+          const yearParam = info.year ? `&year=${info.year}` : '';
+          const searchUrl = `${API_BASE_URL}/api/extension/search-film-by-keyword?keyword=${encodeURIComponent(searchKeyword)}${yearParam}&type=${searchType}`;
           
-          console.log('[STREAMING] Поиск фильма:', { searchKeyword, searchType, url: searchUrl });
+          console.log('[STREAMING] Поиск фильма:', { searchKeyword, searchType, year: info.year, url: searchUrl });
           
-          const searchResponse = await apiRequest('GET', `/api/extension/search-film-by-keyword?keyword=${encodeURIComponent(searchKeyword)}&year=${info.year || ''}&type=${searchType}`);
+          const searchResponse = await apiRequest('GET', `/api/extension/search-film-by-keyword?keyword=${encodeURIComponent(searchKeyword)}${yearParam}&type=${searchType}`);
           
           console.log('[STREAMING] Ответ поиска:', { status: searchResponse.status, ok: searchResponse.ok });
           
@@ -1433,12 +1446,12 @@
           }
         } catch (searchError) {
           console.error('[STREAMING] Ошибка fetch search-film-by-keyword:', searchError);
-          // Если поиск не удался, пробуем еще раз с другим форматом
+          // Если поиск не удался, пробуем еще раз с другим форматом (как в боте: "название год")
           if (info.title && info.year) {
             try {
-              console.log('[STREAMING] Повторная попытка поиска с другим форматом');
+              console.log('[STREAMING] Повторная попытка поиска с форматом "название год"');
               const retryKeyword = `${info.title} ${info.year}`.trim();
-              const retryResponse = await apiRequest('GET', `/api/extension/search-film-by-keyword?keyword=${encodeURIComponent(retryKeyword)}&year=${info.year || ''}&type=${info.isSeries ? 'TV_SERIES' : 'FILM'}`);
+              const retryResponse = await apiRequest('GET', `/api/extension/search-film-by-keyword?keyword=${encodeURIComponent(retryKeyword)}&type=${info.isSeries ? 'TV_SERIES' : 'FILM'}`);
               if (retryResponse.ok) {
                 const retryResult = await retryResponse.json();
                 if (retryResult.success && retryResult.kp_id) {

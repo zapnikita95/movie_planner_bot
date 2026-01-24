@@ -2549,10 +2549,9 @@ def create_web_app(bot):
             
             headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
             
-            # Формируем поисковый запрос в формате "название год"
+            # Формируем поисковый запрос
+            # Сначала пробуем просто название (как в боте)
             search_query = keyword
-            if year:
-                search_query = f"{keyword} {year}"
             
             # Используем API v2.1 для поиска
             url = "https://kinopoiskapiunofficial.tech/api/v2.1/films/search-by-keyword"
@@ -2560,6 +2559,8 @@ def create_web_app(bot):
                 'keyword': search_query,
                 'page': 1
             }
+            
+            logger.info(f"[EXTENSION API] Поиск фильма: keyword={search_query}, year={year}, type={search_type}")
             
             response = requests.get(url, headers=headers, params=params, timeout=15)
             
@@ -2575,11 +2576,20 @@ def create_web_app(bot):
                         films = [f for f in films if f.get('type', '').upper() == 'FILM']
                 
                 if films and len(films) > 0:
+                    # Фильтруем по году, если указан
+                    if year:
+                        # Пробуем найти точное совпадение по году
+                        year_matched = [f for f in films if f.get('year') == year]
+                        if year_matched:
+                            films = year_matched
+                    
                     # Берем первый результат
                     film = films[0]
                     kp_id = film.get('filmId')
                     type_film = film.get('type', 'FILM').upper()
                     is_series = type_film in ['TV_SERIES', 'MINI_SERIES']
+                    
+                    logger.info(f"[EXTENSION API] Найден фильм: kp_id={kp_id}, nameRu={film.get('nameRu')}, year={film.get('year')}, type={type_film}")
                     
                     # Формируем правильную ссылку
                     link_type = 'series' if is_series else 'film'
@@ -2601,6 +2611,7 @@ def create_web_app(bot):
                     })
                     return resp
                 else:
+                    logger.warning(f"[EXTENSION API] Фильм не найден после фильтрации: keyword={search_query}, year={year}, type={search_type}, найдено результатов={len(data.get('films', []))}")
                     resp = jsonify({"success": False, "error": "film not found"})
                     return resp, 404
             else:
