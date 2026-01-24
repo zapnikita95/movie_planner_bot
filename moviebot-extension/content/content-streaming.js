@@ -1386,7 +1386,7 @@
       
       // Показываем плашку (даже если были ошибки API, но kp_id есть)
       console.log('[STREAMING] Вызываем createOverlay с данными:', { info, filmData });
-      createOverlay(info, filmData);
+      await createOverlay(info, filmData);
       console.log('[STREAMING] createOverlay вызван');
       
     } catch (e) {
@@ -1401,7 +1401,7 @@
           has_unwatched_before: false
         };
         console.log('[STREAMING] Вызываем createOverlay с базовыми данными после ошибки:', { info, filmData });
-        createOverlay(info, filmData);
+        await createOverlay(info, filmData);
       } catch (overlayError) {
         console.error('[STREAMING] Ошибка создания плашки:', overlayError);
       }
