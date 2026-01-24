@@ -178,16 +178,26 @@ async function handleStreamingApiRequest(message, sendResponse) {
     console.log('[BACKGROUND] Streaming API response:', { status: response.status, ok: response.ok, data: responseData });
     
     // Проверяем, есть ли ошибка в данных ответа
-    if (!response.ok && responseData && responseData.error) {
+    if (!response.ok) {
+      const errorMsg = (responseData && responseData.error) ? responseData.error : `HTTP ${response.status}`;
       sendResponse({
         success: false,
         status: response.status,
-        error: responseData.error,
+        error: errorMsg,
+        data: responseData
+      });
+    } else if (responseData && responseData.success === false) {
+      // API вернул success: false в данных
+      const errorMsg = responseData.error || 'Unknown error';
+      sendResponse({
+        success: false,
+        status: response.status,
+        error: errorMsg,
         data: responseData
       });
     } else {
       sendResponse({
-        success: response.ok,
+        success: true,
         status: response.status,
         data: responseData
       });

@@ -1755,16 +1755,22 @@ def create_web_app(bot):
             has_unwatched_before = False
             user_id = request.args.get('user_id', type=int)
             
+            logger.info(f"[EXTENSION API] Проверка наличия в БД: chat_id={chat_id}, kp_id={kp_id}")
+            
             try:
                 cursor.execute("""
                     SELECT id, watched FROM movies 
                     WHERE chat_id = %s AND kp_id = %s
                 """, (chat_id, str(kp_id)))
                 row = cursor.fetchone()
+                logger.info(f"[EXTENSION API] Результат запроса БД: row={row}")
                 if row:
                     film_in_db = True
                     film_id = row.get('id') if isinstance(row, dict) else row[0]
                     watched = bool(row.get('watched') if isinstance(row, dict) else row[1])
+                    logger.info(f"[EXTENSION API] Фильм найден в БД: film_id={film_id}, watched={watched}")
+                else:
+                    logger.info(f"[EXTENSION API] Фильм НЕ найден в БД для kp_id={kp_id}")
                 
                 # Проверяем наличие в расписании и тип плана
                 plan_type = None
