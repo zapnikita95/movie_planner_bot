@@ -1212,7 +1212,7 @@ def process_search_query(message, query, reply_to_message=None):
                 rating = film.get('ratingKinopoisk') or film.get('rating') or film.get('ratingImdb') or 'N/A'
                 kp_id = film.get('kinopoiskId') or film.get('filmId') or film.get('id')
                 film_type = film.get('type', '').upper() if film.get('type') else 'FILM'
-                is_series = film_type == 'TV_SERIES'
+                is_series = film_type in ('TV_SERIES', 'MINI_SERIES')
                 
                 if kp_id:
                     type_indicator = "📺" if is_series else "🎬"
@@ -1492,7 +1492,7 @@ def handle_search_reply_direct(message):
                 kp_id = film.get('kinopoiskId') or film.get('filmId') or film.get('id')
                 
                 film_type = film.get('type', '').upper() if film.get('type') else 'FILM'
-                is_series = film_type == 'TV_SERIES'
+                is_series = film_type in ('TV_SERIES', 'MINI_SERIES')
                 
                 if kp_id:
                     type_indicator = "📺" if is_series else "🎬"

@@ -1743,12 +1743,13 @@ def search_films_with_type(query, page=1, search_type='mixed'):
     """
     films, total_pages = search_films(query, page)
     
+    SERIES_TYPES = ('TV_SERIES', 'MINI_SERIES')  # мини-сериалы тоже идут по /series/
     if search_type == 'film':
-        # Фильтруем только фильмы
-        films = [f for f in films if f.get('type', '').upper() != 'TV_SERIES']
+        # Фильтруем только фильмы (исключаем сериалы и мини-сериалы)
+        films = [f for f in films if f.get('type', '').upper() not in SERIES_TYPES]
     elif search_type == 'series':
-        # Фильтруем только сериалы
-        films = [f for f in films if f.get('type', '').upper() == 'TV_SERIES']
+        # Фильтруем только сериалы и мини-сериалы (оба по ссылке /series/)
+        films = [f for f in films if f.get('type', '').upper() in SERIES_TYPES]
     # Если search_type == 'mixed', возвращаем все
     
     return films, total_pages
@@ -1838,7 +1839,7 @@ def search_film_callback(call):
         kp_id = parts[0]
         film_type = parts[1] if len(parts) > 1 else "FILM"
 
-        link = f"https://www.kinopoisk.ru/series/{kp_id}/" if film_type == "TV_SERIES" else f"https://www.kinopoisk.ru/film/{kp_id}/"
+        link = f"https://www.kinopoisk.ru/series/{kp_id}/" if film_type in ("TV_SERIES", "MINI_SERIES") else f"https://www.kinopoisk.ru/film/{kp_id}/"
 
         info = extract_movie_info(link)
         if not info:
@@ -1921,8 +1922,8 @@ def handle_search(message):
             kp_id = film.get('kinopoiskId') or film.get('filmId') or film.get('id')
             
             # Определяем тип (сериал или фильм) по полю type из API
-            film_type = film.get('type', '').upper()  # "FILM" или "TV_SERIES"
-            is_series = film_type == 'TV_SERIES'
+            film_type = film.get('type', '').upper()  # FILM, TV_SERIES, MINI_SERIES
+            is_series = film_type in ('TV_SERIES', 'MINI_SERIES')
             
             logger.info(f"[SEARCH] Фильм: title={title}, year={year}, kp_id={kp_id}, type={film_type}, is_series={is_series}")
             
@@ -2038,22 +2039,17 @@ def random_start(message):
 
 
 def premieres_command(message):
-        """Команда /premieres - премьеры фильмов"""
+        """Команда /premieres - премьеры фильмов. Сначала выбор сортировки."""
         logger.info(f"[HANDLER] /premieres вызван от {message.from_user.id}")
         username = message.from_user.username or f"user_{message.from_user.id}"
         log_request(message.from_user.id, username, '/premieres', message.chat.id)
         
-        # Показываем выбор периода
         markup = InlineKeyboardMarkup(row_width=1)
-        markup.add(InlineKeyboardButton("📅 Текущий месяц", callback_data="premieres_period:current_month"))
-        markup.add(InlineKeyboardButton("📅 Следующий месяц", callback_data="premieres_period:next_month"))
-        markup.add(InlineKeyboardButton("📅 3 месяца", callback_data="premieres_period:3_months"))
-        markup.add(InlineKeyboardButton("📅 6 месяцев", callback_data="premieres_period:6_months"))
-        markup.add(InlineKeyboardButton("📅 Текущий год", callback_data="premieres_period:current_year"))
-        markup.add(InlineKeyboardButton("📅 Ближайший год", callback_data="premieres_period:next_year"))
+        markup.add(InlineKeyboardButton("📆 По датам", callback_data="premieres_mode:date"))
+        markup.add(InlineKeyboardButton("🎭 По жанрам", callback_data="premieres_mode:genre"))
         markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
         
-        bot.reply_to(message, "📅 <b>Выберите период для просмотра премьер:</b>", reply_markup=markup, parse_mode='HTML')
+        bot.reply_to(message, "Выберите вариант сортировки:", reply_markup=markup, parse_mode='HTML')
 
 
 def ticket_command(message):
@@ -4010,7 +4006,7 @@ def handle_search_reply(message):
                 
                 # Определяем тип (сериал или фильм)
                 film_type = film.get('type', '').upper()
-                is_series = film_type == 'TV_SERIES'
+                is_series = film_type in ('TV_SERIES', 'MINI_SERIES')
                 
                 if kp_id:
                     type_indicator = "📺" if is_series else "🎬"
