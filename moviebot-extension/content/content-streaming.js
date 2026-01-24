@@ -558,21 +558,31 @@
     const key = getContentKey(info);
     const hash = getContentHash(info);
     
-    // Если тот же контент, не показываем
-    if (key === lastContentKey && hash === lastContentHash) {
+    // Если тот же контент (включая сезон/серию), не показываем
+    if (hash === lastContentHash) {
+      console.log('[STREAMING] Пропуск: тот же контент (hash совпадает)');
       return false;
     }
     
-    // Проверяем кулдаун (3 минуты)
+    // Если изменился сезон или серия, сбрасываем кулдаун для этого фильма
     const now = Date.now();
     const last = lastShown[key] || 0;
-    if (now - last < 3 * 60 * 1000) {
+    const timeSinceLastShow = now - last;
+    
+    // Если изменился сезон/серия, показываем сразу (не ждем кулдаун)
+    const isNewEpisode = info.season && info.episode && 
+                         (lastContentHash && !hash.startsWith(lastContentHash.split('_').slice(0, 3).join('_')));
+    
+    if (!isNewEpisode && timeSinceLastShow < 3 * 60 * 1000) {
+      console.log('[STREAMING] Пропуск: кулдаун активен (прошло', Math.round(timeSinceLastShow / 1000), 'сек)');
       return false;
     }
     
-    lastShown[key] = now;
+    // Обновляем ключи и время показа
     lastContentKey = key;
+    lastShown[key] = now;
     lastContentHash = hash;
+    console.log('[STREAMING] Разрешено показать overlay: новый hash =', hash);
     return true;
   }
   
@@ -789,11 +799,11 @@
     });
     
     // Рендерим кнопки
-    renderButtons(info, filmData);
+    await renderButtons(info, filmData);
     console.log('[STREAMING] createOverlay завершен, renderButtons вызван');
   }
   
-  function renderButtons(info, filmData) {
+  async function renderButtons(info, filmData) {
     console.log('[STREAMING] renderButtons вызван с данными:', { info, filmData });
     const container = overlayElement?.querySelector('#mpp-buttons-container');
     if (!container) {
@@ -827,49 +837,23 @@
       addBtn.addEventListener('click', () => handleAddToDatabase(info, filmData));
       container.appendChild(addBtn);
     } else {
-      // Фильм/сериал в базе
+      // Фильм/сериал в базе - проверяем подписку
+      const storageData = await chrome.storage.local.get(['has_notifications_access']);
+      const hasNotificationsAccess = storageData.has_notifications_access || false;
+      
       if (info.isSeries) {
         // Сериал
-        const markCurrentBtn = document.createElement('button');
-        markCurrentBtn.textContent = `✅ Отметить серию ${info.season || '?'}×${info.episode || '?'}`;
-        markCurrentBtn.style.cssText = `
-          width: 100%;
-          padding: 10px;
-          background: white;
-          color: #667eea;
-          border: none;
-          border-radius: 6px;
-          font-weight: 600;
-          cursor: pointer;
-          margin-bottom: 8px;
-        `;
-        markCurrentBtn.addEventListener('click', () => handleMarkEpisode(info, filmData, false));
-        container.appendChild(markCurrentBtn);
-        
-        // Проверяем, есть ли непросмотренные серии до текущей
-        if (info.season && info.episode && filmData.has_unwatched_before) {
-          const markAllBtn = document.createElement('button');
-          markAllBtn.textContent = '✅ Отметить все предыдущие';
-          markAllBtn.style.cssText = `
-            width: 100%;
-            padding: 10px;
-            background: rgba(255,255,255,0.2);
-            color: white;
-            border: 1px solid rgba(255,255,255,0.3);
-            border-radius: 6px;
-            font-weight: 600;
-            cursor: pointer;
-            margin-bottom: 8px;
-          `;
-          markAllBtn.addEventListener('click', () => handleMarkEpisode(info, filmData, true));
-          container.appendChild(markAllBtn);
-        }
-      } else {
-        // Фильм
-        if (!filmData.watched) {
-          const markWatchedBtn = document.createElement('button');
-          markWatchedBtn.textContent = '✅ Отметить как просмотренный';
-          markWatchedBtn.style.cssText = `
+        if (!hasNotificationsAccess) {
+          // Нет подписки - показываем только информацию
+          const noAccessMsg = document.createElement('div');
+          noAccessMsg.style.cssText = 'padding: 12px; background: rgba(255,255,255,0.1); border-radius: 6px; text-align: center; font-size: 13px; margin-bottom: 8px;';
+          noAccessMsg.innerHTML = '🔒 Для отметки серий нужна подписка "Уведомления" или "Пакетная"<br><small style="opacity: 0.8;">Доступно только добавление в базу</small>';
+          container.appendChild(noAccessMsg);
+        } else {
+          // Есть подписка - показываем кнопки
+          const markCurrentBtn = document.createElement('button');
+          markCurrentBtn.textContent = `✅ Отметить серию ${info.season || '?'}×${info.episode || '?'}`;
+          markCurrentBtn.style.cssText = `
             width: 100%;
             padding: 10px;
             background: white;
@@ -880,11 +864,58 @@
             cursor: pointer;
             margin-bottom: 8px;
           `;
-          markWatchedBtn.addEventListener('click', () => handleMarkFilmWatched(info, filmData));
-          container.appendChild(markWatchedBtn);
-        } else if (!filmData.rated) {
-          // Фильм просмотрен, но не оценен - показываем оценку
-          showRatingButtons(info, filmData);
+          markCurrentBtn.addEventListener('click', () => handleMarkEpisode(info, filmData, false));
+          container.appendChild(markCurrentBtn);
+          
+          // Проверяем, есть ли непросмотренные серии до текущей
+          if (info.season && info.episode && filmData.has_unwatched_before) {
+            const markAllBtn = document.createElement('button');
+            markAllBtn.textContent = '✅ Отметить все предыдущие';
+            markAllBtn.style.cssText = `
+              width: 100%;
+              padding: 10px;
+              background: rgba(255,255,255,0.2);
+              color: white;
+              border: 1px solid rgba(255,255,255,0.3);
+              border-radius: 6px;
+              font-weight: 600;
+              cursor: pointer;
+              margin-bottom: 8px;
+            `;
+            markAllBtn.addEventListener('click', () => handleMarkEpisode(info, filmData, true));
+            container.appendChild(markAllBtn);
+          }
+        }
+      } else {
+        // Фильм
+        if (!hasNotificationsAccess) {
+          // Нет подписки - показываем только информацию
+          const noAccessMsg = document.createElement('div');
+          noAccessMsg.style.cssText = 'padding: 12px; background: rgba(255,255,255,0.1); border-radius: 6px; text-align: center; font-size: 13px; margin-bottom: 8px;';
+          noAccessMsg.innerHTML = '🔒 Для отметки фильмов нужна подписка "Уведомления" или "Пакетная"<br><small style="opacity: 0.8;">Доступно только добавление в базу</small>';
+          container.appendChild(noAccessMsg);
+        } else {
+          // Есть подписка - показываем кнопки
+          if (!filmData.watched) {
+            const markWatchedBtn = document.createElement('button');
+            markWatchedBtn.textContent = '✅ Отметить как просмотренный';
+            markWatchedBtn.style.cssText = `
+              width: 100%;
+              padding: 10px;
+              background: white;
+              color: #667eea;
+              border: none;
+              border-radius: 6px;
+              font-weight: 600;
+              cursor: pointer;
+              margin-bottom: 8px;
+            `;
+            markWatchedBtn.addEventListener('click', () => handleMarkFilmWatched(info, filmData));
+            container.appendChild(markWatchedBtn);
+          } else if (!filmData.rated) {
+            // Фильм просмотрен, но не оценен - показываем оценку
+            showRatingButtons(info, filmData);
+          }
         }
       }
     }
