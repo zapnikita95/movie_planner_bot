@@ -858,6 +858,7 @@
         try {
           const response = await fetch(`${API_BASE_URL}/api/extension/add-film`, {
             method: 'POST',
+            mode: 'cors',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               chat_id: data.linked_chat_id,
@@ -906,6 +907,7 @@
       try {
         const response = await fetch(`${API_BASE_URL}/api/extension/mark-episode`, {
           method: 'POST',
+          mode: 'cors',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             chat_id: data.linked_chat_id,
@@ -952,6 +954,7 @@
       try {
         const response = await fetch(`${API_BASE_URL}/api/extension/mark-film-watched`, {
           method: 'POST',
+          mode: 'cors',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             chat_id: data.linked_chat_id,
@@ -996,6 +999,7 @@
       try {
         const response = await fetch(`${API_BASE_URL}/api/extension/rate-film`, {
           method: 'POST',
+          mode: 'cors',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             chat_id: data.linked_chat_id,
@@ -1077,13 +1081,20 @@
           if (info.season && info.episode) {
             url += `&season=${info.season}&episode=${info.episode}`;
           }
+          
+          console.log('[STREAMING] Запрос film-info из кэша:', { kpId, url });
+          
           const response = await fetch(url, {
             method: 'GET',
+            mode: 'cors',
             headers: {
               'Content-Type': 'application/json'
             },
             credentials: 'omit'
           });
+          
+          console.log('[STREAMING] Ответ film-info из кэша:', { status: response.status, ok: response.ok, statusText: response.statusText });
+          
           if (response.ok) {
             const result = await response.json();
             if (result.success) {
@@ -1105,14 +1116,21 @@
         try {
           const searchKeyword = `${info.title} ${info.year || ''}`.trim();
           const searchType = info.isSeries ? 'TV_SERIES' : 'FILM';
+          const searchUrl = `${API_BASE_URL}/api/extension/search-film-by-keyword?keyword=${encodeURIComponent(searchKeyword)}&year=${info.year || ''}&type=${searchType}`;
           
-          const searchResponse = await fetch(`${API_BASE_URL}/api/extension/search-film-by-keyword?keyword=${encodeURIComponent(searchKeyword)}&year=${info.year || ''}&type=${searchType}`, {
+          console.log('[STREAMING] Поиск фильма:', { searchKeyword, searchType, url: searchUrl });
+          
+          const searchResponse = await fetch(searchUrl, {
             method: 'GET',
+            mode: 'cors',
             headers: {
               'Content-Type': 'application/json'
             },
             credentials: 'omit'
           });
+          
+          console.log('[STREAMING] Ответ поиска:', { status: searchResponse.status, ok: searchResponse.ok });
+          
           if (searchResponse.ok) {
             const searchResult = await searchResponse.json();
             if (searchResult.success && searchResult.kp_id) {
@@ -1127,13 +1145,20 @@
                 if (info.season && info.episode) {
                   url += `&season=${info.season}&episode=${info.episode}`;
                 }
+                
+                console.log('[STREAMING] Получение данных о фильме:', { kpId, url });
+                
                 const filmResponse = await fetch(url, {
                   method: 'GET',
+                  mode: 'cors',
                   headers: {
                     'Content-Type': 'application/json'
                   },
                   credentials: 'omit'
                 });
+                
+                console.log('[STREAMING] Ответ film-info:', { status: filmResponse.status, ok: filmResponse.ok });
+                
                 if (filmResponse.ok) {
                   const filmResult = await filmResponse.json();
                   if (filmResult.success) {
