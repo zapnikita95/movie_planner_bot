@@ -631,7 +631,7 @@
     }
   }
   
-  function createOverlay(info, filmData) {
+  async function createOverlay(info, filmData) {
     removeOverlay();
     
     currentInfo = info;
