@@ -300,33 +300,13 @@
         extract: (el) => el?.textContent?.match(/(\d{4})/)?.[1]
       },
       seasonEpisode: {
-        selector: '.PlayerData_episodeInfo__D7dT7, p.header-module_subtitle__xeHTB, [class*="subtitle"], [class*="Subtitle"], .episode-info, [data-testid*="episode"]',
+        selector: '.PlayButton_playButtonContext__4XH_C, .PlayerData_episodeInfo__D7dT7',
         extract: (el) => {
           const t = el?.textContent?.trim() || '';
-          // Пробуем разные форматы: "1 сезон, 2 серия", "Сезон 1, Серия 2", "S01E02"
-          const m = t.match(/(\d+)\s*сезон.*?(\d+)\s*серия/i) ||
-                     t.match(/сезон\s*(\d+).*?серия\s*(\d+)/i) ||
-                     t.match(/S(\d+)E(\d+)/i) ||
-                     t.match(/(\d+)\s*×\s*(\d+)/);
+          // Формат: "1 сезон, 1 серия" или "1 сезон,  1 серия" (с двойным пробелом)
+          const m = t.match(/(\d+)\s*сезон\s*,?\s*(\d+)\s*серия/i);
           if (m) {
             return { season: parseInt(m[1]), episode: parseInt(m[2]) };
-          }
-          return null;
-        },
-        fromUrl: () => {
-          const path = window.location.pathname;
-          // Пробуем разные форматы URL
-          const seasonMatch = path.match(/season[_-]?(\d+)/i) || path.match(/s(\d+)/i);
-          const episodeMatch = path.match(/episode[_-]?(\d+)/i) || path.match(/e(\d+)/i);
-          if (seasonMatch && episodeMatch) {
-            return { season: parseInt(seasonMatch[1]), episode: parseInt(episodeMatch[1]) };
-          }
-          // Пробуем формат /watch/series_57725_tajna-ostrova-skribbli-gam?s=1&e=1
-          const urlParams = new URLSearchParams(window.location.search);
-          const season = urlParams.get('s') || urlParams.get('season');
-          const episode = urlParams.get('e') || urlParams.get('episode');
-          if (season && episode) {
-            return { season: parseInt(season), episode: parseInt(episode) };
           }
           return null;
         }

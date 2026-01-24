@@ -2687,7 +2687,8 @@ def create_web_app(bot):
                     pass
         except Exception as e:
             logger.error(f"[EXTENSION API] Ошибка отметки серии: {e}", exc_info=True)
-            return jsonify({"success": False, "error": "server error"}), 500
+            error_msg = str(e) if e else "server error"
+            return jsonify({"success": False, "error": error_msg}), 500
     
     @app.route('/api/extension/mark-film-watched', methods=['POST', 'OPTIONS'])
     def mark_film_watched():
