@@ -804,7 +804,10 @@
     console.log('[STREAMING] renderButtons: контейнер найден, очищаем');
     container.innerHTML = '';
     
-    const isInDatabase = filmData && filmData.film_id;
+    // ВАЖНО: проверяем film_id явно (может быть 0, null, undefined)
+    const isInDatabase = filmData && filmData.film_id !== null && filmData.film_id !== undefined;
+    
+    console.log('[STREAMING] renderButtons: isInDatabase=', isInDatabase, 'film_id=', filmData?.film_id);
     
     if (!isInDatabase) {
       // Фильм/сериал не в базе - показываем кнопку "Добавить в базу"
@@ -1216,6 +1219,7 @@
           
           if (searchResponse.ok) {
             const searchResult = await searchResponse.json();
+            console.log('[STREAMING] Результат поиска:', searchResult);
             if (searchResult.success && searchResult.kp_id) {
               kpId = searchResult.kp_id;
               
@@ -1251,15 +1255,50 @@
                     console.log('[STREAMING] filmData после парсинга (после поиска):', filmData, 'film_id из result:', filmResult.film_id);
                   } else {
                     console.error('[STREAMING] API вернул success: false после поиска:', filmResult);
+                    // Если фильм не найден в БД, но kp_id есть - создаем базовые данные
+                    filmData = {
+                      kp_id: kpId,
+                      film_id: null,
+                      watched: false,
+                      rated: false,
+                      has_unwatched_before: false
+                    };
                   }
                 } else {
                   console.error('[STREAMING] HTTP ошибка после поиска:', filmResponse.status);
+                  // Если ошибка, но kp_id есть - создаем базовые данные
+                  if (kpId) {
+                    filmData = {
+                      kp_id: kpId,
+                      film_id: null,
+                      watched: false,
+                      rated: false,
+                      has_unwatched_before: false
+                    };
+                  }
                 }
               } catch (filmFetchError) {
                 console.error('[STREAMING] Ошибка fetch film-info после поиска:', filmFetchError);
-                // Продолжаем с базовыми данными
+                // Если ошибка, но kp_id есть - создаем базовые данные
+                if (kpId) {
+                  filmData = {
+                    kp_id: kpId,
+                    film_id: null,
+                    watched: false,
+                    rated: false,
+                    has_unwatched_before: false
+                  };
+                }
               }
+            } else {
+              console.log('[STREAMING] Фильм не найден в Kinopoisk API:', searchResult);
+              // Фильм не найден - не показываем виджет
+              return;
             }
+          } else {
+            console.error('[STREAMING] HTTP ошибка поиска:', searchResponse.status);
+            // Если ошибка поиска - не показываем виджет
+            return;
           }
         } catch (searchError) {
           console.error('[STREAMING] Ошибка fetch search-film-by-keyword:', searchError);
@@ -1269,8 +1308,13 @@
       
       // Если не нашли фильм, создаем базовые данные
       if (!filmData) {
+        // Если нет kp_id, значит фильм не найден - не показываем виджет
+        if (!kpId) {
+          console.log('[STREAMING] Пропуск: фильм не найден, нет kp_id');
+          return;
+        }
         filmData = {
-          kp_id: kpId || null,
+          kp_id: kpId,
           film_id: null,
           watched: false,
           rated: false,
@@ -1278,7 +1322,7 @@
         };
       }
       
-      // Показываем плашку (даже если были ошибки API)
+      // Показываем плашку (даже если были ошибки API, но kp_id есть)
       console.log('[STREAMING] Вызываем createOverlay с данными:', { info, filmData });
       createOverlay(info, filmData);
       console.log('[STREAMING] createOverlay вызван');
