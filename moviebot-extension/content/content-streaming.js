@@ -624,6 +624,7 @@
     
     // Загружаем сохраненную позицию
     const savedPos = loadOverlayPosition();
+    console.log('[STREAMING] Загруженная позиция:', savedPos);
     
     // Устанавливаем начальную позицию
     let initialStyle = `
@@ -641,27 +642,34 @@
       pointer-events: auto;
       cursor: move;
       user-select: none;
+      display: block !important;
+      visibility: visible !important;
+      opacity: 1 !important;
     `;
     
     // Устанавливаем позицию (обязательно указываем и left/right, и top/bottom)
-    if (savedPos.left !== undefined) {
-      initialStyle += `left: ${savedPos.left}px; right: auto;`;
-    } else if (savedPos.right !== undefined) {
-      initialStyle += `right: ${savedPos.right}px; left: auto;`;
+    // Проверяем, что значения валидные (не null, не undefined, не NaN)
+    if (savedPos && typeof savedPos.left === 'number' && !isNaN(savedPos.left)) {
+      initialStyle += `left: ${savedPos.left}px !important; right: auto !important;`;
+      console.log('[STREAMING] Установлена позиция left:', savedPos.left);
+    } else if (savedPos && typeof savedPos.right === 'number' && !isNaN(savedPos.right)) {
+      initialStyle += `right: ${savedPos.right}px !important; left: auto !important;`;
+      console.log('[STREAMING] Установлена позиция right:', savedPos.right);
     } else {
-      initialStyle += `right: 20px; left: auto;`;
+      initialStyle += `right: 20px !important; left: auto !important;`;
+      console.log('[STREAMING] Установлена позиция по умолчанию: right 20px');
     }
     
-    if (savedPos.top !== undefined) {
-      initialStyle += `top: ${savedPos.top}px; bottom: auto;`;
-    } else if (savedPos.bottom !== undefined) {
-      initialStyle += `bottom: ${savedPos.bottom}px; top: auto;`;
+    if (savedPos && typeof savedPos.top === 'number' && !isNaN(savedPos.top)) {
+      initialStyle += `top: ${savedPos.top}px !important; bottom: auto !important;`;
+      console.log('[STREAMING] Установлена позиция top:', savedPos.top);
+    } else if (savedPos && typeof savedPos.bottom === 'number' && !isNaN(savedPos.bottom)) {
+      initialStyle += `bottom: ${savedPos.bottom}px !important; top: auto !important;`;
+      console.log('[STREAMING] Установлена позиция bottom:', savedPos.bottom);
     } else {
-      initialStyle += `bottom: 20px; top: auto;`;
+      initialStyle += `bottom: 20px !important; top: auto !important;`;
+      console.log('[STREAMING] Установлена позиция по умолчанию: bottom 20px');
     }
-    
-    // Убеждаемся, что overlay видим
-    initialStyle += `display: block; visibility: visible; opacity: 1;`;
     
     overlayElement.style.cssText = initialStyle;
     
