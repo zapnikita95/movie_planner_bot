@@ -22,7 +22,7 @@ from moviebot.database.db_operations import (
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 from moviebot.database.db_operations import get_user_timezone_or_default, get_user_films_count
 from moviebot.utils.helpers import extract_film_info_from_existing
-from moviebot.api.kinopoisk_api import search_films, extract_movie_info, get_premieres_for_period, get_seasons_data, search_films_by_filters, get_film_distribution
+from moviebot.api.kinopoisk_api import search_films, extract_movie_info, get_premieres_for_period, get_seasons_data, search_films_by_filters, get_film_distribution, search_persons, get_staff
 from moviebot.utils.helpers import has_tickets_access, has_recommendations_access, has_notifications_access
 from moviebot.utils.parsing import parse_plan_date_text
 from moviebot.bot.handlers.seasons import get_series_airing_status, count_episodes_for_watch_check
@@ -1621,34 +1621,20 @@ def search_type_callback(call):
             }
         logger.info(f"[SEARCH TYPE] ✅ Состояние обновлено: {user_search_state[user_id]}")
 
-        # Текущий тип (может быть 'film', 'series' или 'mixed' из состояния)
         current_type = user_search_state[user_id].get('search_type', 'mixed')
 
-        # Текст промпта в зависимости от текущего типа
-        type_text = {
-            'film': "🎬 фильмы",
-            'series': "📺 сериалы",
-            'mixed': "🎬📺 фильмы и сериалы"
-        }.get(current_type, "🎬📺 фильмы и сериалы")
-
-        # === Универсальные кнопки: всегда две, галочка только на текущем ===
-        markup = InlineKeyboardMarkup(row_width=2)
-
-        film_btn_text = "🎬 Найти фильм"
-        if current_type == 'film':
-            film_btn_text += " ✅"
-
-        series_btn_text = "📺 Найти сериал"
-        if current_type == 'series':
-            series_btn_text += " ✅"
-
+        markup = InlineKeyboardMarkup(row_width=3)
+        film_btn = "🎬 Фильмы" + (" ✅" if current_type == "film" else "")
+        series_btn = "📺 Сериалы" + (" ✅" if current_type == "series" else "")
+        people_btn = "👥 Люди" + (" ✅" if current_type == "people" else "")
         markup.add(
-            InlineKeyboardButton(film_btn_text, callback_data="search_type:film"),
-            InlineKeyboardButton(series_btn_text, callback_data="search_type:series")
+            InlineKeyboardButton(film_btn, callback_data="search_type:film"),
+            InlineKeyboardButton(series_btn, callback_data="search_type:series"),
+            InlineKeyboardButton(people_btn, callback_data="search_type:people")
         )
         markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
 
-        prompt_text = f"🔍 Укажите запрос для поиска {type_text} в ответном сообщении, например: джон уик"
+        prompt_text = "🔍 Выберите направление поиска — по фильмам, по сериалам, по людям, или укажите запрос для поиска фильмов и сериалов в ответном сообщении. Примеры запросов: Джон Уик, Миллиары, Брэд Питт"
 
         try:
             sent_msg = bot.edit_message_text(
@@ -1717,32 +1703,21 @@ def search_retry_callback(call):
         chat_id = call.message.chat.id
         is_private = call.message.chat.type == 'private'
         
-        # Получаем тип поиска из состояния, если есть
         search_type = user_search_state.get(user_id, {}).get('search_type', 'mixed')
-        type_text = "🎬 фильмы" if search_type == 'film' else "📺 сериалы" if search_type == 'series' else "🎬📺 фильмы и сериалы"
-        
-        # Создаем кнопки для выбора типа поиска
-        markup = InlineKeyboardMarkup(row_width=2)
-        if search_type == 'film':
-            markup.add(
-                InlineKeyboardButton("🎬 Найти фильм ✅", callback_data="search_type:film"),
-                InlineKeyboardButton("📺 Найти сериал", callback_data="search_type:series")
-            )
-        elif search_type == 'series':
-            markup.add(
-                InlineKeyboardButton("🎬 Найти фильм", callback_data="search_type:film"),
-                InlineKeyboardButton("📺 Найти сериал ✅", callback_data="search_type:series")
-            )
-        else:
-            markup.add(
-                InlineKeyboardButton("🎬 Найти фильм", callback_data="search_type:film"),
-                InlineKeyboardButton("📺 Найти сериал", callback_data="search_type:series")
-            )
+
+        markup = InlineKeyboardMarkup(row_width=3)
+        film_btn = "🎬 Фильмы" + (" ✅" if search_type == "film" else "")
+        series_btn = "📺 Сериалы" + (" ✅" if search_type == "series" else "")
+        people_btn = "👥 Люди" + (" ✅" if search_type == "people" else "")
+        markup.add(
+            InlineKeyboardButton(film_btn, callback_data="search_type:film"),
+            InlineKeyboardButton(series_btn, callback_data="search_type:series"),
+            InlineKeyboardButton(people_btn, callback_data="search_type:people")
+        )
         markup.add(InlineKeyboardButton("⬅️ Вернуться в меню", callback_data="back_to_start_menu"))
         markup.add(InlineKeyboardButton("❌ Отмена", callback_data="search:cancel"))
-        
-        # Отправляем новое сообщение с промптом
-        prompt_text = f"🔍 Укажите запрос для поиска {type_text} в ответном сообщении, например: джон уик"
+
+        prompt_text = "🔍 Выберите направление поиска — по фильмам, по сериалам, по людям, или укажите запрос для поиска фильмов и сериалов в ответном сообщении. Примеры запросов: Джон Уик, Миллиары, Брэд Питт"
         if is_private:
             prompt_text += "\n\n📝 В личке можно отправить запрос следующим сообщением или в ответ на это сообщение."
         else:
@@ -1787,6 +1762,322 @@ def search_films_with_type(query, page=1, search_type='mixed'):
     # Если search_type == 'mixed', возвращаем все
     
     return films, total_pages
+
+
+PERSON_PROFESSION_KEYS = ('ACTOR', 'PRODUCER', 'DIRECTOR', 'OPERATOR', 'WRITER')
+PERSON_PROFESSION_LABELS = {
+    'ACTOR': 'Актер', 'PRODUCER': 'Продюсер', 'DIRECTOR': 'Режиссер',
+    'OPERATOR': 'Оператор', 'WRITER': 'Сценарист',
+}
+PERSON_FILMS_PER_PAGE = 8
+
+
+def _person_films_by_role(staff_data, role_key):
+    films = staff_data.get('films') or []
+    filtered = [f for f in films if (f.get('professionKey') or '').upper() == role_key.upper()]
+    seen = set()
+    out = []
+    for f in filtered:
+        fid = f.get('filmId')
+        if fid is not None and fid not in seen:
+            seen.add(fid)
+            out.append(f)
+    return out
+
+
+def _person_roles_from_staff(staff_data):
+    films = staff_data.get('films') or []
+    seen = set()
+    out = []
+    for f in films:
+        k = (f.get('professionKey') or '').upper()
+        if k in PERSON_PROFESSION_KEYS and k not in seen:
+            seen.add(k)
+            out.append(k)
+    return sorted(out, key=lambda x: list(PERSON_PROFESSION_KEYS).index(x) if x in PERSON_PROFESSION_KEYS else 99)
+
+
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("person_select:"))
+def person_select_callback(call):
+    try:
+        bot.answer_callback_query(call.id)
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        person_id = call.data.split(":")[1].strip()
+        if not person_id or not person_id.isdigit():
+            return
+        staff = get_staff(int(person_id))
+        if not staff:
+            try:
+                bot.edit_message_text("❌ Не удалось загрузить данные персоны.", chat_id, call.message.message_id)
+            except Exception:
+                pass
+            return
+        name = staff.get('nameRu') or staff.get('nameEn') or 'Без имени'
+        roles = _person_roles_from_staff(staff)
+        if not roles:
+            try:
+                bot.edit_message_text(f"У {name} нет подходящих ролей (актёр, режиссёр и т.д.).", chat_id, call.message.message_id)
+            except Exception:
+                pass
+            return
+        text = f"Выберите роль, в которой выступал(а) <b>{name}</b>"
+        markup = InlineKeyboardMarkup(row_width=1)
+        for r in roles:
+            label = PERSON_PROFESSION_LABELS.get(r, r)
+            markup.add(InlineKeyboardButton(label, callback_data=f"person_role:{person_id}:{r}"))
+        markup.add(InlineKeyboardButton("◀️ Назад", callback_data="person_back_to_results"))
+        state = dict(user_search_state.get(user_id) or {})
+        state.update({'person_id': person_id, 'person_name': name, 'staff_data': staff, 'chat_id': chat_id, 'search_type': 'people'})
+        user_search_state[user_id] = state
+        try:
+            bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+        except Exception:
+            bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+    except Exception as e:
+        logger.error(f"[PERSON SELECT] {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+        except Exception:
+            pass
+
+
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("person_back_to_results"))
+def person_back_to_results_callback(call):
+    try:
+        bot.answer_callback_query(call.id)
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        state = user_search_state.get(user_id) or {}
+        results = state.get('people_results') or []
+        if not results:
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("🔄 Повторить поиск", callback_data="search:retry"))
+            markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+            try:
+                bot.edit_message_text("❌ Результаты поиска людей не сохранены. Повторите поиск.", chat_id, call.message.message_id, reply_markup=markup)
+            except Exception:
+                bot.send_message(chat_id, "❌ Результаты поиска людей не сохранены. Повторите поиск.", reply_markup=markup)
+            if user_id in user_search_state:
+                del user_search_state[user_id]
+            return
+        text = "👥 Вот люди из киносферы, найденные по вашему запросу:\n\n"
+        markup = InlineKeyboardMarkup(row_width=1)
+        for p in results[:20]:
+            pid = p.get('kinopoiskId')
+            name = p.get('nameRu') or p.get('nameEn') or 'Без имени'
+            if pid:
+                btn = (name[:60] + "…") if len(name) > 60 else name
+                markup.add(InlineKeyboardButton(btn, callback_data=f"person_select:{pid}"))
+        markup.add(InlineKeyboardButton("🔄 Повторить поиск", callback_data="search:retry"))
+        markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+        keep = {'chat_id', 'message_id', 'search_type', 'people_query', 'people_results'}
+        user_search_state[user_id] = {k: v for k, v in state.items() if k in keep}
+        try:
+            bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+        except Exception:
+            bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+    except Exception as e:
+        logger.error(f"[PERSON BACK RESULTS] {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+        except Exception:
+            pass
+
+
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("person_back_to_roles"))
+def person_back_to_roles_callback(call):
+    try:
+        bot.answer_callback_query(call.id)
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        state = user_search_state.get(user_id) or {}
+        person_id = state.get('person_id')
+        name = state.get('person_name') or 'Без имени'
+        staff = state.get('staff_data')
+        if not staff or not person_id:
+            bot.answer_callback_query(call.id, "❌ Сессия поиска устарела. Повторите поиск.", show_alert=True)
+            return
+        roles = _person_roles_from_staff(staff)
+        if not roles:
+            return
+        text = f"Выберите роль, в которой выступал(а) <b>{name}</b>"
+        markup = InlineKeyboardMarkup(row_width=1)
+        for r in roles:
+            label = PERSON_PROFESSION_LABELS.get(r, r)
+            markup.add(InlineKeyboardButton(label, callback_data=f"person_role:{person_id}:{r}"))
+        markup.add(InlineKeyboardButton("◀️ Назад", callback_data="person_back_to_results"))
+        try:
+            bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+        except Exception:
+            bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+    except Exception as e:
+        logger.error(f"[PERSON BACK ROLES] {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+        except Exception:
+            pass
+
+
+def _show_person_films_page(call, person_id, role_key, page=0):
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    state = user_search_state.get(user_id) or {}
+    staff = state.get('staff_data')
+    name = state.get('person_name') or 'Без имени'
+    if not staff:
+        return
+    films = _person_films_by_role(staff, role_key)
+    total = len(films)
+    total_pages = max(1, (total + PERSON_FILMS_PER_PAGE - 1) // PERSON_FILMS_PER_PAGE)
+    page = max(0, min(page, total_pages - 1))
+    start = page * PERSON_FILMS_PER_PAGE
+    chunk = films[start:start + PERSON_FILMS_PER_PAGE]
+    label = PERSON_PROFESSION_LABELS.get(role_key, role_key)
+    text = f"🎬 Фильмы и сериалы: <b>{name}</b> — {label}\n\n"
+    markup = InlineKeyboardMarkup(row_width=1)
+    for f in chunk:
+        film_id = f.get('filmId')
+        title = f.get('nameRu') or f.get('nameEn') or 'Без названия'
+        year = f.get('year')
+        rating = f.get('rating')
+        year_str = f" ({year})" if year else ""
+        r_str = f" ⭐ {rating}" if rating else ""
+        btn_text = title + year_str + r_str
+        btn = btn_text[:60] if len(btn_text) <= 60 else btn_text[:57] + "..."
+        markup.add(InlineKeyboardButton(btn, callback_data=f"add_film_{film_id}:FILM"))
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton("◀️ Назад", callback_data=f"person_films_page:{person_id}:{role_key}:{page - 1}"))
+    nav.append(InlineKeyboardButton(f"Стр. {page + 1}/{total_pages}", callback_data="noop"))
+    if page < total_pages - 1:
+        nav.append(InlineKeyboardButton("Вперёд ▶️", callback_data=f"person_films_page:{person_id}:{role_key}:{page + 1}"))
+    if nav:
+        markup.row(*nav)
+    markup.add(InlineKeyboardButton("📥 Добавить все фильмы в базу", callback_data=f"person_add_all:{person_id}:{role_key}"))
+    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="person_back_to_roles"))
+    try:
+        bot.edit_message_text(text, chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+    except Exception:
+        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+
+
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("person_role:"))
+def person_role_callback(call):
+    try:
+        bot.answer_callback_query(call.id)
+        parts = call.data.split(":")
+        if len(parts) < 3:
+            return
+        person_id, role_key = parts[1], parts[2]
+        state = user_search_state.get(call.from_user.id) or {}
+        state['person_id'] = person_id
+        state['person_role'] = role_key
+        user_search_state[call.from_user.id] = state
+        _show_person_films_page(call, person_id, role_key, page=0)
+    except Exception as e:
+        logger.error(f"[PERSON ROLE] {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+        except Exception:
+            pass
+
+
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("person_films_page:"))
+def person_films_page_callback(call):
+    try:
+        bot.answer_callback_query(call.id)
+        parts = call.data.split(":")
+        if len(parts) < 4:
+            return
+        person_id, role_key = parts[1], parts[2]
+        page = int(parts[3]) if parts[3].isdigit() else 0
+        _show_person_films_page(call, person_id, role_key, page=page)
+    except Exception as e:
+        logger.error(f"[PERSON FILMS PAGE] {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+        except Exception:
+            pass
+
+
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("person_add_all:"))
+def person_add_all_callback(call):
+    try:
+        bot.answer_callback_query(call.id)
+        parts = call.data.split(":")
+        if len(parts) < 3:
+            return
+        person_id, role_key = parts[1], parts[2]
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        msg_id = call.message.message_id
+        state = user_search_state.get(user_id) or {}
+        staff = state.get('staff_data') or get_staff(int(person_id))
+        name = state.get('person_name') or 'Без имени'
+        if not staff:
+            try:
+                bot.edit_message_text("❌ Не удалось загрузить данные персоны.", chat_id, msg_id)
+            except Exception:
+                pass
+            return
+        films = _person_films_by_role(staff, role_key)
+        if not films:
+            try:
+                bot.edit_message_text(f"Нет фильмов по выбранной роли у {name}.", chat_id, msg_id)
+            except Exception:
+                pass
+            return
+        loading = bot.send_message(chat_id, "⏳ Добавляю фильмы в базу... 0%")
+        loading_id = loading.message_id if loading else None
+        added = skipped = 0
+        total = len(films)
+        for i, f in enumerate(films):
+            film_id = f.get('filmId')
+            if not film_id:
+                continue
+            link = f"https://www.kinopoisk.ru/film/{film_id}/"
+            info = extract_movie_info(link)
+            if not info:
+                skipped += 1
+                continue
+            is_series = info.get('is_series', False)
+            link = f"https://www.kinopoisk.ru/series/{film_id}/" if is_series else f"https://www.kinopoisk.ru/film/{film_id}/"
+            fid, inserted = ensure_movie_in_database(chat_id, film_id, link, info, user_id)
+            if inserted:
+                added += 1
+            else:
+                skipped += 1
+            if loading_id and (i + 1) % 3 == 0:
+                try:
+                    pct = int((i + 1) / total * 100)
+                    bot.edit_message_text(f"⏳ Добавляю фильмы в базу... {pct}% ({i + 1}/{total})", chat_id, loading_id)
+                except Exception:
+                    pass
+        if loading_id:
+            try:
+                bot.delete_message(chat_id, loading_id)
+            except Exception:
+                pass
+        line = f"Добавлено в базу <b>{added}</b> фильмов <b>{name}</b>."
+        if skipped:
+            line += f" Пропущено (уже в базе/план/просмотр): {skipped}."
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("✅ Готово", callback_data="back_to_start_menu"))
+        markup.add(InlineKeyboardButton("◀️ В главное меню", callback_data="back_to_start_menu"))
+        try:
+            bot.edit_message_text(line, chat_id, msg_id, reply_markup=markup, parse_mode='HTML')
+        except Exception:
+            bot.send_message(chat_id, line, reply_markup=markup, parse_mode='HTML')
+        if user_id in user_search_state:
+            del user_search_state[user_id]
+    except Exception as e:
+        logger.error(f"[PERSON ADD ALL] {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+        except Exception:
+            pass
+
 
 # Обработчик поиска
 @bot.callback_query_handler(func=lambda call: call.data.startswith("view_film_from_ticket:"))
@@ -1903,16 +2194,15 @@ def handle_search(message):
         query = message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else None
 
         if not query:
-            # Создаем кнопки для выбора типа поиска (default mixed — обе без ✅)
-            markup = InlineKeyboardMarkup(row_width=2)
+            markup = InlineKeyboardMarkup(row_width=3)
             markup.add(
-                InlineKeyboardButton("🎬 Найти фильм", callback_data="search_type:film"),
-                InlineKeyboardButton("📺 Найти сериал", callback_data="search_type:series")
+                InlineKeyboardButton("🎬 Фильмы", callback_data="search_type:film"),
+                InlineKeyboardButton("📺 Сериалы", callback_data="search_type:series"),
+                InlineKeyboardButton("👥 Люди", callback_data="search_type:people")
             )
             markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
 
-            # Текст для mixed
-            prompt_text = "🔍 Укажите запрос для поиска 🎬📺 фильмов и сериалов в ответном сообщении, например: джон уик"
+            prompt_text = "🔍 Выберите направление поиска — по фильмам, по сериалам, по людям, или укажите запрос для поиска фильмов и сериалов в ответном сообщении. Примеры запросов: Джон Уик, Миллиары, Брэд Питт"
 
             reply_msg = bot.reply_to(message, prompt_text, reply_markup=markup)
 
@@ -1933,8 +2223,35 @@ def handle_search(message):
         
         logger.info(f"Команда /search от пользователя {message.from_user.id}, запрос: {query}")
         
-        # Получаем тип поиска из состояния, если есть
         search_type = user_search_state.get(message.from_user.id, {}).get('search_type', 'mixed')
+
+        if search_type == 'people':
+            persons, _ = search_persons(query, page=1)
+            if not persons:
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("🔄 Повторить поиск", callback_data="search:retry"))
+                markup.add(InlineKeyboardButton("⬅️ Вернуться в меню", callback_data="back_to_start_menu"))
+                bot.reply_to(message, f"❌ По запросу «{query}» людей не найдено.", reply_markup=markup)
+                return
+            results_text = "👥 Вот люди из киносферы, найденные по вашему запросу:\n\n"
+            markup = InlineKeyboardMarkup(row_width=1)
+            for p in persons[:20]:
+                pid = p.get('kinopoiskId')
+                name = p.get('nameRu') or p.get('nameEn') or 'Без имени'
+                if pid:
+                    btn = (name[:60] + "…") if len(name) > 60 else name
+                    markup.add(InlineKeyboardButton(btn, callback_data=f"person_select:{pid}"))
+            markup.add(InlineKeyboardButton("🔄 Повторить поиск", callback_data="search:retry"))
+            markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+            results_msg = bot.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
+            if results_msg:
+                user_search_state[message.from_user.id] = {
+                    'chat_id': message.chat.id, 'message_id': results_msg.message_id,
+                    'search_type': 'people', 'people_query': query, 'people_results': persons[:20],
+                }
+            logger.info(f"[SEARCH] Люди: отправлено {len(persons)} результатов")
+            return
+
         films, total_pages = search_films_with_type(query, page=1, search_type=search_type)
         if not films:
             markup = InlineKeyboardMarkup(row_width=1)
@@ -3647,26 +3964,50 @@ def handle_dice_result(message):
             # Не требуем точного совпадения message_id, так как состояние может быть обновлено
             logger.info(f"[SEARCH REPLY] Пользователь {user_id} в состоянии поиска, обрабатываем запрос: {query}")
             
-            # Получаем тип поиска из состояния
             search_type = state.get('search_type', 'mixed')
             logger.info(f"[SEARCH REPLY] Тип поиска: {search_type}")
-            
-            # Выполняем поиск
+
+            if search_type == 'people':
+                persons, _ = search_persons(query, page=1)
+                if not persons:
+                    markup = InlineKeyboardMarkup(row_width=1)
+                    markup.add(InlineKeyboardButton("🔄 Повторить поиск", callback_data="search:retry"))
+                    markup.add(InlineKeyboardButton("⬅️ Вернуться в меню", callback_data="back_to_start_menu"))
+                    bot.reply_to(message, f"❌ По запросу «{query}» людей не найдено.", reply_markup=markup)
+                    if user_id in user_search_state:
+                        del user_search_state[user_id]
+                    return
+                results_text = "👥 Вот люди из киносферы, найденные по вашему запросу:\n\n"
+                markup = InlineKeyboardMarkup(row_width=1)
+                for p in persons[:20]:
+                    pid = p.get('kinopoiskId')
+                    name = p.get('nameRu') or p.get('nameEn') or 'Без имени'
+                    if pid:
+                        btn = (name[:60] + "…") if len(name) > 60 else name
+                        markup.add(InlineKeyboardButton(btn, callback_data=f"person_select:{pid}"))
+                markup.add(InlineKeyboardButton("🔄 Повторить поиск", callback_data="search:retry"))
+                markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+                sent = bot.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
+                user_search_state[user_id] = {
+                    'chat_id': chat_id, 'message_id': sent.message_id if sent else None,
+                    'search_type': 'people', 'people_query': query, 'people_results': persons[:20],
+                }
+                logger.info(f"[SEARCH REPLY] Люди: отправлено {len(persons)} результатов")
+                return
+
             logger.info(f"[SEARCH REPLY] Вызов search_films_with_type для query={query}, search_type={search_type}")
             films, total_pages = search_films_with_type(query, page=1, search_type=search_type)
             logger.info(f"[SEARCH REPLY] Поиск завершен: найдено {len(films)} результатов, страниц: {total_pages}")
-            
+
             if not films:
-                logger.warning(f"[SEARCH REPLY] Ничего не найдено по запросу '{query}'")
                 markup = InlineKeyboardMarkup(row_width=1)
                 markup.add(InlineKeyboardButton("🔄 Повторить запрос", callback_data="search:retry"))
                 markup.add(InlineKeyboardButton("⬅️ Вернуться в меню", callback_data="back_to_start_menu"))
                 bot.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'", reply_markup=markup)
-                # Очищаем состояние
-                del user_search_state[user_id]
+                if user_id in user_search_state:
+                    del user_search_state[user_id]
                 return
-            
-            # Формируем сообщение с результатами
+
             results_text = f"🔍 Результаты поиска '{query}':\n\n"
             markup = InlineKeyboardMarkup(row_width=1)
             
@@ -4015,26 +4356,50 @@ def handle_search_reply(message):
             # Не требуем точного совпадения message_id, так как состояние может быть обновлено
             logger.info(f"[SEARCH REPLY] Пользователь {user_id} в состоянии поиска, обрабатываем запрос: {query}")
             
-            # Получаем тип поиска из состояния
             search_type = state.get('search_type', 'mixed')
             logger.info(f"[SEARCH REPLY] Тип поиска: {search_type}")
-            
-            # Выполняем поиск
+
+            if search_type == 'people':
+                persons, _ = search_persons(query, page=1)
+                if not persons:
+                    markup = InlineKeyboardMarkup(row_width=1)
+                    markup.add(InlineKeyboardButton("🔄 Повторить поиск", callback_data="search:retry"))
+                    markup.add(InlineKeyboardButton("⬅️ Вернуться в меню", callback_data="back_to_start_menu"))
+                    bot.reply_to(message, f"❌ По запросу «{query}» людей не найдено.", reply_markup=markup)
+                    if user_id in user_search_state:
+                        del user_search_state[user_id]
+                    return
+                results_text = "👥 Вот люди из киносферы, найденные по вашему запросу:\n\n"
+                markup = InlineKeyboardMarkup(row_width=1)
+                for p in persons[:20]:
+                    pid = p.get('kinopoiskId')
+                    name = p.get('nameRu') or p.get('nameEn') or 'Без имени'
+                    if pid:
+                        btn = (name[:60] + "…") if len(name) > 60 else name
+                        markup.add(InlineKeyboardButton(btn, callback_data=f"person_select:{pid}"))
+                markup.add(InlineKeyboardButton("🔄 Повторить поиск", callback_data="search:retry"))
+                markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+                sent = bot.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
+                user_search_state[user_id] = {
+                    'chat_id': chat_id, 'message_id': sent.message_id if sent else None,
+                    'search_type': 'people', 'people_query': query, 'people_results': persons[:20],
+                }
+                logger.info(f"[SEARCH REPLY] Люди: отправлено {len(persons)} результатов")
+                return
+
             logger.info(f"[SEARCH REPLY] Вызов search_films_with_type для query={query}, search_type={search_type}")
             films, total_pages = search_films_with_type(query, page=1, search_type=search_type)
             logger.info(f"[SEARCH REPLY] Поиск завершен: найдено {len(films)} результатов, страниц: {total_pages}")
-            
+
             if not films:
-                logger.warning(f"[SEARCH REPLY] Ничего не найдено по запросу '{query}'")
                 markup = InlineKeyboardMarkup(row_width=1)
                 markup.add(InlineKeyboardButton("🔄 Повторить запрос", callback_data="search:retry"))
                 markup.add(InlineKeyboardButton("⬅️ Вернуться в меню", callback_data="back_to_start_menu"))
                 bot.reply_to(message, f"❌ Ничего не найдено по запросу '{query}'", reply_markup=markup)
-                # Очищаем состояние
-                del user_search_state[user_id]
+                if user_id in user_search_state:
+                    del user_search_state[user_id]
                 return
-            
-            # Формируем сообщение с результатами
+
             results_text = f"🔍 Результаты поиска '{query}':\n\n"
             markup = InlineKeyboardMarkup(row_width=1)
             

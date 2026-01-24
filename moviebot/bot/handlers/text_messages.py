@@ -1175,20 +1175,65 @@ def expect_text_from_user(user_id: int, chat_id: int, expected_for: str = 'searc
 
 # ==================== ОБЩАЯ ФУНКЦИЯ ДЛЯ ОБРАБОТКИ ПОИСКА ====================
 def process_search_query(message, query, reply_to_message=None):
-    """Единая логика поиска и отправки результатов. Используется обоими обработчиками."""
-    # Ленивый импорт для избежания циклического импорта
+    """Единая логика поиска и отправки результатов. Поддерживает фильмы, сериалы, людей."""
     from moviebot.bot.handlers.series import search_films_with_type
+    from moviebot.api.kinopoisk_api import search_persons
     
     user_id = message.from_user.id
     chat_id = message.chat.id
     
     try:
-        # Получаем тип поиска (mixed по умолчанию)
-        search_type = 'mixed'
-        if user_id in user_search_state:
-            search_type = user_search_state[user_id].get('search_type', 'mixed')
+        search_type = user_search_state.get(user_id, {}).get('search_type', 'mixed')
         
-        # Выполняем поиск
+        # ---------- Поиск по людям ----------
+        if search_type == 'people':
+            persons, _ = search_persons(query, page=1)
+            if not persons:
+                reply_text = f"❌ По запросу «{query}» людей не найдено."
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("🔄 Повторить поиск", callback_data="search:retry"))
+                markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+                if reply_to_message:
+                    bot.reply_to(message, reply_text, reply_markup=markup)
+                else:
+                    bot.send_message(chat_id, reply_text, reply_markup=markup)
+                return
+            
+            results_text = "👥 Вот люди из киносферы, найденные по вашему запросу:\n\n"
+            markup = InlineKeyboardMarkup(row_width=1)
+            for p in persons[:20]:
+                pid = p.get('kinopoiskId')
+                name = p.get('nameRu') or p.get('nameEn') or 'Без имени'
+                if pid:
+                    btn = name[:60] + "…" if len(name) > 60 else name
+                    markup.add(InlineKeyboardButton(btn, callback_data=f"person_select:{pid}"))
+            markup.add(InlineKeyboardButton("🔄 Повторить поиск", callback_data="search:retry"))
+            markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+            
+            if user_id in user_search_state:
+                prompt_message_id = user_search_state[user_id].get('message_id')
+                if prompt_message_id:
+                    try:
+                        bot.delete_message(chat_id, prompt_message_id)
+                    except Exception:
+                        pass
+            
+            user_search_state[user_id] = {
+                'chat_id': chat_id,
+                'message_id': None,
+                'search_type': 'people',
+                'people_query': query,
+                'people_results': persons[:20],
+            }
+            if reply_to_message:
+                sent = bot.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
+            else:
+                sent = bot.send_message(chat_id, results_text, reply_markup=markup, parse_mode='HTML')
+            if sent:
+                user_search_state[user_id]['message_id'] = sent.message_id
+            return
+        
+        # ---------- Поиск фильмов/сериалов ----------
         films, total_pages = search_films_with_type(query, page=1, search_type=search_type)
         
         if not films:
@@ -1201,7 +1246,6 @@ def process_search_query(message, query, reply_to_message=None):
                 bot.send_message(chat_id, reply_text, reply_markup=markup)
             return
         
-        # Формируем текст и кнопки
         results_text = f"🔍 Результаты поиска '{query}':\n\n"
         markup = InlineKeyboardMarkup(row_width=1)
         
@@ -1238,24 +1282,19 @@ def process_search_query(message, query, reply_to_message=None):
         if len(results_text) > 4096:
             results_text = results_text[:4000] + "\n\n... (показаны не все результаты)"
         
-        # Удаляем сообщение "Укажите запрос для поиска", если оно есть
         if user_id in user_search_state:
             prompt_message_id = user_search_state[user_id].get('message_id')
             if prompt_message_id:
                 try:
                     bot.delete_message(chat_id, prompt_message_id)
-                    logger.info(f"[SEARCH] Удалено сообщение с промптом поиска: message_id={prompt_message_id}")
-                except Exception as del_e:
-                    logger.warning(f"[SEARCH] Не удалось удалить сообщение с промптом: {del_e}")
+                except Exception:
+                    pass
         
         if reply_to_message:
             sent_message = bot.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
         else:
             sent_message = bot.send_message(chat_id, results_text, reply_markup=markup, parse_mode='HTML')
         
-        logger.info(f"[SEARCH] Результаты отправлены: message_id={sent_message.message_id}")
-        
-        # Очищаем состояние, если было
         if user_id in user_search_state:
             del user_search_state[user_id]
             
@@ -1326,7 +1365,7 @@ def handle_expected_text_in_private(message):
                                       m.reply_to_message and
                                       m.reply_to_message.from_user.id == BOT_ID and
                                       m.text and
-                                      "🔍 Укажите запрос для поиска" in (m.reply_to_message.text or ""))
+                                      "🔍 Выберите направление поиска" in (m.reply_to_message.text or ""))
 def handle_group_search_reply(message):
     """Обработчик поиска в группах - только reply на сообщение бота"""
     query = message.text.strip()
@@ -1438,7 +1477,7 @@ def handle_group_shazam_text_reply(message):
 
 
 # ==================== СТАРЫЙ ОБРАБОТЧИК (ОСТАВЛЯЕМ ДЛЯ СОВМЕСТИМОСТИ) ====================
-@bot.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.from_user.id == BOT_ID and m.text and "🔍 Укажите запрос для поиска" in (m.reply_to_message.text or ""))
+@bot.message_handler(func=lambda m: m.reply_to_message and m.reply_to_message.from_user.id == BOT_ID and m.text and "🔍 Выберите направление поиска" in (m.reply_to_message.text or ""))
 def handle_search_reply_direct(message):
     """ОТДЕЛЬНЫЙ handler для реплаев на сообщение поиска - ВЫСОКИЙ ПРИОРИТЕТ"""
     logger.info(f"[SEARCH REPLY DIRECT] ===== START: message_id={message.message_id}, user_id={message.from_user.id}, text='{message.text[:50] if message.text else ''}'")

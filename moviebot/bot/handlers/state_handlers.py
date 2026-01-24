@@ -968,6 +968,35 @@ def handle_search(message):
             
             logger.info(f"[SEARCH HANDLER] Поиск по запросу '{query}' от пользователя {user_id}, тип: {search_type}")
             
+            if search_type == 'people':
+                from moviebot.api.kinopoisk_api import search_persons
+                persons, _ = search_persons(query, page=1)
+                if not persons:
+                    markup = InlineKeyboardMarkup(row_width=1)
+                    markup.add(InlineKeyboardButton("🔄 Повторить поиск", callback_data="search:retry"))
+                    markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+                    bot.reply_to(message, f"❌ По запросу «{query}» людей не найдено.", reply_markup=markup)
+                    if user_id in user_search_state:
+                        del user_search_state[user_id]
+                    return
+                results_text = "👥 Вот люди из киносферы, найденные по вашему запросу:\n\n"
+                markup = InlineKeyboardMarkup(row_width=1)
+                for p in persons[:20]:
+                    pid = p.get('kinopoiskId')
+                    name = p.get('nameRu') or p.get('nameEn') or 'Без имени'
+                    if pid:
+                        btn = (name[:60] + "…") if len(name) > 60 else name
+                        markup.add(InlineKeyboardButton(btn, callback_data=f"person_select:{pid}"))
+                markup.add(InlineKeyboardButton("🔄 Повторить поиск", callback_data="search:retry"))
+                markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+                sent = bot.reply_to(message, results_text, reply_markup=markup, parse_mode='HTML')
+                user_search_state[user_id] = {
+                    'chat_id': chat_id, 'message_id': sent.message_id if sent else None,
+                    'search_type': 'people', 'people_query': query, 'people_results': persons[:20],
+                }
+                logger.info(f"[SEARCH HANDLER] Люди: отправлено {len(persons)} результатов")
+                return
+            
             films, total_pages = search_films_with_type(query, page=1, search_type=search_type)
             logger.info(f"[SEARCH HANDLER] ✅ Поиск завершен: найдено {len(films) if films else 0} результатов, страниц: {total_pages}")
             

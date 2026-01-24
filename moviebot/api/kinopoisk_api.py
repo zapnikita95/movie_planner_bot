@@ -862,6 +862,50 @@ def search_films(query, page=1):
         logger.error(f"[SEARCH] Неожиданная ошибка: {e}", exc_info=True)
         return [], 0
 
+
+def search_persons(query, page=1):
+    """Поиск людей (актёры, режиссёры и т.д.) через Kinopoisk API /api/v1/persons"""
+    if not KP_TOKEN:
+        logger.error("[SEARCH PERSONS] KP_TOKEN не установлен")
+        return [], 0
+    url = "https://kinopoiskapiunofficial.tech/api/v1/persons"
+    params = {"name": query, "page": page}
+    headers = {"X-API-KEY": KP_TOKEN, "accept": "application/json"}
+    try:
+        response = requests.get(url, params=params, headers=headers, timeout=15)
+        log_kinopoisk_api_request("/api/v1/persons", "GET", response.status_code, None, None, None)
+        if response.status_code != 200:
+            logger.error(f"[SEARCH PERSONS] API статус {response.status_code}: {response.text[:300]}")
+            return [], 0
+        data = response.json()
+        items = data.get("items", [])
+        total = data.get("total", 0)
+        logger.info(f"[SEARCH PERSONS] Найдено: {len(items)}, total={total}")
+        return items, max(1, (total + 19) // 20)
+    except Exception as e:
+        logger.error(f"[SEARCH PERSONS] Ошибка: {e}", exc_info=True)
+        return [], 0
+
+
+def get_staff(person_id):
+    """Детальная информация о персоне: /api/v1/staff/{personId} (фильмы, роли, факты и т.д.)"""
+    if not KP_TOKEN:
+        logger.error("[GET STAFF] KP_TOKEN не установлен")
+        return None
+    url = f"https://kinopoiskapiunofficial.tech/api/v1/staff/{person_id}"
+    headers = {"X-API-KEY": KP_TOKEN, "accept": "application/json"}
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        log_kinopoisk_api_request(f"/api/v1/staff/{person_id}", "GET", response.status_code, None, None, person_id)
+        if response.status_code != 200:
+            logger.error(f"[GET STAFF] API статус {response.status_code}: {response.text[:300]}")
+            return None
+        return response.json()
+    except Exception as e:
+        logger.error(f"[GET STAFF] Ошибка для person_id={person_id}: {e}", exc_info=True)
+        return None
+
+
 # Добавление и анонс
 
 
