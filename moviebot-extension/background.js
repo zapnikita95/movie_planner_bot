@@ -158,19 +158,34 @@ async function handleStreamingApiRequest(message, sendResponse) {
       fetchOptions.body = typeof body === 'string' ? body : JSON.stringify(body);
     }
     
-    const response = await fetch(url, fetchOptions);
+    console.log('[BACKGROUND] Отправка fetch запроса:', { method: method || 'GET', url });
+    
+    let response;
+    try {
+      response = await fetch(url, fetchOptions);
+      console.log('[BACKGROUND] Fetch завершен:', { status: response.status, ok: response.ok, statusText: response.statusText });
+    } catch (fetchErr) {
+      console.error('[BACKGROUND] Ошибка fetch:', fetchErr);
+      sendResponse({
+        success: false,
+        error: fetchErr.message || 'Network error'
+      });
+      return;
+    }
     
     let responseData;
     try {
-      responseData = await response.json();
+      const text = await response.text();
+      console.log('[BACKGROUND] Текст ответа (первые 500 символов):', text.substring(0, 500));
+      responseData = JSON.parse(text);
     } catch (jsonError) {
       console.error('[BACKGROUND] Ошибка парсинга JSON ответа:', jsonError);
-      const text = await response.text();
-      console.error('[BACKGROUND] Текст ответа:', text);
+      const text = await response.text().catch(() => '');
+      console.error('[BACKGROUND] Полный текст ответа:', text);
       sendResponse({
         success: false,
         status: response.status,
-        error: 'Invalid JSON response: ' + text.substring(0, 100)
+        error: 'Invalid JSON response: ' + (text.substring(0, 100) || 'empty response')
       });
       return;
     }
