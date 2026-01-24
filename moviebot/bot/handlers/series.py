@@ -941,8 +941,9 @@ def show_film_info_with_buttons(
         logger.info(f"[SHOW FILM INFO] Обработка сериала завершена")
         
         # Проверяем наличие online_link для замены кнопки "Выбрать онлайн-кинотеатр" на прямую ссылку
+        # Инициализируем ДО использования в кнопках (строка 793)
         online_link = None
-        if existing and film_id:
+        if film_id:  # Убрали проверку existing, т.к. film_id уже получен выше
             try:
                 conn_online = get_db_connection()
                 cursor_online = get_db_cursor()
@@ -8250,7 +8251,7 @@ def send_episode_marked_message(bot, chat_id, user_id, kp_id, film_id, season, e
                 text = f"✅ <b>{title}</b>\n\nОтмечена серия {season}×{episode} как просмотренная"
             
             markup = InlineKeyboardMarkup(row_width=1)
-            markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"show_seasons:{kp_id}"))
+            markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"seasons_kp:{kp_id}"))
             
             if online_link:
                 markup.add(InlineKeyboardButton("🎬 Онлайн-кинотеатр", url=online_link))

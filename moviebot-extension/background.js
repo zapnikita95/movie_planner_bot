@@ -177,11 +177,21 @@ async function handleStreamingApiRequest(message, sendResponse) {
     
     console.log('[BACKGROUND] Streaming API response:', { status: response.status, ok: response.ok, data: responseData });
     
-    sendResponse({
-      success: response.ok,
-      status: response.status,
-      data: responseData
-    });
+    // Проверяем, есть ли ошибка в данных ответа
+    if (!response.ok && responseData && responseData.error) {
+      sendResponse({
+        success: false,
+        status: response.status,
+        error: responseData.error,
+        data: responseData
+      });
+    } else {
+      sendResponse({
+        success: response.ok,
+        status: response.status,
+        data: responseData
+      });
+    }
   } catch (error) {
     console.error('[BACKGROUND] Ошибка API запроса:', error);
     console.error('[BACKGROUND] Stack trace:', error.stack);
