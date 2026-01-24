@@ -818,6 +818,19 @@ def register_stats_handlers(bot):
             text += f"   • Всего планов: {stats.get('total_plans', 0)}\n"
             text += f"   • Всего оценок: {stats.get('total_ratings', 0)}\n\n"
             
+            # Переходы по ссылкам подборок
+            tag_add_total = stats.get('tag_add_total', 0)
+            tag_add_stats = stats.get('tag_add_stats', [])
+            text += "🔗 <b>Переходы по ссылкам подборок:</b>\n"
+            text += f"   • Всего добавлений: {tag_add_total}\n"
+            if tag_add_stats:
+                for i, r in enumerate(tag_add_stats[:15], 1):
+                    name = r.get('name', '') if isinstance(r, dict) else (r[1] if len(r) > 1 else '')
+                    cnt = r.get('add_count', 0) if isinstance(r, dict) else (r[3] if len(r) > 3 else 0)
+                    name_short = (name[:35] + '…') if len(name) > 35 else name
+                    text += f"   {i}. {name_short}: {cnt}\n"
+            text += "\n"
+            
             # Топ команд за день
             top_commands_day = stats.get('top_commands_day', [])
             if top_commands_day:

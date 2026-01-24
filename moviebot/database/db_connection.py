@@ -715,6 +715,38 @@ def init_database():
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_tag_movies_tag_id ON user_tag_movies (tag_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_tag_movies_film_id ON user_tag_movies (film_id)')
         
+        # Таблица событий «добавил подборку» (переход по ссылке + «Добавить в базу»)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS tag_add_events (
+                id SERIAL PRIMARY KEY,
+                tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+                user_id BIGINT NOT NULL,
+                chat_id BIGINT NOT NULL,
+                added_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tag_add_events_tag_id ON tag_add_events (tag_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_tag_add_events_added_at ON tag_add_events (added_at)')
+        
+        # Флаг «бэкфилл выполнен» для ретроспективных данных
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS tag_add_events_backfill_done (
+                id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1)
+            )
+        ''')
+        
+        # Ретроспективный бэкфилл: по user_tag_movies создаём по одному событию на (user, chat, tag)
+        cursor.execute('SELECT 1 FROM tag_add_events_backfill_done LIMIT 1')
+        if cursor.fetchone() is None:
+            cursor.execute('''
+                INSERT INTO tag_add_events (tag_id, user_id, chat_id, added_at)
+                SELECT tag_id, user_id, chat_id, MIN(added_at)
+                FROM user_tag_movies
+                GROUP BY tag_id, user_id, chat_id
+            ''')
+            cursor.execute('INSERT INTO tag_add_events_backfill_done (id) VALUES (1) ON CONFLICT (id) DO NOTHING')
+            logger.info("tag_add_events: ретроспективный бэкфилл выполнен")
+        
         logger.info("Таблицы для тегов созданы")
     except Exception as e:
         logger.error(f"Ошибка при создании таблиц для тегов: {e}", exc_info=True)

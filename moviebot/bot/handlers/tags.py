@@ -1005,6 +1005,32 @@ def handle_tag_confirm(call):
                 logger.error(f"[TAG CONFIRM] Ошибка обработки kp_id={kp_id}: {e}", exc_info=True)
                 errors.append(f"{kp_id}: {str(e)[:50]}")
         
+        # Логируем событие «добавил подборку» для /admin_stats
+        conn_ev = get_db_connection()
+        cursor_ev = get_db_cursor()
+        try:
+            with db_lock:
+                cursor_ev.execute('''
+                    INSERT INTO tag_add_events (tag_id, user_id, chat_id)
+                    VALUES (%s, %s, %s)
+                ''', (tag_info['id'], user_id, chat_id))
+                conn_ev.commit()
+        except Exception as e:
+            logger.warning(f"[TAG CONFIRM] Не удалось записать tag_add_event: {e}")
+            try:
+                conn_ev.rollback()
+            except:
+                pass
+        finally:
+            try:
+                cursor_ev.close()
+            except:
+                pass
+            try:
+                conn_ev.close()
+            except:
+                pass
+        
         # Удаляем сообщение о загрузке
         if loading_msg_id:
             try:

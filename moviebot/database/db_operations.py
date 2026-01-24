@@ -1803,6 +1803,25 @@ def get_admin_statistics():
             row = cursor_local.fetchone()
             stats['cancelled_subscriptions_week'] = row['count'] if row else 0
             
+            # Переходы по ссылкам подборок: название, сколько раз добавили
+            try:
+                cursor_local.execute('''
+                    SELECT t.id, t.name, t.short_code,
+                           COUNT(e.id) AS add_count
+                    FROM tags t
+                    LEFT JOIN tag_add_events e ON e.tag_id = t.id
+                    GROUP BY t.id, t.name, t.short_code
+                    ORDER BY add_count DESC
+                ''')
+                stats['tag_add_stats'] = cursor_local.fetchall()
+                cursor_local.execute('SELECT COUNT(*) AS count FROM tag_add_events')
+                row = cursor_local.fetchone()
+                stats['tag_add_total'] = row['count'] if row else 0
+            except Exception as tag_err:
+                logger.debug(f"tag_add_events недоступна: {tag_err}")
+                stats['tag_add_stats'] = []
+                stats['tag_add_total'] = 0
+            
         return stats
         
     except Exception as e:
