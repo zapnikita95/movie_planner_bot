@@ -1837,8 +1837,10 @@ def create_web_app(bot):
                                     AND watched = TRUE
                                 )
                             """, (current_episode - 1, chat_id, film_id, user_id, current_season))
-                            unwatched_count = cursor.fetchone()[0] if cursor.rowcount > 0 else 0
+                            unwatched_result = cursor.fetchone()
+                            unwatched_count = unwatched_result[0] if unwatched_result else 0
                             has_unwatched_before = unwatched_count > 0
+                            logger.info(f"[EXTENSION API] Проверка непросмотренных серий: film_id={film_id}, season={current_season}, episode={current_episode}, unwatched_count={unwatched_count}, has_unwatched_before={has_unwatched_before}")
             finally:
                 try:
                     cursor.close()
@@ -2549,9 +2551,9 @@ def create_web_app(bot):
             
             headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
             
-            # Формируем поисковый запрос
-            # Сначала пробуем просто название (как в боте)
-            search_query = keyword
+            # Используем тот же формат, что и в боте: просто название без года
+            # Год передаем отдельно и фильтруем результаты
+            search_query = keyword.strip()
             
             # Используем API v2.1 для поиска
             url = "https://kinopoiskapiunofficial.tech/api/v2.1/films/search-by-keyword"
@@ -2567,22 +2569,28 @@ def create_web_app(bot):
             if response.status_code == 200:
                 data = response.json()
                 films = data.get('films', [])
+                logger.info(f"[EXTENSION API] Найдено результатов: {len(films)}")
                 
                 # Фильтруем по типу, если указан
                 if search_type:
                     if search_type == 'TV_SERIES':
                         films = [f for f in films if f.get('type', '').upper() in ['TV_SERIES', 'MINI_SERIES']]
+                        logger.info(f"[EXTENSION API] После фильтрации по типу TV_SERIES: {len(films)}")
                     elif search_type == 'FILM':
                         films = [f for f in films if f.get('type', '').upper() == 'FILM']
+                        logger.info(f"[EXTENSION API] После фильтрации по типу FILM: {len(films)}")
+                
+                # Фильтруем по году, если указан
+                if year and films:
+                    # Пробуем найти точное совпадение по году
+                    year_matched = [f for f in films if f.get('year') == year]
+                    if year_matched:
+                        films = year_matched
+                        logger.info(f"[EXTENSION API] После фильтрации по году {year}: {len(films)}")
+                    else:
+                        logger.warning(f"[EXTENSION API] Не найдено фильмов с годом {year}, используем все результаты")
                 
                 if films and len(films) > 0:
-                    # Фильтруем по году, если указан
-                    if year:
-                        # Пробуем найти точное совпадение по году
-                        year_matched = [f for f in films if f.get('year') == year]
-                        if year_matched:
-                            films = year_matched
-                    
                     # Берем первый результат
                     film = films[0]
                     kp_id = film.get('filmId')
