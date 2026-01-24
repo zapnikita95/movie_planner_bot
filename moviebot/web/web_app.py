@@ -1845,8 +1845,9 @@ def create_web_app(bot):
             # after_request hook автоматически добавит CORS заголовки
             return resp
         except Exception as e:
-            logger.error("Ошибка получения информации о фильме", exc_info=True)
-            resp = jsonify({"success": False, "error": "server error"})
+            logger.error(f"[EXTENSION API] Ошибка получения информации о фильме: {e}", exc_info=True)
+            error_msg = str(e) if e else "server error"
+            resp = jsonify({"success": False, "error": error_msg})
             # after_request hook автоматически добавит CORS заголовки
             return resp, 500
     
