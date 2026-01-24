@@ -90,9 +90,18 @@
     
     'ivi.ru': {
       isSeries: () => {
-        return document.querySelector('.postersListDesktop__seasonTitle') || 
-               document.querySelector('.serieBadge') || 
-               document.querySelector('#root .breadCrumbs__item:contains("Сериалы")');
+        if (document.querySelector('.postersListDesktop__seasonTitle') || 
+            document.querySelector('.serieBadge')) {
+          return true;
+        }
+        // Проверяем breadcrumbs через JavaScript (не через :contains, т.к. это не валидный CSS)
+        const breadcrumbs = document.querySelectorAll('#root .breadCrumbs__item');
+        for (const item of breadcrumbs) {
+          if (item.textContent?.includes('Сериалы')) {
+            return true;
+          }
+        }
+        return false;
       },
       title: {
         selector: 'title, meta[property="og:title"]',
@@ -647,6 +656,7 @@
     `;
     
     document.body.appendChild(overlayElement);
+    console.log('[STREAMING] Overlay добавлен в DOM:', overlayElement);
     
     // Кнопка закрытия
     overlayElement.querySelector('#mpp-close').addEventListener('click', (e) => {
@@ -739,12 +749,18 @@
     
     // Рендерим кнопки
     renderButtons(info, filmData);
+    console.log('[STREAMING] createOverlay завершен, renderButtons вызван');
   }
   
   function renderButtons(info, filmData) {
-    const container = overlayElement.querySelector('#mpp-buttons-container');
-    if (!container) return;
+    console.log('[STREAMING] renderButtons вызван с данными:', { info, filmData });
+    const container = overlayElement?.querySelector('#mpp-buttons-container');
+    if (!container) {
+      console.error('[STREAMING] renderButtons: контейнер не найден!', overlayElement);
+      return;
+    }
     
+    console.log('[STREAMING] renderButtons: контейнер найден, очищаем');
     container.innerHTML = '';
     
     const isInDatabase = filmData && filmData.film_id;
@@ -1070,12 +1086,19 @@
   // ────────────────────────────────────────────────
   async function checkAndShowOverlay() {
     const info = getContentInfo();
+    console.log('[STREAMING] getContentInfo результат:', info);
+    
     if (!info || !info.title) {
+      console.log('[STREAMING] Пропуск: нет info или title');
       return;
     }
     
     // Проверяем защиту от спама
-    if (!shouldShowOverlay(info)) {
+    const shouldShow = shouldShowOverlay(info);
+    console.log('[STREAMING] shouldShowOverlay результат:', shouldShow);
+    
+    if (!shouldShow) {
+      console.log('[STREAMING] Пропуск: защита от спама');
       return;
     }
     
@@ -1189,7 +1212,9 @@
       }
       
       // Показываем плашку (даже если были ошибки API)
+      console.log('[STREAMING] Вызываем createOverlay с данными:', { info, filmData });
       createOverlay(info, filmData);
+      console.log('[STREAMING] createOverlay вызван');
       
     } catch (e) {
       console.error('[STREAMING] Ошибка проверки:', e);
@@ -1202,6 +1227,7 @@
           rated: false,
           has_unwatched_before: false
         };
+        console.log('[STREAMING] Вызываем createOverlay с базовыми данными после ошибки:', { info, filmData });
         createOverlay(info, filmData);
       } catch (overlayError) {
         console.error('[STREAMING] Ошибка создания плашки:', overlayError);
