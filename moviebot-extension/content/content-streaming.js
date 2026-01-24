@@ -1178,6 +1178,7 @@
           
           if (response.ok) {
             const result = await response.json();
+            console.log('[STREAMING] Результат film-info из кэша:', result);
             if (result.success) {
               filmData = {
                 kp_id: kpId,
@@ -1186,6 +1187,7 @@
                 rated: result.rated || false,
                 has_unwatched_before: result.has_unwatched_before || false
               };
+              console.log('[STREAMING] filmData после парсинга:', filmData);
             }
           }
         } catch (fetchError) {
@@ -1228,6 +1230,7 @@
                 
                 if (filmResponse.ok) {
                   const filmResult = await filmResponse.json();
+                  console.log('[STREAMING] Результат film-info после поиска:', filmResult);
                   if (filmResult.success) {
                     filmData = {
                       kp_id: kpId,
@@ -1236,6 +1239,7 @@
                       rated: filmResult.rated || false,
                       has_unwatched_before: filmResult.has_unwatched_before || false
                     };
+                    console.log('[STREAMING] filmData после парсинга (после поиска):', filmData);
                   }
                 }
               } catch (filmFetchError) {

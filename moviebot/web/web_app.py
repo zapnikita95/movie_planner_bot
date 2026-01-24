@@ -1821,6 +1821,7 @@ def create_web_app(bot):
                 except:
                     pass
             
+            logger.info(f"[EXTENSION API] Возвращаем film-info: film_id={film_id}, film_in_db={film_in_db}, watched={watched}")
             resp = jsonify({
                 "success": True,
                 "film": {
@@ -1834,7 +1835,7 @@ def create_web_app(bot):
                     "description": info.get('description')
                 },
                 "in_database": film_in_db,
-                "film_id": film_id,
+                "film_id": film_id,  # ВАЖНО: возвращаем film_id, даже если он None
                 "watched": watched,
                 "rated": rated,
                 "has_unwatched_before": has_unwatched_before,
