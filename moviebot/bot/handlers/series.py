@@ -1917,7 +1917,10 @@ def handle_search(message):
             # Пробуем разные варианты полей для совместимости с разными версиями API
             title = film.get('nameRu') or film.get('nameEn') or film.get('title') or "Без названия"
             year = film.get('year') or film.get('releaseYear') or 'N/A'
-            rating = film.get('ratingKinopoisk') or film.get('rating') or film.get('ratingImdb') or 'N/A'
+            _r = film.get('ratingKinopoisk') or film.get('rating') or film.get('ratingImdb')
+            rating = None
+            if _r is not None and str(_r).strip().lower() not in ('', 'null', 'none', 'n/a'):
+                rating = _r
             # Пробуем разные варианты ID
             kp_id = film.get('kinopoiskId') or film.get('filmId') or film.get('id')
             
@@ -1935,7 +1938,7 @@ def handle_search(message):
                 if len(button_text) > 50:
                     button_text = button_text[:47] + "..."
                 results_text += f"• {type_indicator} <b>{title}</b>{year_str}"
-                if rating != 'N/A':
+                if rating:
                     results_text += f" ⭐ {rating}"
                 results_text += "\n"
                 # Сохраняем тип в callback_data для правильного формирования ссылки
@@ -3638,13 +3641,16 @@ def handle_dice_result(message):
                     # Пробуем разные варианты полей для совместимости с разными версиями API
                     title = film.get('nameRu') or film.get('nameEn') or film.get('title') or "Без названия"
                     year = film.get('year') or film.get('releaseYear') or 'N/A'
-                    rating = film.get('ratingKinopoisk') or film.get('rating') or film.get('ratingImdb') or 'N/A'
+                    _r = film.get('ratingKinopoisk') or film.get('rating') or film.get('ratingImdb')
+                    rating = None
+                    if _r is not None and str(_r).strip().lower() not in ('', 'null', 'none', 'n/a'):
+                        rating = _r
                     # Пробуем разные варианты ID
                     kp_id = film.get('kinopoiskId') or film.get('filmId') or film.get('id')
                     
                     # Определяем тип (сериал или фильм) по полю type из API
-                    film_type = film.get('type', '').upper() if film.get('type') else 'FILM'  # "FILM" или "TV_SERIES"
-                    is_series = film_type == 'TV_SERIES'
+                    film_type = film.get('type', '').upper() if film.get('type') else 'FILM'
+                    is_series = film_type in ('TV_SERIES', 'MINI_SERIES')
                     
                     if kp_id:
                         # Ограничиваем длину текста кнопки
@@ -3654,7 +3660,7 @@ def handle_dice_result(message):
                         if len(button_text) > 50:
                             button_text = button_text[:47] + "..."
                         results_text += f"• {type_indicator} <b>{title}</b>{year_str}"
-                        if rating != 'N/A':
+                        if rating:
                             results_text += f" ⭐ {rating}"
                         results_text += "\n"
                         # Сохраняем тип в callback_data для правильного формирования ссылки
@@ -4001,7 +4007,10 @@ def handle_search_reply(message):
             for film in films[:10]:  # Показываем максимум 10 результатов на странице
                 title = film.get('nameRu') or film.get('nameEn') or film.get('title') or "Без названия"
                 year = film.get('year') or film.get('releaseYear') or 'N/A'
-                rating = film.get('ratingKinopoisk') or film.get('rating') or film.get('ratingImdb') or 'N/A'
+                _r = film.get('ratingKinopoisk') or film.get('rating') or film.get('ratingImdb')
+                rating = None
+                if _r is not None and str(_r).strip().lower() not in ('', 'null', 'none', 'n/a'):
+                    rating = _r
                 kp_id = film.get('kinopoiskId') or film.get('filmId') or film.get('id')
                 
                 # Определяем тип (сериал или фильм)
@@ -4015,7 +4024,7 @@ def handle_search_reply(message):
                     if len(button_text) > 50:
                         button_text = button_text[:47] + "..."
                     results_text += f"• {type_indicator} <b>{title}</b>{year_str}"
-                    if rating != 'N/A':
+                    if rating:
                         results_text += f" ⭐ {rating}"
                     results_text += "\n"
                     markup.add(InlineKeyboardButton(button_text, callback_data=f"add_film_{kp_id}:{film_type}"))

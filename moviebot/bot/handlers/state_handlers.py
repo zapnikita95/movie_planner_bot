@@ -986,7 +986,10 @@ def handle_search(message):
                 try:
                     title = film.get('nameRu') or film.get('nameEn') or film.get('title') or "Без названия"
                     year = film.get('year') or film.get('releaseYear') or 'N/A'
-                    rating = film.get('ratingKinopoisk') or film.get('rating') or film.get('ratingImdb') or 'N/A'
+                    _r = film.get('ratingKinopoisk') or film.get('rating') or film.get('ratingImdb')
+                    rating = None
+                    if _r is not None and str(_r).strip().lower() not in ('', 'null', 'none', 'n/a'):
+                        rating = _r
                     kp_id = film.get('kinopoiskId') or film.get('filmId') or film.get('id')
                     
                     film_type = film.get('type', '').upper() if film.get('type') else 'FILM'
@@ -998,7 +1001,7 @@ def handle_search(message):
                         if len(button_text) > 50:
                             button_text = button_text[:47] + "..."
                         results_text += f"• {type_indicator} <b>{title}</b> ({year})"
-                        if rating != 'N/A':
+                        if rating:
                             results_text += f" ⭐ {rating}"
                         results_text += "\n"
                         markup.add(InlineKeyboardButton(button_text, callback_data=f"add_film_{kp_id}:{film_type}"))
