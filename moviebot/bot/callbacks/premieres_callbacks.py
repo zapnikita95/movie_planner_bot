@@ -24,6 +24,14 @@ from moviebot.config import KP_TOKEN
 logger = logging.getLogger(__name__)
 
 ITEMS_PER_PAGE = 5
+GENRES_PER_PAGE = 10
+GENRE_PERIOD = "3_months"
+
+# Состояние для «По жанрам»: выбор жанров, кэш премьер, страница списка жанров
+user_premiere_genre_selection = {}
+user_premieres_genre_cache = {}
+user_premiere_genre_list_page = {}
+user_premiere_genre_film_page = {}
 
 PERIOD_NAMES = {
     'current_month': 'текущего месяца',
@@ -54,18 +62,23 @@ def _get_premiere_date(p):
     return datetime(2099, 12, 31).date()
 
 
-def _format_premiere_block(p, include_genre=True):
-    """Компактный блок для списка: дата, название, жанр. Без реж/актёров (без доп. запросов)."""
+def _format_premiere_block(p, include_genre=True, all_genres=False):
+    """Компактный блок для списка: дата, название, жанр(ы). Без реж/актёров."""
     kp_id = p.get('kinopoiskId') or p.get('filmId')
     title = p.get('nameRu') or p.get('nameEn') or "Без названия"
     d = _get_premiere_date(p)
     date_str = d.strftime('%d.%m') if d.year < 2099 else "—"
     genres = p.get('genres') or []
-    first_genre = genres[0].get('genre', '—') if genres else '—'
+    if all_genres and genres:
+        genre_str = ", ".join((g.get("genre") or "").strip() for g in genres if (g.get("genre") or "").strip())
+    elif genres:
+        genre_str = (genres[0].get("genre") or "").strip() or "—"
+    else:
+        genre_str = "—"
     lines = [f"• <b>{date_str}</b> {title}"]
-    if include_genre and first_genre != '—':
-        lines.append(f"🎭 {first_genre}")
-    return '\n'.join(lines), kp_id, title
+    if include_genre and genre_str != "—":
+        lines.append(f"🎭 {genre_str}")
+    return "\n".join(lines), kp_id, title
 
 
 def _show_sort_selection(chat_id, message_id=None, edit=True):
@@ -114,8 +127,8 @@ def _show_period_selection(chat_id, message_id=None, edit=True):
         bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
 
 
-def show_premieres_page(call, premieres, period, page=0, mode='date', genre_name=None):
-    """Страница премьер: 5 на страницу, компактный формат (дата, название, жанр)."""
+def show_premieres_page(call, premieres, period, page=0, mode='date', genre_name=None, genre_label=None, all_genres=False):
+    """Страница премьер: 5 на страницу. genre_label — подпись для режима жанров (один или несколько)."""
     try:
         chat_id = call.message.chat.id
         premieres_sorted = sorted(premieres, key=_get_premiere_date)
@@ -130,24 +143,29 @@ def show_premieres_page(call, premieres, period, page=0, mode='date', genre_name
             back_data = "premieres_back_to_sort"
             page_cb = f"premieres_page:{period}"
             detail_fmt = "premiere_detail:{}:date:{}".format
+            use_all_genres = False
         else:
-            title = f"🎭 <b>Премьеры — {genre_name}</b>"
+            label = genre_label or genre_name or "жанры"
+            title = f"🎭 <b>Премьеры — {label}</b>"
             back_data = "premieres_back_to_sort"
-            page_cb = f"premieres_genre_page:{genre_name}"
-            detail_fmt = "premiere_detail:{}:genre:{}".format
+            page_cb = "premieres_genre_multi_page"
+            detail_fmt = "premiere_detail:{}:genre_multi".format
+            use_all_genres = all_genres
 
         text = title + "\n\n"
         markup = InlineKeyboardMarkup(row_width=1)
         include_genre = True
 
         for p in page_premieres:
-            block, kp_id, title_ru = _format_premiere_block(p, include_genre=include_genre)
+            block, kp_id, title_ru = _format_premiere_block(
+                p, include_genre=include_genre, all_genres=use_all_genres
+            )
             text += block + "\n\n"
             btn = title_ru[:27] + "..." if len(title_ru) > 30 else title_ru
             if mode == 'date':
                 cb = detail_fmt(kp_id, period)
             else:
-                cb = detail_fmt(kp_id, genre_name)
+                cb = detail_fmt(kp_id)
             markup.add(InlineKeyboardButton(btn, callback_data=cb))
 
         nav = []
@@ -198,20 +216,83 @@ def premieres_back_to_sort_callback(call):
             pass
 
 
+def _show_genre_list_page(chat_id, msg_id, user_id, page=0, edit=True):
+    """Список жанров: 10 на страницу, мультивыбор (✅/⬜), «Посмотреть премьеры»."""
+    premieres = user_premieres_genre_cache.get(user_id)
+    if not premieres:
+        try:
+            if edit and msg_id:
+                bot.edit_message_text("❌ Кэш премьер пуст. Вернитесь и выберите «По жанрам» снова.", chat_id, msg_id)
+            else:
+                bot.send_message(chat_id, "❌ Кэш премьер пуст. Вернитесь и выберите «По жанрам» снова.")
+        except Exception:
+            pass
+        return
+    genres_set = set()
+    for p in premieres:
+        for g in (p.get("genres") or []):
+            name = (g.get("genre") or "").strip()
+            if name:
+                genres_set.add(name)
+    genres_sorted = sorted(genres_set, key=str.lower)
+    total = len(genres_sorted)
+    total_pages = max(1, (total + GENRES_PER_PAGE - 1) // GENRES_PER_PAGE)
+    start = page * GENRES_PER_PAGE
+    end = min(start + GENRES_PER_PAGE, total)
+    page_genres = genres_sorted[start:end]
+    selected = user_premiere_genre_selection.get(user_id) or set()
+
+    markup = InlineKeyboardMarkup(row_width=1)
+    for g in page_genres:
+        prefix = "✅ " if g in selected else "⬜ "
+        markup.add(InlineKeyboardButton(
+            f"{prefix}{g}",
+            callback_data=f"premieres_genre_toggle:{g}:{page}"
+        ))
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton("◀️ Назад", callback_data=f"premieres_genre_list_page:{page - 1}"))
+    if page < total_pages - 1:
+        nav.append(InlineKeyboardButton("Вперёд ▶️", callback_data=f"premieres_genre_list_page:{page + 1}"))
+    if nav:
+        markup.row(*nav)
+    if selected:
+        markup.add(InlineKeyboardButton("🔍 Посмотреть премьеры", callback_data="premieres_genre_apply"))
+    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="premieres_back_to_sort"))
+
+    text = "🎭 <b>Премьеры по жанрам</b> (3 месяца)\n\nВыберите один или несколько жанров, затем «Посмотреть премьеры»."
+    text += f"\n\nСтраница {page + 1} из {total_pages}"
+    if selected:
+        text += f"\nВыбрано: {", ".join(sorted(selected, key=str.lower))}"
+    try:
+        if edit and msg_id:
+            bot.edit_message_text(text, chat_id, msg_id, reply_markup=markup, parse_mode="HTML")
+        else:
+            bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+    except Exception as e:
+        if "message is not modified" not in str(e).lower():
+            logger.warning(f"[PREMIERES GENRE LIST] edit: {e}")
+        try:
+            bot.send_message(chat_id, text, reply_markup=markup, parse_mode="HTML")
+        except Exception:
+            pass
+
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("premieres_mode:"))
 def premieres_mode_callback(call):
-    """По датам -> периоды; По жанрам -> список жанров."""
+    """По датам -> периоды; По жанрам -> список жанров (3 мес, кэш, пагинация)."""
     try:
         bot.answer_callback_query(call.id)
         mode = call.data.split(":")[1]
         chat_id = call.message.chat.id
         msg_id = call.message.message_id
+        user_id = call.from_user.id
 
         if mode == "date":
             _show_period_selection(chat_id, msg_id, edit=True)
             return
         if mode == "genre":
-            premieres = get_premieres_for_period("6_months")
+            premieres = get_premieres_for_period(GENRE_PERIOD)
             if not premieres:
                 try:
                     bot.edit_message_text(
@@ -221,32 +302,115 @@ def premieres_mode_callback(call):
                 except Exception:
                     bot.send_message(chat_id, "❌ Не удалось загрузить премьеры для выбора жанров.")
                 return
-            genres_set = set()
-            for p in premieres:
-                for g in (p.get("genres") or []):
-                    name = (g.get("genre") or "").strip()
-                    if name:
-                        genres_set.add(name)
-            genres_sorted = sorted(genres_set, key=str.lower)
-            markup = InlineKeyboardMarkup(row_width=1)
-            for g in genres_sorted:
-                markup.add(InlineKeyboardButton(f"🎭 {g}", callback_data=f"premieres_genre_page:{g}:0"))
-            markup.add(InlineKeyboardButton("◀️ Назад", callback_data="premieres_back_to_sort"))
-            try:
-                bot.edit_message_text(
-                    "🎭 <b>Премьеры по жанрам</b>\n\nВыберите жанр:",
-                    chat_id, msg_id, reply_markup=markup, parse_mode="HTML"
-                )
-            except Exception as e:
-                if "message is not modified" not in str(e).lower():
-                    logger.warning(f"[PREMIERES GENRE] edit: {e}")
-                try:
-                    bot.send_message(chat_id, "🎭 <b>Премьеры по жанрам</b>\n\nВыберите жанр:", reply_markup=markup, parse_mode="HTML")
-                except Exception:
-                    pass
+            user_premieres_genre_cache[user_id] = premieres
+            user_premiere_genre_selection[user_id] = set()
+            _show_genre_list_page(chat_id, msg_id, user_id, page=0, edit=True)
             return
     except Exception as e:
         logger.error(f"[PREMIERES MODE] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+        except Exception:
+            pass
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("premieres_genre_list_page:"))
+def premieres_genre_list_page_callback(call):
+    """Пагинация списка жанров."""
+    try:
+        bot.answer_callback_query(call.id)
+        page = int(call.data.split(":")[1])
+        _show_genre_list_page(
+            call.message.chat.id, call.message.message_id,
+            call.from_user.id, page=page, edit=True
+        )
+    except Exception as e:
+        logger.error(f"[PREMIERES GENRE LIST PAGE] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+        except Exception:
+            pass
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("premieres_genre_toggle:"))
+def premieres_genre_toggle_callback(call):
+    """Включить/выключить жанр в мультивыборе."""
+    try:
+        bot.answer_callback_query(call.id)
+        parts = call.data.split(":", 2)
+        genre = parts[1]
+        page = int(parts[2])
+        user_id = call.from_user.id
+        sel = user_premiere_genre_selection.get(user_id) or set()
+        if genre in sel:
+            sel.discard(genre)
+        else:
+            sel.add(genre)
+        user_premiere_genre_selection[user_id] = sel
+        _show_genre_list_page(
+            call.message.chat.id, call.message.message_id,
+            user_id, page=page, edit=True
+        )
+    except Exception as e:
+        logger.error(f"[PREMIERES GENRE TOGGLE] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+        except Exception:
+            pass
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "premieres_genre_apply")
+def premieres_genre_apply_callback(call):
+    """Показать премьеры по выбранным жанрам (хотя бы один совпадает)."""
+    try:
+        bot.answer_callback_query(call.id)
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        selected = user_premiere_genre_selection.get(user_id) or set()
+        if not selected:
+            try:
+                bot.answer_callback_query(call.id, "Выберите хотя бы один жанр", show_alert=True)
+            except Exception:
+                pass
+            return
+        premieres = user_premieres_genre_cache.get(user_id)
+        if not premieres:
+            try:
+                bot.edit_message_text(
+                    "❌ Кэш премьер пуст. Вернитесь к выбору жанров.",
+                    chat_id, call.message.message_id
+                )
+            except Exception:
+                pass
+            return
+        sel_lower = {g.lower() for g in selected}
+        filtered = [
+            p for p in premieres
+            if any((g.get("genre") or "").lower() in sel_lower for g in (p.get("genres") or []))
+        ]
+        if not filtered:
+            try:
+                bot.edit_message_text(
+                    "❌ Нет премьер по выбранным жанрам.",
+                    chat_id, call.message.message_id
+                )
+            except Exception:
+                pass
+            return
+        user_premiere_genre_list_page[user_id] = 0
+        user_premiere_genre_film_page[user_id] = 0
+        label = ", ".join(sorted(selected, key=str.lower))
+        class FakeCall:
+            pass
+        fc = FakeCall()
+        fc.message = type("M", (), {"chat": type("C", (), {"id": chat_id})(), "message_id": call.message.message_id})()
+        fc.id = call.id
+        show_premieres_page(
+            fc, filtered, None, page=0, mode="genre",
+            genre_label=label, all_genres=True
+        )
+    except Exception as e:
+        logger.error(f"[PREMIERES GENRE APPLY] Ошибка: {e}", exc_info=True)
         try:
             bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
         except Exception:

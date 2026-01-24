@@ -1806,6 +1806,85 @@ def delete_recommendations_message(call):
     except Exception as e:
         logger.warning(f"[DELETE MESSAGE] Не удалось удалить: {e}")
 
+def send_rating_message(bot, chat_id, user_id, kp_id, film_id, rating, film_title=None):
+    """Отправляет сообщение в бота об оценке фильма"""
+    try:
+        from moviebot.database.db_connection import get_db_connection, get_db_cursor
+        
+        conn = get_db_connection()
+        cursor = get_db_cursor()
+        
+        try:
+            # Получаем информацию о фильме, если не передана
+            if not film_title:
+                cursor.execute("SELECT title, online_link FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
+                row = cursor.fetchone()
+                if row:
+                    film_title = row.get('title') if isinstance(row, dict) else row[0]
+                    online_link = row.get('online_link') if isinstance(row, dict) else (row[1] if len(row) > 1 else None)
+                else:
+                    film_title = "Фильм"
+                    online_link = None
+            else:
+                cursor.execute("SELECT online_link FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
+                row = cursor.fetchone()
+                online_link = row.get('online_link') if row and isinstance(row, dict) else (row[0] if row and len(row) > 0 else None)
+            
+            # Формируем сообщение
+            text = f"⭐ <b>{film_title}</b>\n\nОценка: {rating}/10"
+            
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"show_film_info:{kp_id}"))
+            
+            if online_link:
+                markup.add(InlineKeyboardButton("🎬 Онлайн-кинотеатр", url=online_link))
+            
+            bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+        finally:
+            try:
+                cursor.close()
+            except:
+                pass
+            try:
+                conn.close()
+            except:
+                pass
+    except Exception as e:
+        logger.error(f"[FILM CALLBACKS] Ошибка отправки сообщения об оценке: {e}", exc_info=True)
+
+def send_recommendations_message(bot, chat_id, user_id, kp_id, similar_films):
+    """Отправляет сообщение в бота с рекомендациями"""
+    try:
+        # get_similars возвращает список кортежей (filmId, name, is_series)
+        if not similar_films or len(similar_films) == 0:
+            return
+        
+        text = "🎬 <b>Похожие фильмы и сериалы:</b>\n\n"
+        markup = InlineKeyboardMarkup(row_width=1)
+        
+        for film in similar_films[:5]:  # Показываем до 5 рекомендаций
+            # get_similars возвращает кортеж (filmId, name, is_series)
+            if isinstance(film, tuple) and len(film) >= 2:
+                film_kp_id = film[0]
+                film_title = film[1]
+                film_year = ''  # В кортеже нет года
+            else:
+                # Если это dict (на случай изменения API)
+                film_kp_id = film.get('filmId')
+                film_title = film.get('nameRu') or film.get('nameEn') or 'Без названия'
+                film_year = film.get('year') or ''
+            
+            if film_kp_id:
+                year_str = f" ({film_year})" if film_year else ""
+                text += f"• <b>{film_title}</b>{year_str}\n"
+                markup.add(InlineKeyboardButton(f"📖 {film_title}", callback_data=f"show_film_info:{film_kp_id}"))
+        
+        markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"show_film_info:{kp_id}"))
+        
+        bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+    except Exception as e:
+        logger.error(f"[FILM CALLBACKS] Ошибка отправки рекомендаций: {e}", exc_info=True)
+
 def register_film_callbacks(bot):
     """Регистрирует callback handlers для карточки фильма (уже зарегистрированы через декораторы)"""
     # Handlers уже зарегистрированы через декораторы @bot.callback_query_handler

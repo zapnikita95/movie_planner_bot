@@ -498,11 +498,11 @@ def init_database():
         conn.rollback()
     
     try:
-        cursor.execute('ALTER TABLE movies ADD COLUMN IF NOT EXISTS is_series INTEGER DEFAULT 0')
+        cursor.execute('ALTER TABLE movies ADD COLUMN IF NOT EXISTS online_link TEXT')
         conn.commit()
-        logger.info("Поле is_series добавлено в таблицу movies")
+        logger.info("Поле online_link добавлено в таблицу movies")
     except Exception as e:
-        logger.debug(f"Поле is_series уже существует или ошибка: {e}")
+        logger.debug(f"Поле online_link уже существует или ошибка: {e}")
         conn.rollback()
     
     # Миграция: изменение типа timestamp в stats с TEXT на TIMESTAMP WITH TIME ZONE

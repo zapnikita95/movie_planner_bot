@@ -21,7 +21,20 @@
     "*://kinoteatr.ru/*",
     "*://karofilm.ru/*",
     "*://mos-kino.ru/*",
-    "*://web-production-3921c.up.railway.app/*"
+    "*://web-production-3921c.up.railway.app/*",
+    "*://tvoe.live/*",
+    "*://*.ivi.ru/*",
+    "*://okko.tv/*",
+    "*://premier.one/*",
+    "*://wink.ru/*",
+    "*://start.ru/*",
+    "*://*.amediateka.ru/*",
+    "*://*.rezka.ag/*",
+    "*://*.rezka.ad/*",
+    "*://*.hdrezka.*/*",
+    "*://*.lordfilm*/*",
+    "*://*.allserial.*/*",
+    "*://boxserial.org/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -69,6 +82,27 @@
         "*://mos-kino.ru/*/schedule/*"
       ],
       "js": ["content/content-tickets.js"],
+      "run_at": "document_end"
+    },
+    {
+      "matches": [
+        "*://tvoe.live/*",
+        "*://*.ivi.ru/*",
+        "*://okko.tv/*",
+        "*://*.kinopoisk.ru/*",
+        "*://*.hd.kinopoisk.ru/*",
+        "*://premier.one/*",
+        "*://wink.ru/*",
+        "*://start.ru/*",
+        "*://*.amediateka.ru/*",
+        "*://*.rezka.ag/*",
+        "*://*.rezka.ad/*",
+        "*://*.hdrezka.*/*",
+        "*://*.lordfilm*/*",
+        "*://*.allserial.*/*",
+        "*://boxserial.org/*"
+      ],
+      "js": ["content/content-streaming.js"],
       "run_at": "document_end"
     }
   ],

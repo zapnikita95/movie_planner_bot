@@ -2871,6 +2871,46 @@ def handle_random_instruction_plan_reply(message):
         logger.error(f"[RANDOM INSTR REPLY] Ошибка process_plan: {e}")
         bot.reply_to(message, "Не смог добавить в план :(")
 
+def send_film_watched_message(bot, chat_id, user_id, kp_id, film_id):
+    """Отправляет сообщение в бота об отметке фильма как просмотренного"""
+    try:
+        from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+        
+        conn = get_db_connection()
+        cursor = get_db_cursor()
+        
+        try:
+            # Получаем информацию о фильме
+            cursor.execute("SELECT title, online_link FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
+            row = cursor.fetchone()
+            if not row:
+                return
+            
+            title = row.get('title') if isinstance(row, dict) else row[0]
+            online_link = row.get('online_link') if isinstance(row, dict) else (row[1] if len(row) > 1 else None)
+            
+            # Формируем сообщение
+            text = f"✅ <b>{title}</b>\n\nОтмечен как просмотренный"
+            
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"show_film_info:{kp_id}"))
+            
+            if online_link:
+                markup.add(InlineKeyboardButton("🎬 Онлайн-кинотеатр", url=online_link))
+            
+            bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+        finally:
+            try:
+                cursor.close()
+            except:
+                pass
+            try:
+                conn.close()
+            except:
+                pass
+    except Exception as e:
+        logger.error(f"[TEXT MESSAGES] Ошибка отправки сообщения об отметке фильма: {e}", exc_info=True)
+
 def register_text_message_handlers(bot):
     """Регистрирует обработчики текстовых сообщений"""
     # Обработчики уже зарегистрированы через декораторы при импорте модуля

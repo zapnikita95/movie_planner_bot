@@ -332,7 +332,7 @@ def show_film_info_with_buttons(
                 try:
                     with db_lock:
                         cursor_db.execute("""
-                            SELECT title, year, genres, description, director, actors, is_series
+                            SELECT title, year, genres, description, director, actors, is_series, online_link
                             FROM movies 
                             WHERE id = %s AND chat_id = %s
                         """, (film_id, chat_id))
@@ -931,6 +931,41 @@ def show_film_info_with_buttons(
                 markup.add(InlineKeyboardButton("🔒 Подписаться на новые серии", callback_data=f"series_locked:{int(kp_id)}"))
 
         logger.info(f"[SHOW FILM INFO] Обработка сериала завершена")
+        
+        # Добавляем кнопку "Онлайн-кинотеатр" первой, если есть online_link
+        if existing and film_id:
+            try:
+                conn_online = get_db_connection()
+                cursor_online = get_db_cursor()
+                try:
+                    with db_lock:
+                        cursor_online.execute("SELECT online_link FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
+                        online_row = cursor_online.fetchone()
+                        online_link = None
+                        if online_row:
+                            online_link = online_row.get('online_link') if isinstance(online_row, dict) else (online_row[0] if len(online_row) > 0 else None)
+                        
+                        if online_link:
+                            # Добавляем кнопку первой (в начало клавиатуры)
+                            from telebot.types import InlineKeyboardButton
+                            online_button = InlineKeyboardButton("🎬 Онлайн-кинотеатр", url=online_link)
+                            # Вставляем в начало
+                            if markup.keyboard:
+                                markup.keyboard.insert(0, [online_button])
+                            else:
+                                markup.add(online_button)
+                            logger.info(f"[SHOW FILM INFO] Добавлена кнопка 'Онлайн-кинотеатр' с ссылкой: {online_link[:50]}...")
+                finally:
+                    try:
+                        cursor_online.close()
+                    except:
+                        pass
+                    try:
+                        conn_online.close()
+                    except:
+                        pass
+            except Exception as e:
+                logger.warning(f"[SHOW FILM INFO] Ошибка добавления кнопки онлайн-кинотеатра: {e}", exc_info=True)
         
         logger.info(f"[SHOW FILM INFO] ===== ФИНАЛЬНАЯ ПОДГОТОВКА =====")
         # Проверяем длину текста перед отправкой
@@ -8190,3 +8225,48 @@ def _random_final(call, chat_id, user_id):
                 del random_plan_data[user_id]
         except:
             pass
+
+def send_episode_marked_message(bot, chat_id, user_id, kp_id, film_id, season, episode, mark_all_previous):
+    """Отправляет сообщение в бота об отметке серии"""
+    try:
+        from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+        from moviebot.api.kinopoisk_api import extract_movie_info
+        
+        conn = get_db_connection()
+        cursor = get_db_cursor()
+        
+        try:
+            # Получаем информацию о сериале
+            cursor.execute("SELECT title, link, online_link FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
+            row = cursor.fetchone()
+            if not row:
+                return
+            
+            title = row.get('title') if isinstance(row, dict) else row[0]
+            link = row.get('link') if isinstance(row, dict) else row[1]
+            online_link = row.get('online_link') if isinstance(row, dict) else (row[2] if len(row) > 2 else None)
+            
+            # Формируем сообщение
+            if mark_all_previous:
+                text = f"✅ <b>{title}</b>\n\nОтмечены все серии до {season}×{episode} как просмотренные"
+            else:
+                text = f"✅ <b>{title}</b>\n\nОтмечена серия {season}×{episode} как просмотренная"
+            
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"show_seasons:{kp_id}"))
+            
+            if online_link:
+                markup.add(InlineKeyboardButton("🎬 Онлайн-кинотеатр", url=online_link))
+            
+            bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+        finally:
+            try:
+                cursor.close()
+            except:
+                pass
+            try:
+                conn.close()
+            except:
+                pass
+    except Exception as e:
+        logger.error(f"[SERIES] Ошибка отправки сообщения об отметке серии: {e}", exc_info=True)
