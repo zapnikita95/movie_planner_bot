@@ -1854,7 +1854,12 @@ def create_web_app(bot):
             return resp
         except Exception as e:
             logger.error(f"[EXTENSION API] Ошибка получения информации о фильме: {e}", exc_info=True)
+            import traceback
+            logger.error(f"[EXTENSION API] Traceback: {traceback.format_exc()}")
             error_msg = str(e) if e else "server error"
+            # Убеждаемся, что error_msg не пустая строка и не "0"
+            if not error_msg or error_msg == "0":
+                error_msg = "server error"
             resp = jsonify({"success": False, "error": error_msg})
             # after_request hook автоматически добавит CORS заголовки
             return resp, 500

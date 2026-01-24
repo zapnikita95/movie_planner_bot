@@ -1202,7 +1202,20 @@
           }
         } catch (fetchError) {
           console.error('[STREAMING] Ошибка fetch film-info:', fetchError);
-          // Продолжаем с базовыми данными
+          // Если есть kp_id в кэше, но запрос упал - все равно показываем виджет с kp_id
+          // Пользователь сможет добавить фильм вручную
+          if (kpId) {
+            filmData = {
+              kp_id: kpId,
+              film_id: null,
+              watched: false,
+              rated: false,
+              has_unwatched_before: false
+            };
+          } else {
+            // Нет kp_id - не показываем виджет
+            return;
+          }
         }
       } else {
         // Не нашли в кэше - ищем через API
