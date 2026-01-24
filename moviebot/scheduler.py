@@ -80,6 +80,7 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
         text += f"<b>{title}</b>\n{link}"
        
         markup = None
+        kp_id = None  # Будем получать kp_id для кнопок
        
         # Проверяем, является ли фильм сериалом, и получаем информацию о последней просмотренной серии
         is_series = False
@@ -253,6 +254,40 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
                 markup.add(InlineKeyboardButton("🎟 Показать билеты", callback_data=f"show_ticket:{plan_id}"))
                 logger.info(f"[PLAN NOTIFICATION] Кнопка 'Показать билеты' для плана {plan_id}")
 
+        # Получаем kp_id для кнопок "Перейти к описанию" и "Изменить в расписании"
+        if film_id and plan_id:
+            conn_kp = get_db_connection()
+            cursor_kp = None
+            try:
+                with db_lock:
+                    cursor_kp = conn_kp.cursor()
+                    cursor_kp.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                    movie_row = cursor_kp.fetchone()
+                    if movie_row:
+                        kp_id = movie_row.get('kp_id') if isinstance(movie_row, dict) else movie_row[0]
+            finally:
+                if cursor_kp:
+                    try:
+                        cursor_kp.close()
+                    except:
+                        pass
+                try:
+                    conn_kp.close()
+                except:
+                    pass
+        
+        # Добавляем кнопки "Перейти к описанию" и "Изменить в расписании", если есть plan_id и kp_id
+        if plan_id and kp_id:
+            if not markup:
+                markup = InlineKeyboardMarkup(row_width=1)
+            try:
+                kp_id_int = int(kp_id)
+                markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"back_to_film:{kp_id_int}"))
+                markup.add(InlineKeyboardButton("✏️ Изменить в расписании", callback_data=f"edit_plan:{plan_id}"))
+                logger.info(f"[PLAN NOTIFICATION] Добавлены кнопки 'Перейти к описанию' и 'Изменить в расписании' для плана {plan_id}")
+            except (ValueError, TypeError) as e:
+                logger.warning(f"[PLAN NOTIFICATION] Не удалось преобразовать kp_id в int: {kp_id}, ошибка: {e}")
+        
         # Кнопка подписки в конце
         if not has_access and user_id:
             if not markup:
