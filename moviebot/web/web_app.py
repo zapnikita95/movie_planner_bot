@@ -2786,7 +2786,12 @@ def create_web_app(bot):
             user_id = data.get('user_id')
             kp_id = data.get('kp_id')
             film_id = data.get('film_id')
-            rating = data.get('rating', type=int)
+            rating = data.get('rating')
+            if rating is not None:
+                try:
+                    rating = int(rating)
+                except (ValueError, TypeError):
+                    rating = None
             
             if not all([chat_id, user_id, kp_id, rating]) or not (1 <= rating <= 10):
                 return jsonify({"success": False, "error": "invalid rating"}), 400
