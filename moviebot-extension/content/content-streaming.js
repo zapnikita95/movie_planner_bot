@@ -506,13 +506,36 @@
   }
   
   // ────────────────────────────────────────────────
-  // Плашка с кнопками
+  // Плавающая плашка с кнопками (перетаскиваемая)
   // ────────────────────────────────────────────────
   let overlayElement = null;
   let currentInfo = null;
   let currentKpId = null;
   let currentFilmId = null;
   let currentFilmData = null;
+  
+  // Функция загрузки позиции плашки из localStorage
+  function loadOverlayPosition() {
+    try {
+      const saved = localStorage.getItem('movieplanner_streaming_overlay_position');
+      if (saved) {
+        const pos = JSON.parse(saved);
+        return { top: pos.top, right: pos.right, left: pos.left, bottom: pos.bottom };
+      }
+    } catch (e) {
+      console.error('[STREAMING] Ошибка загрузки позиции плашки:', e);
+    }
+    return { top: null, right: 20, bottom: 20, left: null };
+  }
+  
+  // Функция сохранения позиции плашки в localStorage
+  function saveOverlayPosition(position) {
+    try {
+      localStorage.setItem('movieplanner_streaming_overlay_position', JSON.stringify(position));
+    } catch (e) {
+      console.error('[STREAMING] Ошибка сохранения позиции плашки:', e);
+    }
+  }
   
   function removeOverlay() {
     if (overlayElement) {
@@ -531,12 +554,13 @@
     
     overlayElement = document.createElement('div');
     overlayElement.id = 'movieplanner-streaming-overlay';
-    // Позиционируем плашку так, чтобы она не перекрывала видеопроигрыватель
-    // Обычно видеопроигрыватель в центре/сверху, поэтому плашка справа внизу
-    overlayElement.style.cssText = `
+    
+    // Загружаем сохраненную позицию
+    const savedPos = loadOverlayPosition();
+    
+    // Устанавливаем начальную позицию
+    let initialStyle = `
       position: fixed;
-      bottom: 20px;
-      right: 20px;
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       color: white;
       padding: 16px;
@@ -548,7 +572,27 @@
       font-size: 14px;
       line-height: 1.4;
       pointer-events: auto;
+      cursor: move;
+      user-select: none;
     `;
+    
+    if (savedPos.left !== undefined) {
+      initialStyle += `left: ${savedPos.left}px; right: auto;`;
+    } else if (savedPos.right !== undefined) {
+      initialStyle += `right: ${savedPos.right}px; left: auto;`;
+    } else {
+      initialStyle += `right: 20px; left: auto;`;
+    }
+    
+    if (savedPos.top !== undefined) {
+      initialStyle += `top: ${savedPos.top}px; bottom: auto;`;
+    } else if (savedPos.bottom !== undefined) {
+      initialStyle += `bottom: ${savedPos.bottom}px; top: auto;`;
+    } else {
+      initialStyle += `bottom: 20px; top: auto;`;
+    }
+    
+    overlayElement.style.cssText = initialStyle;
     
     const titleText = info.isSeries 
       ? `${info.title} ${info.year ? `(${info.year})` : ''} - ${info.season || '?'} сезон, ${info.episode || '?'} серия`
@@ -566,8 +610,92 @@
     document.body.appendChild(overlayElement);
     
     // Кнопка закрытия
-    overlayElement.querySelector('#mpp-close').addEventListener('click', () => {
+    overlayElement.querySelector('#mpp-close').addEventListener('click', (e) => {
+      e.stopPropagation();
       removeOverlay();
+    });
+    
+    // Перетаскивание плашки
+    let isDragging = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let initialLeft = 0;
+    let initialTop = 0;
+    let hasMoved = false;
+    
+    overlayElement.addEventListener('mousedown', (e) => {
+      // Игнорируем клики на кнопки и контейнер кнопок
+      if (e.target.closest('button') || e.target.closest('#mpp-buttons-container') || e.target.id === 'mpp-close') {
+        return;
+      }
+      
+      if (e.button !== 0) return; // Только левая кнопка мыши
+      
+      dragStartX = e.clientX;
+      dragStartY = e.clientY;
+      hasMoved = false;
+      
+      // Получаем текущую позицию плашки
+      const rect = overlayElement.getBoundingClientRect();
+      initialLeft = rect.left;
+      initialTop = rect.top;
+      
+      e.preventDefault();
+    });
+    
+    document.addEventListener('mousemove', (e) => {
+      if (dragStartX === 0 && dragStartY === 0) return;
+      
+      const deltaX = Math.abs(e.clientX - dragStartX);
+      const deltaY = Math.abs(e.clientY - dragStartY);
+      
+      // Если мышь сдвинулась больше чем на 5px, начинаем перетаскивание
+      if (deltaX > 5 || deltaY > 5) {
+        hasMoved = true;
+        if (!isDragging) {
+          isDragging = true;
+          overlayElement.style.cursor = 'grabbing';
+          overlayElement.style.transition = 'none';
+        }
+        
+        const newLeft = initialLeft + (e.clientX - dragStartX);
+        const newTop = initialTop + (e.clientY - dragStartY);
+        
+        // Ограничиваем перемещение в пределах окна
+        const maxLeft = window.innerWidth - overlayElement.offsetWidth;
+        const maxTop = window.innerHeight - overlayElement.offsetHeight;
+        
+        const clampedLeft = Math.max(0, Math.min(newLeft, maxLeft));
+        const clampedTop = Math.max(0, Math.min(newTop, maxTop));
+        
+        overlayElement.style.left = `${clampedLeft}px`;
+        overlayElement.style.top = `${clampedTop}px`;
+        overlayElement.style.right = 'auto';
+        overlayElement.style.bottom = 'auto';
+      }
+    });
+    
+    document.addEventListener('mouseup', () => {
+      if (isDragging && hasMoved) {
+        // Сохраняем позицию
+        const rect = overlayElement.getBoundingClientRect();
+        saveOverlayPosition({
+          left: rect.left,
+          top: rect.top,
+          right: null,
+          bottom: null
+        });
+      }
+      
+      isDragging = false;
+      hasMoved = false;
+      dragStartX = 0;
+      dragStartY = 0;
+      
+      if (overlayElement) {
+        overlayElement.style.cursor = 'move';
+        overlayElement.style.transition = '';
+      }
     });
     
     // Рендерим кнопки
@@ -1008,6 +1136,31 @@
     });
     
     // Наблюдение за изменениями URL (для SPA)
+    // Слушаем history.pushState и popstate для SPA навигации
+    const originalPushState = history.pushState;
+    const originalReplaceState = history.replaceState;
+    
+    history.pushState = function(...args) {
+      originalPushState.apply(history, args);
+      setTimeout(() => {
+        checkAndShowOverlay();
+      }, 1000);
+    };
+    
+    history.replaceState = function(...args) {
+      originalReplaceState.apply(history, args);
+      setTimeout(() => {
+        checkAndShowOverlay();
+      }, 1000);
+    };
+    
+    window.addEventListener('popstate', () => {
+      setTimeout(() => {
+        checkAndShowOverlay();
+      }, 1000);
+    });
+    
+    // Дополнительная проверка URL через setInterval (fallback)
     let lastUrlCheck = location.href;
     setInterval(() => {
       if (location.href !== lastUrlCheck) {
@@ -1016,14 +1169,18 @@
           checkAndShowOverlay();
         }, 1000);
       }
-    }, 500);
+    }, 2000);
     
     // Периодическая проверка для статичных URL (каждые 30 секунд)
+    // Только если изменился контент (сезон/серия)
     checkInterval = setInterval(() => {
-      const currentHash = getContentHash(getContentInfo() || {});
-      if (currentHash !== lastContentHash) {
-        lastContentHash = currentHash;
-        checkAndShowOverlay();
+      const info = getContentInfo();
+      if (info) {
+        const currentHash = getContentHash(info);
+        if (currentHash !== lastContentHash) {
+          lastContentHash = currentHash;
+          checkAndShowOverlay();
+        }
       }
     }, 30000);
   }

@@ -771,8 +771,12 @@ def show_film_info_with_buttons(
                     markup.add(InlineKeyboardButton("🔒 Добавить билеты", callback_data=f"ticket_locked:{plan_info['id']}"))
 
             # Онлайн-кинотеатр для планов дома
-            if plan_info and plan_info.get('type') == 'home' and not watched and has_sources:
-                markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{int(kp_id)}"))
+            # Если есть online_link, показываем прямую ссылку, иначе - выбор
+            if plan_info and plan_info.get('type') == 'home' and not watched:
+                if online_link:
+                    markup.add(InlineKeyboardButton("🎬 Онлайн-кинотеатр", url=online_link))
+                elif has_sources:
+                    markup.add(InlineKeyboardButton("🎬 Выбрать онлайн-кинотеатр", callback_data=f"streaming_select:{int(kp_id)}"))
         else:
             # Нет плана → всегда показываем кнопку "Запланировать просмотр"
             logger.info(f"[BUTTONS] Нет плана → добавляем 'Запланировать просмотр'")
@@ -785,7 +789,11 @@ def show_film_info_with_buttons(
                 markup.add(InlineKeyboardButton("📅 Запланировать просмотр", callback_data=f"plan_from_added:{int(kp_id)}"))
 
             # === КНОПКИ ОНЛАЙН-КИНОТЕАТРОВ ===
-            if not watched and has_sources:
+            # Если есть online_link, показываем прямую ссылку вместо выбора
+            if online_link:
+                logger.info(f"[SHOW FILM INFO] Добавляем кнопку 'Онлайн-кинотеатр' с прямой ссылкой: {online_link[:50]}...")
+                markup.add(InlineKeyboardButton("🎬 Онлайн-кинотеатр", url=online_link))
+            elif not watched and has_sources:
                 logger.info(f"[SHOW FILM INFO] Добавляем кнопку 'Выбрать онлайн-кинотеатр' для kp_id={kp_id}")
                 
                 # Глобальный кэш источников (в памяти, живёт пока бот работает)
@@ -932,7 +940,8 @@ def show_film_info_with_buttons(
 
         logger.info(f"[SHOW FILM INFO] Обработка сериала завершена")
         
-        # Добавляем кнопку "Онлайн-кинотеатр" первой, если есть online_link
+        # Проверяем наличие online_link для замены кнопки "Выбрать онлайн-кинотеатр" на прямую ссылку
+        online_link = None
         if existing and film_id:
             try:
                 conn_online = get_db_connection()
@@ -941,20 +950,8 @@ def show_film_info_with_buttons(
                     with db_lock:
                         cursor_online.execute("SELECT online_link FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
                         online_row = cursor_online.fetchone()
-                        online_link = None
                         if online_row:
                             online_link = online_row.get('online_link') if isinstance(online_row, dict) else (online_row[0] if len(online_row) > 0 else None)
-                        
-                        if online_link:
-                            # Добавляем кнопку первой (в начало клавиатуры)
-                            from telebot.types import InlineKeyboardButton
-                            online_button = InlineKeyboardButton("🎬 Онлайн-кинотеатр", url=online_link)
-                            # Вставляем в начало
-                            if markup.keyboard:
-                                markup.keyboard.insert(0, [online_button])
-                            else:
-                                markup.add(online_button)
-                            logger.info(f"[SHOW FILM INFO] Добавлена кнопка 'Онлайн-кинотеатр' с ссылкой: {online_link[:50]}...")
                 finally:
                     try:
                         cursor_online.close()
@@ -965,7 +962,7 @@ def show_film_info_with_buttons(
                     except:
                         pass
             except Exception as e:
-                logger.warning(f"[SHOW FILM INFO] Ошибка добавления кнопки онлайн-кинотеатра: {e}", exc_info=True)
+                logger.warning(f"[SHOW FILM INFO] Ошибка получения online_link: {e}", exc_info=True)
         
         logger.info(f"[SHOW FILM INFO] ===== ФИНАЛЬНАЯ ПОДГОТОВКА =====")
         # Проверяем длину текста перед отправкой

@@ -204,9 +204,15 @@ def show_premieres_page(call, premieres, period, page=0, mode='date', genre_name
 
 @bot.callback_query_handler(func=lambda call: call.data == "premieres_back_to_sort")
 def premieres_back_to_sort_callback(call):
-    """Возврат к выбору сортировки (По датам / По жанрам)."""
+    """Возврат к выбору сортировки (По датам / По жанрам). Очищаем кэш жанров."""
     try:
         bot.answer_callback_query(call.id)
+        user_id = getattr(call.from_user, "id", None)
+        if user_id is not None:
+            user_premiere_genre_selection.pop(user_id, None)
+            user_premieres_genre_cache.pop(user_id, None)
+            user_premiere_genre_list_page.pop(user_id, None)
+            user_premiere_genre_film_page.pop(user_id, None)
         _show_sort_selection(call.message.chat.id, call.message.message_id, edit=True)
     except Exception as e:
         logger.error(f"[PREMIERES BACK TO SORT] Ошибка: {e}", exc_info=True)
@@ -263,7 +269,7 @@ def _show_genre_list_page(chat_id, msg_id, user_id, page=0, edit=True):
     text = "🎭 <b>Премьеры по жанрам</b> (3 месяца)\n\nВыберите один или несколько жанров, затем «Посмотреть премьеры»."
     text += f"\n\nСтраница {page + 1} из {total_pages}"
     if selected:
-        text += f"\nВыбрано: {", ".join(sorted(selected, key=str.lower))}"
+        text += "\nВыбрано: " + ", ".join(sorted(selected, key=str.lower))
     try:
         if edit and msg_id:
             bot.edit_message_text(text, chat_id, msg_id, reply_markup=markup, parse_mode="HTML")
@@ -363,7 +369,6 @@ def premieres_genre_toggle_callback(call):
 def premieres_genre_apply_callback(call):
     """Показать премьеры по выбранным жанрам (хотя бы один совпадает)."""
     try:
-        bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         selected = user_premiere_genre_selection.get(user_id) or set()
@@ -373,6 +378,7 @@ def premieres_genre_apply_callback(call):
             except Exception:
                 pass
             return
+        bot.answer_callback_query(call.id)
         premieres = user_premieres_genre_cache.get(user_id)
         if not premieres:
             try:
@@ -459,32 +465,38 @@ def premieres_page_callback(call):
             pass
 
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("premieres_genre_page:"))
-def premieres_genre_page_callback(call):
-    """Премьеры по жанру: список или пагинация."""
+@bot.callback_query_handler(func=lambda call: call.data.startswith("premieres_genre_multi_page:"))
+def premieres_genre_multi_page_callback(call):
+    """Пагинация премьер по выбранным жанрам."""
     try:
-        parts = call.data.split(":", 2)
-        genre_name = parts[1]
-        page = int(parts[2])
-        premieres_all = get_premieres_for_period("6_months")
-        genre_lower = genre_name.lower()
-        filtered = [
-            p for p in premieres_all
-            if any((g.get("genre") or "").lower() == genre_lower for g in (p.get("genres") or []))
-        ]
-        if not filtered:
-            bot.answer_callback_query(call.id)
+        bot.answer_callback_query(call.id)
+        page = int(call.data.split(":")[1])
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        selected = user_premiere_genre_selection.get(user_id) or set()
+        premieres = user_premieres_genre_cache.get(user_id)
+        if not selected or not premieres:
             try:
                 bot.edit_message_text(
-                    f"❌ Нет премьер в жанре «{genre_name}».",
-                    call.message.chat.id, call.message.message_id
+                    "❌ Нет выбранных жанров или кэш пуст. Вернитесь к выбору жанров.",
+                    chat_id, call.message.message_id
                 )
             except Exception:
                 pass
             return
-        show_premieres_page(call, filtered, None, page=page, mode='genre', genre_name=genre_name)
+        user_premiere_genre_film_page[user_id] = page
+        sel_lower = {g.lower() for g in selected}
+        filtered = [
+            p for p in premieres
+            if any((g.get("genre") or "").lower() in sel_lower for g in (p.get("genres") or []))
+        ]
+        label = ", ".join(sorted(selected, key=str.lower))
+        show_premieres_page(
+            call, filtered, None, page=page, mode="genre",
+            genre_label=label, all_genres=True
+        )
     except Exception as e:
-        logger.error(f"[PREMIERES GENRE PAGE] Ошибка: {e}", exc_info=True)
+        logger.error(f"[PREMIERES GENRE MULTI PAGE] Ошибка: {e}", exc_info=True)
         try:
             bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
         except Exception:
@@ -518,10 +530,14 @@ def premiere_detail_handler(call):
         if len(parts) >= 4:
             source, ref = parts[2], parts[3]
         elif len(parts) == 3:
-            source, ref = 'date', parts[2]
+            if parts[2] == "genre_multi":
+                source, ref = "genre_multi", None
+            else:
+                source, ref = "date", parts[2]
         else:
-            source, ref = 'date', 'current_month'
+            source, ref = "date", "current_month"
         chat_id = call.message.chat.id
+        user_id = getattr(call.from_user, "id", None)
 
         headers = {'X-API-KEY': KP_TOKEN}
         url = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}"
@@ -582,10 +598,11 @@ def premiere_detail_handler(call):
         )
         date_cb = premiere_date_str.replace(':', '-') if premiere_date_str else ''
 
+        notify_ref = ref if ref else "genre_multi"
         if show_notify:
             markup.add(InlineKeyboardButton(
                 "🔔 Уведомить о премьере",
-                callback_data=f"premiere_notify:{kp_id}:{date_cb}:{ref}"
+                callback_data=f"premiere_notify:{kp_id}:{date_cb}:{notify_ref}"
             ))
 
         if in_database:
@@ -594,7 +611,8 @@ def premiere_detail_handler(call):
             markup.add(InlineKeyboardButton("➕ Добавить в базу", callback_data=f"add_to_database:{int(kp_id)}"))
 
         markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"back_to_film:{int(kp_id)}"))
-        markup.add(InlineKeyboardButton("◀️ Назад", callback_data=f"premieres_back:{source}:{ref}"))
+        back_cb = f"premieres_back:{source}" if source == "genre_multi" else f"premieres_back:{source}:{ref}"
+        markup.add(InlineKeyboardButton("◀️ Назад", callback_data=back_cb))
 
         if poster_url:
             try:
@@ -1132,17 +1150,19 @@ def premiere_cancel_handler(call):
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("premieres_back:"))
 def premieres_back_handler(call):
-    """Возврат из детали к списку: по датам (period) или по жанру (genre)."""
+    """Возврат из детали к списку: по датам (period) или по жанрам (genre_multi)."""
     try:
         bot.answer_callback_query(call.id)
         parts = call.data.split(":", 2)
         if len(parts) >= 3:
             source, ref = parts[1], parts[2]
         elif len(parts) == 2:
-            source, ref = 'date', parts[1]
+            source = parts[1]
+            ref = "current_month" if source == "date" else None
         else:
-            source, ref = 'date', 'current_month'
+            source, ref = "date", "current_month"
         chat_id = call.message.chat.id
+        user_id = getattr(call.from_user, "id", None)
 
         try:
             bot.delete_message(chat_id, call.message.message_id)
@@ -1151,11 +1171,11 @@ def premieres_back_handler(call):
 
         class FakeCall:
             def __init__(self, cid):
-                self.message = type('M', (), {'chat': type('C', (), {'id': cid})(), 'message_id': None})()
+                self.message = type("M", (), {"chat": type("C", (), {"id": cid})(), "message_id": None})()
                 self.id = None
 
         fake = FakeCall(chat_id)
-        if source == 'date':
+        if source == "date":
             premieres = get_premieres_for_period(ref)
             if not premieres:
                 try:
@@ -1163,18 +1183,32 @@ def premieres_back_handler(call):
                 except Exception:
                     pass
                 return
-            show_premieres_page(fake, premieres, ref, page=0, mode='date')
-        else:
-            all_p = get_premieres_for_period("6_months")
-            gl = ref.lower()
-            filtered = [p for p in all_p if any((g.get("genre") or "").lower() == gl for g in (p.get("genres") or []))]
-            if not filtered:
+            show_premieres_page(fake, premieres, ref, page=0, mode="date")
+        elif source == "genre_multi" and user_id is not None:
+            selected = user_premiere_genre_selection.get(user_id) or set()
+            premieres = user_premieres_genre_cache.get(user_id)
+            if not selected or not premieres:
                 try:
-                    bot.send_message(chat_id, f"❌ Нет премьер в жанре «{ref}».")
+                    bot.send_message(chat_id, "❌ Нет выбранных жанров или кэш пуст. Вернитесь к выбору жанров.")
                 except Exception:
                     pass
                 return
-            show_premieres_page(fake, filtered, None, page=0, mode='genre', genre_name=ref)
+            page = user_premiere_genre_film_page.get(user_id, 0)
+            sel_lower = {g.lower() for g in selected}
+            filtered = [
+                p for p in premieres
+                if any((g.get("genre") or "").lower() in sel_lower for g in (p.get("genres") or []))
+            ]
+            label = ", ".join(sorted(selected, key=str.lower))
+            show_premieres_page(
+                fake, filtered, None, page=page, mode="genre",
+                genre_label=label, all_genres=True
+            )
+        else:
+            try:
+                bot.send_message(chat_id, "❌ Не удалось вернуться к списку.")
+            except Exception:
+                pass
     except Exception as e:
         logger.error(f"[PREMIERES BACK] Ошибка: {e}", exc_info=True)
         try:
