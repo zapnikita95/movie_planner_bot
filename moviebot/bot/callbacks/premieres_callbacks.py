@@ -223,7 +223,7 @@ def premieres_back_to_sort_callback(call):
 
 
 def _show_genre_list_page(chat_id, msg_id, user_id, page=0, edit=True):
-    """Список жанров: 10 на страницу, мультивыбор (✅/⬜), «Посмотреть премьеры»."""
+    """Список жанров: 10 на страницу, мультивыбор (✅ только у выбранных), «Посмотреть премьеры»."""
     premieres = user_premieres_genre_cache.get(user_id)
     if not premieres:
         try:
@@ -250,9 +250,9 @@ def _show_genre_list_page(chat_id, msg_id, user_id, page=0, edit=True):
 
     markup = InlineKeyboardMarkup(row_width=1)
     for g in page_genres:
-        prefix = "✅ " if g in selected else "⬜ "
+        label = f"✅ {g}" if g in selected else g
         markup.add(InlineKeyboardButton(
-            f"{prefix}{g}",
+            label,
             callback_data=f"premieres_genre_toggle:{g}:{page}"
         ))
     nav = []
@@ -347,9 +347,10 @@ def premieres_genre_toggle_callback(call):
         if len(parts) < 3:
             return
         page = int(parts[-1])
-        genre = ":".join(parts[2:-1])
+        genre = ":".join(parts[1:-1])  # жанр может содержать ":" (напр. "Мультфильм: мюзикл")
         user_id = call.from_user.id
         sel = user_premiere_genre_selection.get(user_id) or set()
+        sel = set(sel)  # копия, чтобы не мутировать общий set
         if genre in sel:
             sel.discard(genre)
         else:

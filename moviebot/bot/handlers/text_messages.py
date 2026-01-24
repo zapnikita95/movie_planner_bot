@@ -2893,7 +2893,7 @@ def send_film_watched_message(bot, chat_id, user_id, kp_id, film_id):
             text = f"✅ <b>{title}</b>\n\nОтмечен как просмотренный"
             
             markup = InlineKeyboardMarkup(row_width=1)
-            markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"show_film_info:{kp_id}"))
+            markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"back_to_film:{kp_id}"))
             
             if online_link:
                 markup.add(InlineKeyboardButton("🎬 Онлайн-кинотеатр", url=online_link))
