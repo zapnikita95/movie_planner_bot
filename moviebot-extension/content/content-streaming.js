@@ -998,7 +998,7 @@
             if (result.success) {
               // Обновляем данные и перерисовываем кнопки
               currentFilmData = { ...filmData, film_id: result.film_id, kp_id: filmData.kp_id };
-              renderButtons(info, currentFilmData);
+              await renderButtons(info, currentFilmData);
             } else {
               alert('Ошибка: ' + (result.error || 'неизвестная ошибка'));
             }
