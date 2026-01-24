@@ -1722,16 +1722,30 @@ def create_web_app(bot):
                 logger.info(f"[EXTENSION API] Конвертирован imdb_id={imdb_id} в kp_id={kp_id}")
             
             # Получаем информацию о фильме через API для определения типа
+            logger.info(f"[EXTENSION API] Запрос к Kinopoisk API для kp_id={kp_id}")
             headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
             url_api = f"https://kinopoiskapiunofficial.tech/api/v2.2/films/{kp_id}"
-            response = requests.get(url_api, headers=headers, timeout=15)
+            
+            try:
+                response = requests.get(url_api, headers=headers, timeout=15)
+                logger.info(f"[EXTENSION API] Kinopoisk API ответ: status={response.status_code}")
+            except Exception as api_err:
+                logger.error(f"[EXTENSION API] Ошибка запроса к Kinopoisk API: {api_err}", exc_info=True)
+                return jsonify({"success": False, "error": f"Kinopoisk API error: {str(api_err)}"}), 500
             
             is_series = False
             if response.status_code == 200:
-                data = response.json()
-                api_type = data.get('type', '').upper()
-                if api_type == 'TV_SERIES':
-                    is_series = True
+                try:
+                    data = response.json()
+                    api_type = data.get('type', '').upper()
+                    if api_type == 'TV_SERIES':
+                        is_series = True
+                    logger.info(f"[EXTENSION API] Тип фильма из API: {api_type}, is_series={is_series}")
+                except Exception as json_err:
+                    logger.error(f"[EXTENSION API] Ошибка парсинга JSON от Kinopoisk API: {json_err}", exc_info=True)
+                    return jsonify({"success": False, "error": "Invalid response from Kinopoisk API"}), 500
+            else:
+                logger.warning(f"[EXTENSION API] Kinopoisk API вернул статус {response.status_code}")
             
             # Формируем правильную ссылку в зависимости от типа
             if is_series:
@@ -1739,10 +1753,18 @@ def create_web_app(bot):
             else:
                 link = f"https://www.kinopoisk.ru/film/{kp_id}/"
             
-            info = extract_movie_info(link)
+            logger.info(f"[EXTENSION API] Вызов extract_movie_info для link={link}")
+            try:
+                info = extract_movie_info(link)
+            except Exception as extract_err:
+                logger.error(f"[EXTENSION API] Ошибка extract_movie_info: {extract_err}", exc_info=True)
+                return jsonify({"success": False, "error": f"Error extracting movie info: {str(extract_err)}"}), 500
             
             if not info:
+                logger.warning(f"[EXTENSION API] extract_movie_info вернул None для link={link}")
                 return jsonify({"success": False, "error": "film not found"}), 404
+            
+            logger.info(f"[EXTENSION API] extract_movie_info успешно: title={info.get('title', 'N/A')}")
             
             # Проверяем наличие в базе (без db_lock)
             conn = get_db_connection()
@@ -2453,12 +2475,14 @@ def create_web_app(bot):
             return resp, 400
         
         try:
-            from moviebot.utils.helpers import has_tickets_access
-            has_access = has_tickets_access(chat_id, user_id)
+            from moviebot.utils.helpers import has_tickets_access, has_notifications_access
+            has_tickets = has_tickets_access(chat_id, user_id)
+            has_notifications = has_notifications_access(chat_id, user_id)
             
             resp = jsonify({
                 "success": True,
-                "has_tickets_access": has_access
+                "has_tickets_access": has_tickets,
+                "has_notifications_access": has_notifications
             })
             return resp
         except Exception as e:

@@ -1157,9 +1157,27 @@
     }
     
     try {
-      const data = await chrome.storage.local.get(['linked_chat_id', 'linked_user_id']);
+      const data = await chrome.storage.local.get(['linked_chat_id', 'linked_user_id', 'has_notifications_access']);
       if (!data.linked_chat_id) {
         return; // Пользователь не привязан
+      }
+      
+      // Проверяем подписку для функционала отметки серий (если еще не проверяли)
+      if (data.has_notifications_access === undefined) {
+        try {
+          const subResponse = await apiRequest('GET', `/api/extension/check-subscription?chat_id=${data.linked_chat_id}&user_id=${data.linked_user_id}`);
+          if (subResponse.ok) {
+            const subResult = await subResponse.json();
+            if (subResult.success) {
+              await chrome.storage.local.set({ has_notifications_access: subResult.has_notifications_access || false });
+              data.has_notifications_access = subResult.has_notifications_access || false;
+            }
+          }
+        } catch (subErr) {
+          console.error('[STREAMING] Ошибка проверки подписки:', subErr);
+          // Продолжаем работу, но без функционала отметки серий
+          data.has_notifications_access = false;
+        }
       }
       
       // Сначала проверяем локальный кэш
