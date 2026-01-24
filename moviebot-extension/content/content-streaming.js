@@ -124,6 +124,10 @@
           // Убираем все после "смотреть" или "в хорошем"
           cleanTitle = cleanTitle.split(/\s+смотреть/i)[0]?.trim() || cleanTitle;
           cleanTitle = cleanTitle.split(/\s+в хорошем/i)[0]?.trim() || cleanTitle;
+          // Убираем сезон/серию из названия (например "1 сезон 2 серия")
+          cleanTitle = cleanTitle.replace(/\s+\d+\s*сезон\s*\d+\s*серия/i, '').trim();
+          cleanTitle = cleanTitle.replace(/\s+\d+\s*сезон/i, '').trim();
+          cleanTitle = cleanTitle.replace(/\s+\d+\s*серия/i, '').trim();
           // Убираем год в конце, если он есть (он будет в отдельном поле)
           cleanTitle = cleanTitle.replace(/\s+\d{4}\s*$/, '').trim();
           return cleanTitle || null;
@@ -1252,17 +1256,19 @@
         } catch (fetchError) {
           console.error('[STREAMING] Ошибка fetch film-info:', fetchError);
           // Если есть kp_id в кэше, но запрос упал - все равно показываем виджет с kp_id
-          // Пользователь сможет добавить фильм вручную
+          // Пользователь сможет добавить фильм вручную или отметить серию
           if (kpId) {
             filmData = {
               kp_id: kpId,
-              film_id: null,
+              film_id: null, // Не знаем film_id из-за ошибки, но kp_id есть
               watched: false,
               rated: false,
               has_unwatched_before: false
             };
+            console.log('[STREAMING] Продолжаем с kp_id несмотря на ошибку film-info:', kpId);
           } else {
             // Нет kp_id - не показываем виджет
+            console.log('[STREAMING] Пропуск: нет kp_id и ошибка film-info');
             return;
           }
         }
@@ -1417,15 +1423,26 @@
       checkAndShowOverlay();
     }, 3000);
     
-    // Наблюдение за изменениями DOM (debounce 15 секунд)
-    const observer = new MutationObserver(() => {
-      if (debounceTimer) {
-        clearTimeout(debounceTimer);
-      }
-      debounceTimer = setTimeout(() => {
-        checkAndShowOverlay();
-      }, 15000);
-    });
+      // Наблюдение за изменениями DOM (debounce 5 секунд для лучшей реакции на смену серий)
+      const observer = new MutationObserver(() => {
+        if (debounceTimer) {
+          clearTimeout(debounceTimer);
+        }
+        debounceTimer = setTimeout(() => {
+          // Проверяем, изменился ли сезон/серия
+          const info = getContentInfo();
+          if (info) {
+            const currentHash = getContentHash(info);
+            if (currentHash !== lastContentHash) {
+              console.log('[STREAMING] MutationObserver: обнаружено изменение контента');
+              lastContentHash = currentHash;
+              const key = getContentKey(info);
+              lastShown[key] = 0; // Сбрасываем кулдаун
+              checkAndShowOverlay();
+            }
+          }
+        }, 5000); // Уменьшили debounce до 5 секунд
+      });
     
     observer.observe(document.body, {
       childList: true,
@@ -1475,18 +1492,22 @@
       }
     }, 2000);
     
-    // Периодическая проверка для статичных URL (каждые 30 секунд)
+    // Периодическая проверка для статичных URL (каждые 5 секунд для SPA)
     // Только если изменился контент (сезон/серия)
     checkInterval = setInterval(() => {
       const info = getContentInfo();
       if (info) {
         const currentHash = getContentHash(info);
         if (currentHash !== lastContentHash) {
+          console.log('[STREAMING] Обнаружено изменение контента (hash изменился):', lastContentHash, '->', currentHash);
           lastContentHash = currentHash;
+          // Сбрасываем кулдаун при смене сезона/серии
+          const key = getContentKey(info);
+          lastShown[key] = 0; // Сбрасываем кулдаун
           checkAndShowOverlay();
         }
       }
-    }, 30000);
+    }, 5000); // Проверяем каждые 5 секунд вместо 30
   }
   
   // Запускаем при загрузке
