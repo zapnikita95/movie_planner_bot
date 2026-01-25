@@ -899,9 +899,10 @@ def show_schedule(message):
                 InlineKeyboardButton(tickets_text, callback_data=tickets_callback)
             )
             
-            # Строка 5: Оплата / Настройки / Помощь (только эмодзи)
+            # Строка 5: Оплата / Расширение / Настройки / Помощь (только эмодзи)
             markup.row(
                 InlineKeyboardButton("💰", callback_data="start_menu:payment"),
+                InlineKeyboardButton("💻", callback_data="start_menu:extension"),
                 InlineKeyboardButton("⚙️", callback_data="start_menu:settings"),
                 InlineKeyboardButton("❓", callback_data="start_menu:help")
             )

@@ -227,6 +227,44 @@ def start_menu_callback(call):
             show_database_menu(call.message.chat.id, user_id, call.message.message_id)
             return
 
+        elif action == 'extension':
+            # Показываем информацию о браузерном расширении
+            text = (
+                "💻 <b>Браузерное расширение Movie Planner Bot</b>\n\n"
+                "Расширение решает три задачи:\n"
+                "1️⃣ Добавление в базу и планирование фильмов (Кинопоиск, IMDb, Letterboxd)\n"
+                "2️⃣ Помощь в сохранении билетов в кино при покупке из браузера\n"
+                "3️⃣ Трекинг сериалов на стримингах (Амедиатека, Okko, ivi, hd.kinopoisk, tvoe, Start, Premier, Wink и др.)\n\n"
+                "🔗 <b>Установить расширение:</b>\n"
+                "https://chromewebstore.google.com/detail/movie-planner-bot/fldeclcfcngcjphhklommcebkpfipdol\n\n"
+                "Для подключения расширения к вашей базе потребуется ввести код. Вы можете подключить расширение к личной базе или групповой. "
+                "Код действителен в течение 10 минут. Возможности расширения открываются согласно вашему тарифу, полный функционал доступен с пакетным тарифом.\n\n"
+                "Нажмите, чтобы получить код ⬇️"
+            )
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("🔢 Получить код", callback_data="extension:get_code"))
+            markup.add(InlineKeyboardButton("◀️ Назад в меню", callback_data="back_to_start_menu"))
+            try:
+                bot.edit_message_text(
+                    text=text,
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    reply_markup=markup,
+                    parse_mode='HTML',
+                    disable_web_page_preview=True
+                )
+            except Exception as e:
+                logger.warning(f"[START MENU] Не удалось отредактировать для extension: {e}")
+                bot.send_message(
+                    chat_id=chat_id,
+                    text=text,
+                    reply_markup=markup,
+                    parse_mode='HTML',
+                    message_thread_id=message_thread_id,
+                    disable_web_page_preview=True
+                )
+            return
+
         # Удаляем старое меню для всех действий
         try:
             bot.delete_message(chat_id, message_id)
@@ -235,6 +273,74 @@ def start_menu_callback(call):
 
     except Exception as e:
         logger.error(f"[START MENU] Ошибка в обработчике: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Произошла ошибка", show_alert=True)
+        except:
+            pass
+
+@bot.callback_query_handler(func=lambda call: call.data == "extension:get_code")
+def extension_get_code_callback(call):
+    """Генерация кода для привязки браузерного расширения через callback"""
+    try:
+        import secrets
+        from datetime import datetime, timedelta
+        from moviebot.database.db_connection import get_db_connection, get_db_cursor
+        
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+        message_id = call.message.message_id
+        
+        safe_answer_callback_query(bot, call.id, "⏳ Генерируем код...")
+        
+        code = secrets.token_hex(5).upper()  # 10 символов
+        expires = datetime.utcnow() + timedelta(minutes=10)
+        
+        conn = get_db_connection()
+        cursor = get_db_cursor()
+        try:
+            cursor.execute("""
+                INSERT INTO extension_links (code, user_id, chat_id, expires_at, used)
+                VALUES (%s, %s, %s, %s, FALSE)
+                ON CONFLICT (code) DO UPDATE SET 
+                    user_id = EXCLUDED.user_id,
+                    chat_id = EXCLUDED.chat_id,
+                    expires_at = EXCLUDED.expires_at,
+                    used = FALSE
+            """, (code, user_id, chat_id, expires))
+            conn.commit()
+            
+            logger.info(f"[EXTENSION CODE] Код сгенерирован: {code} для user_id={user_id}, chat_id={chat_id}")
+            
+            text = (
+                f"🔢 <b>Код для расширения:</b>\n\n"
+                f"<code>{code}</code>\n\n"
+                f"Скопируйте и вставьте его в popup расширения.\n"
+                f"⏰ Код действует 10 минут."
+            )
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("◀️ Назад в меню", callback_data="back_to_start_menu"))
+            
+            bot.edit_message_text(
+                text=text,
+                chat_id=chat_id,
+                message_id=message_id,
+                reply_markup=markup,
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            logger.error(f"[EXTENSION CODE] Ошибка генерации кода: {e}", exc_info=True)
+            bot.answer_callback_query(call.id, "❌ Не удалось сгенерировать код", show_alert=True)
+        finally:
+            try:
+                cursor.close()
+            except:
+                pass
+            try:
+                conn.close()
+            except:
+                pass
+    except Exception as e:
+        logger.error(f"[EXTENSION CODE] Общая ошибка: {e}", exc_info=True)
         try:
             bot.answer_callback_query(call.id, "❌ Произошла ошибка", show_alert=True)
         except:
@@ -338,9 +444,10 @@ def back_to_start_menu_callback(call):
             InlineKeyboardButton(tickets_text, callback_data=tickets_callback)
         )
 
-        # Строка 5: Оплата / Настройки / Помощь (только эмодзи)
+        # Строка 5: Оплата / Расширение / Настройки / Помощь (только эмодзи)
         markup.row(
             InlineKeyboardButton("💰", callback_data="start_menu:payment"),
+            InlineKeyboardButton("💻", callback_data="start_menu:extension"),
             InlineKeyboardButton("⚙️", callback_data="start_menu:settings"),
             InlineKeyboardButton("❓", callback_data="start_menu:help")
         )
@@ -509,9 +616,10 @@ def register_start_handlers(bot):
                 InlineKeyboardButton(tickets_text, callback_data=tickets_callback)
             )
 
-            # Строка 5: Оплата / Настройки / Помощь (только эмодзи)
+            # Строка 5: Оплата / Расширение / Настройки / Помощь (только эмодзи)
             markup.row(
                 InlineKeyboardButton("💰", callback_data="start_menu:payment"),
+                InlineKeyboardButton("💻", callback_data="start_menu:extension"),
                 InlineKeyboardButton("⚙️", callback_data="start_menu:settings"),
                 InlineKeyboardButton("❓", callback_data="start_menu:help")
             )
@@ -849,9 +957,10 @@ def register_start_handlers(bot):
                 InlineKeyboardButton(tickets_text, callback_data=tickets_callback)
             )
 
-            # Строка 5: Оплата / Настройки / Помощь (только эмодзи)
+            # Строка 5: Оплата / Расширение / Настройки / Помощь (только эмодзи)
             markup.row(
                 InlineKeyboardButton("💰", callback_data="start_menu:payment"),
+                InlineKeyboardButton("💻", callback_data="start_menu:extension"),
                 InlineKeyboardButton("⚙️", callback_data="start_menu:settings"),
                 InlineKeyboardButton("❓", callback_data="start_menu:help")
             )
