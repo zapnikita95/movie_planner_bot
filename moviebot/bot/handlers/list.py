@@ -326,14 +326,12 @@ def show_list_page(bot, chat_id, user_id, page=1, message_id=None):
             if total_pages > 1:
                 pagination_buttons = []
                 
-                # Если страниц немного (<= 20), показываем все
-                if total_pages <= 20:
+                # Если страниц немного (<= 5), показываем все
+                if total_pages <= 5:
                     for p in range(1, total_pages + 1):
                         label = f"•{p}" if p == page else str(p)
                         pagination_buttons.append(InlineKeyboardButton(label, callback_data=f"list_page:{p}"))
-                    # Разбиваем кнопки на строки по 10 штук
-                    for i in range(0, len(pagination_buttons), 10):
-                        markup.row(*pagination_buttons[i:i+10])
+                    markup.row(*pagination_buttons)
                 else:
                     # Для большого количества страниц используем умную пагинацию
                     start_page = max(1, page - 2)
@@ -358,9 +356,7 @@ def show_list_page(bot, chat_id, user_id, page=1, message_id=None):
                     elif end_page < total_pages:
                         pagination_buttons.append(InlineKeyboardButton(str(total_pages), callback_data=f"list_page:{total_pages}"))
                     
-                    # Разбиваем на строки по 10 кнопок
-                    for i in range(0, len(pagination_buttons), 10):
-                        markup.row(*pagination_buttons[i:i+10])
+                    markup.row(*pagination_buttons)
                 
                 # Добавляем кнопки навигации (без кнопки "Страница X/Y")
                 nav_buttons = []

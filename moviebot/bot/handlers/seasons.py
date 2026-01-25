@@ -263,12 +263,11 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
         if total_pages > 1:
             pagination_buttons = []
             
-            if total_pages <= 20:
+            if total_pages <= 5:
                 for p in range(1, total_pages + 1):
                     label = f"•{p}" if p == page else str(p)
                     pagination_buttons.append(InlineKeyboardButton(label, callback_data=f"episodes_page:{kp_id}:{season_num}:{p}"))
-                for i in range(0, len(pagination_buttons), 10):
-                    markup.row(*pagination_buttons[i:i+10])
+                markup.row(*pagination_buttons)
             else:
                 start_page = max(1, page - 2)
                 end_page = min(total_pages, page + 2)
@@ -289,8 +288,7 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
                 elif end_page < total_pages:
                     pagination_buttons.append(InlineKeyboardButton(str(total_pages), callback_data=f"episodes_page:{kp_id}:{season_num}:{total_pages}"))
                 
-                for i in range(0, len(pagination_buttons), 10):
-                    markup.row(*pagination_buttons[i:i+10])
+                markup.row(*pagination_buttons)
                 
                 nav_buttons = []
                 if page > 1:
