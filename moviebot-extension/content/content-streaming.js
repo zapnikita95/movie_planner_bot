@@ -219,27 +219,87 @@
     
     'kinopoisk.ru,hd.kinopoisk.ru': {
       isSeries: () => {
+        // 1. Проверяем URL параметры - если есть season или episode, это сериал
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.has('season') || urlParams.has('episode')) {
+          return true;
+        }
+        // 2. Проверяем title на слово "сериал"
         const titleEl = document.querySelector('title[data-tid="HdSeoHead"], title');
         const t = titleEl?.textContent || '';
-        return /\(сериал\b/i.test(t) || /\bсериал\b/i.test(t);
+        if (/\(сериал\b/i.test(t) || /\bсериал\b/i.test(t) || /все серии/i.test(t)) {
+          return true;
+        }
+        // 3. Проверяем URL path на /series/
+        if (/\/series\//i.test(window.location.pathname)) {
+          return true;
+        }
+        return false;
       },
       title: {
         selector: 'title[data-tid="HdSeoHead"], title',
         extract: (el) => {
           const text = el?.textContent || '';
-          return text.split(/[,（(]/)[0]?.trim() || null;
+          // "Ассасины. Начало (сериал, все серии), 2024 — смотреть..." → "Ассасины. Начало"
+          // Берём всё до первой скобки "("
+          const beforeParen = text.split(/\s*\(/)[0]?.trim();
+          if (beforeParen && beforeParen.length > 0 && !beforeParen.includes('Кинопоиск')) {
+            return beforeParen;
+          }
+          // Fallback: до запятой или тире
+          const fallback = text.split(/[,—]/)[0]?.trim();
+          if (fallback && !fallback.includes('Кинопоиск')) {
+            return fallback;
+          }
+          return null;
         }
       },
       year: {
-        selector: 'title',
-        extract: (el) => el?.textContent?.match(/(\d{4})/)?.[1]
+        selector: 'title[data-tid="HdSeoHead"], title',
+        extract: (el) => {
+          const text = el?.textContent || '';
+          // "Ассасины. Начало (сериал, все серии), 2024 — смотреть..." → "2024"
+          // Ищем год после скобок: ), 2024 или просто отдельно стоящий год
+          const m = text.match(/\)\s*,?\s*(\d{4})/);
+          if (m) return m[1];
+          // Fallback: ищем год в формате ", 2024" или "2024 —"
+          const m2 = text.match(/,\s*(\d{4})\s*[—-]/) || text.match(/(\d{4})\s*[—-]/);
+          if (m2) return m2[1];
+          return null;
+        }
       },
       seasonEpisode: {
-        selector: '.styles_subtitle__PPaVH, .styles_extraInfo__A3zOn div, [data-tid="ContentInfoItem"], .styles_info-item_subtitle__zFUmG, .ContentInfoItem_root__J1fBw span',
-        extract: (el) => {
-          const t = el?.textContent?.trim() || '';
-          const m = t.match(/(\d+)\s*сезон[.\s,]*(\d+)\s*серия/i);
-          return m ? { season: parseInt(m[1]), episode: parseInt(m[2]) } : null;
+        getSeasonEpisode: () => {
+          // 1. Сначала пробуем из URL параметров
+          const urlParams = new URLSearchParams(window.location.search);
+          const seasonFromUrl = urlParams.get('season');
+          const episodeFromUrl = urlParams.get('episode');
+          if (seasonFromUrl && episodeFromUrl) {
+            return { season: parseInt(seasonFromUrl), episode: parseInt(episodeFromUrl) };
+          }
+          // 2. Пробуем из DOM элемента ".styles_subtitle__PPaVH"
+          const subtitleEl = document.querySelector('.styles_subtitle__PPaVH');
+          if (subtitleEl) {
+            const t = subtitleEl.textContent?.trim() || '';
+            // "1 сезон, 1 серия. Привет фром Марс" → {season: 1, episode: 1}
+            const m = t.match(/(\d+)\s*сезон[.\s,]*(\d+)\s*серия/i);
+            if (m) {
+              return { season: parseInt(m[1]), episode: parseInt(m[2]) };
+            }
+          }
+          // 3. Fallback - другие селекторы
+          const selectors = ['.styles_extraInfo__A3zOn div', '[data-tid="ContentInfoItem"]', '.ContentInfoItem_root__J1fBw span'];
+          for (const sel of selectors) {
+            const el = document.querySelector(sel);
+            if (el) {
+              const t = el.textContent?.trim() || '';
+              const m = t.match(/(\d+)\s*сезон[.\s,]*(\d+)\s*серия/i);
+              if (m) {
+                return { season: parseInt(m[1]), episode: parseInt(m[2]) };
+              }
+            }
+          }
+          return null;
         }
       }
     },
@@ -360,12 +420,16 @@
         selector: 'title[data-next-head], title',
         extract: (el) => {
           const text = el?.textContent || '';
-          return text.replace(/^(Сериал|Фильм)\s+/, '').split(/смотреть/)[0]?.trim() || null;
+          // "Сериал Побег (2026) смотреть онлайн..." → "Побег"
+          let title = text.replace(/^(Сериал|Фильм)\s+/, '').split(/смотреть/)[0]?.trim() || '';
+          // Убираем год в скобках: "Побег (2026)" → "Побег"
+          title = title.replace(/\s*\(\d{4}\)\s*$/, '').trim();
+          return title || null;
         }
       },
       year: {
         selector: 'title',
-        extract: (el) => el?.textContent?.match(/(\d{4})/)?.[1]
+        extract: (el) => el?.textContent?.match(/\((\d{4})\)/)?.[1] || el?.textContent?.match(/(\d{4})/)?.[1]
       },
       seasonEpisode: {
         selector: '.PlayButton_playButtonContext__4XH_C, .PlayerData_episodeInfo__D7dT7',
@@ -434,19 +498,46 @@
     
     'lordfilm': {
       isSeries: () => {
+        // Проверяем хлебные крошки: если второй элемент = "Сериалы", то это сериал
         const breadcrumb = document.querySelector('#dle-speedbar');
-        return breadcrumb?.textContent?.includes('Сериалы') || false;
+        if (!breadcrumb) return false;
+        const items = breadcrumb.querySelectorAll('span[itemprop="name"]');
+        // items[0] = "LordFilm", items[1] = "Фильмы" или "Сериалы"
+        if (items.length >= 2) {
+          const category = items[1]?.textContent?.trim() || '';
+          return category === 'Сериалы';
+        }
+        return breadcrumb.textContent?.includes('Сериалы') || false;
       },
       title: {
-        selector: '#dle-speedbar a[itemprop="item"]:last-of-type span[itemprop="name"], #dle-speedbar span[itemprop="name"]:last-child',
+        selector: '#dle-speedbar',
         extract: (el) => {
+          // Хлебные крошки: "LordFilm » Фильмы » Гарри Поттер и Тайная комната (2002)"
+          // Берём всё после последнего "»"
           const text = (el?.textContent || '').trim();
-          return text.replace(/\s*\(\d{4}\)\s*$/, '').trim() || null;
+          const parts = text.split('»');
+          if (parts.length >= 3) {
+            const lastPart = parts[parts.length - 1].trim();
+            // Убираем год в скобках: "Гарри Поттер и Тайная комната (2002)" -> "Гарри Поттер и Тайная комната"
+            return lastPart.replace(/\s*\(\d{4}\)\s*$/, '').trim() || null;
+          }
+          return null;
         }
       },
       year: {
-        selector: '#dle-speedbar a[itemprop="item"]:last-of-type span[itemprop="name"], #dle-speedbar span[itemprop="name"]:last-child',
-        extract: (el) => (el?.textContent || '').match(/\d{4}/)?.[0]
+        selector: '#dle-speedbar',
+        extract: (el) => {
+          // Хлебные крошки: "LordFilm » Фильмы » Гарри Поттер и Тайная комната (2002)"
+          // Берём год из последней части
+          const text = (el?.textContent || '').trim();
+          const parts = text.split('»');
+          if (parts.length >= 3) {
+            const lastPart = parts[parts.length - 1].trim();
+            const yearMatch = lastPart.match(/\((\d{4})\)/);
+            return yearMatch ? yearMatch[1] : null;
+          }
+          return null;
+        }
       },
       seasonEpisode: {
         getSeasonEpisode: () => {
@@ -613,8 +704,8 @@
   function isCatalogOrMainPage() {
     const path = (window.location.pathname || '').replace(/\/$/, '') || '/';
     if (hostname.includes('amediateka')) {
-      if (path === '' || path === '/') return true;
-      if (path === '/series' || path.startsWith('/series/')) return true;
+      // Виджет только на /watch/... страницах
+      if (!path.startsWith('/watch/')) return true; // Всё остальное - пропускаем
       return false;
     }
     if (hostname.includes('premier.one')) {
@@ -630,13 +721,32 @@
       return false;
     }
     if (hostname.includes('start.ru')) {
-      if (path === '/auth' || path.startsWith('/auth')) return true;
+      // Виджет только на /watch/... страницах
+      if (!path.startsWith('/watch/')) return true; // Всё остальное - пропускаем
       return false;
     }
     // OKKO: показывать виджет только на /movie/... и /serial/...
     if (hostname.includes('okko.tv')) {
       // Только страницы фильмов и сериалов
       if (!/^\/(movie|serial)\/[^/]+/.test(path)) return true;
+      return false;
+    }
+    // PREMIER: показывать виджет только на /show/... (сериалы) и /film/... (фильмы)
+    if (hostname.includes('premier.one')) {
+      // Пропускаем каталоги: /all, /series, /movies, /collections и т.д.
+      if (path === '' || path === '/' || path === '/all') return true;
+      if (/^\/(series|movies|collections|promo|prems|channels)/.test(path)) return true;
+      // Только страницы с контентом: /show/... или /film/...
+      if (!/^\/(show|film)\/[^/]+/.test(path)) return true;
+      return false;
+    }
+    // START: показывать виджет только на /watch/...
+    if (hostname.includes('start.ru')) {
+      // Пропускаем каталоги: /series, /movies, /movies/family и т.д.
+      if (path === '' || path === '/' || path === '/auth') return true;
+      if (/^\/(series|movies|films|collections|promo)/.test(path)) return true;
+      // Только страницы просмотра: /watch/...
+      if (!/^\/watch\/[^/]+/.test(path)) return true;
       return false;
     }
     return false;
@@ -649,8 +759,14 @@
     if (config?.searchBaseTitle && typeof config.searchBaseTitle === 'function') {
       return config.searchBaseTitle(title) || title;
     }
-    let base = title.replace(/\s*—\s*[^(]+(\s*\([^)]*\))?\s*$/i, '').trim();
+    let base = title;
+    // Убираем год в скобках: "Побег (2026)" → "Побег"
+    base = base.replace(/\s*\(\d{4}\)\s*$/i, '').trim();
+    // Убираем "— текст" после тире
+    base = base.replace(/\s*—\s*[^(]+(\s*\([^)]*\))?\s*$/i, '').trim();
+    // Убираем "(Часть X)"
     base = base.replace(/\s*\([^)]*[Чч]асть\s*\d+[^)]*\)\s*$/i, '').trim();
+    // Убираем "(Сезон X)"
     base = base.replace(/\s*\([^)]*[Сс]езон\s*\d+[^)]*\)\s*$/i, '').trim();
     return base || title;
   }
@@ -902,13 +1018,16 @@
       border-radius: 12px;
       z-index: 999998;
       box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-      max-width: 320px;
+      width: 280px;
+      min-width: 280px;
+      max-width: 280px;
       max-height: 70vh;
       overflow-y: auto;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       font-size: 14px;
       line-height: 1.4;
       pointer-events: auto;
+      box-sizing: border-box;
       cursor: move;
       user-select: none;
       display: block !important;
@@ -918,26 +1037,65 @@
     
     // Устанавливаем позицию (обязательно указываем и left/right, и top/bottom)
     // Проверяем, что значения валидные (не null, не undefined, не NaN)
+    // И что виджет не выходит за пределы экрана
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const widgetWidth = 280; // Фиксированная ширина виджета
+    const minMargin = 10;
+    
+    let useLeft = false;
+    let leftVal = 0;
+    let rightVal = 20;
+    
     if (savedPos && typeof savedPos.left === 'number' && !isNaN(savedPos.left)) {
-      initialStyle += `left: ${savedPos.left}px !important; right: auto !important;`;
-      console.log('[STREAMING] Установлена позиция left:', savedPos.left);
+      // Проверяем, что виджет не выходит за пределы
+      if (savedPos.left >= 0 && savedPos.left + widgetWidth <= viewportWidth - minMargin) {
+        useLeft = true;
+        leftVal = savedPos.left;
+        console.log('[STREAMING] Установлена позиция left:', savedPos.left);
+      } else {
+        console.log('[STREAMING] Сохранённая позиция left выходит за экран, используем default');
+      }
     } else if (savedPos && typeof savedPos.right === 'number' && !isNaN(savedPos.right)) {
-      initialStyle += `right: ${savedPos.right}px !important; left: auto !important;`;
-      console.log('[STREAMING] Установлена позиция right:', savedPos.right);
-    } else {
-      initialStyle += `right: 20px !important; left: auto !important;`;
-      console.log('[STREAMING] Установлена позиция по умолчанию: right 20px');
+      if (savedPos.right >= 0 && savedPos.right <= viewportWidth - widgetWidth - minMargin) {
+        rightVal = savedPos.right;
+        console.log('[STREAMING] Установлена позиция right:', savedPos.right);
+      } else {
+        console.log('[STREAMING] Сохранённая позиция right выходит за экран, используем default');
+      }
     }
     
-    if (savedPos && typeof savedPos.top === 'number' && !isNaN(savedPos.top)) {
-      initialStyle += `top: ${savedPos.top}px !important; bottom: auto !important;`;
-      console.log('[STREAMING] Установлена позиция top:', savedPos.top);
-    } else if (savedPos && typeof savedPos.bottom === 'number' && !isNaN(savedPos.bottom)) {
-      initialStyle += `bottom: ${savedPos.bottom}px !important; top: auto !important;`;
-      console.log('[STREAMING] Установлена позиция bottom:', savedPos.bottom);
+    if (useLeft) {
+      initialStyle += `left: ${leftVal}px !important; right: auto !important;`;
     } else {
-      initialStyle += `bottom: 20px !important; top: auto !important;`;
-      console.log('[STREAMING] Установлена позиция по умолчанию: bottom 20px');
+      initialStyle += `right: ${rightVal}px !important; left: auto !important;`;
+    }
+    
+    let useTop = false;
+    let topVal = 0;
+    let bottomVal = 20;
+    
+    if (savedPos && typeof savedPos.top === 'number' && !isNaN(savedPos.top)) {
+      if (savedPos.top >= 0 && savedPos.top <= viewportHeight - 100) {
+        useTop = true;
+        topVal = savedPos.top;
+        console.log('[STREAMING] Установлена позиция top:', savedPos.top);
+      } else {
+        console.log('[STREAMING] Сохранённая позиция top выходит за экран, используем default');
+      }
+    } else if (savedPos && typeof savedPos.bottom === 'number' && !isNaN(savedPos.bottom)) {
+      if (savedPos.bottom >= 0 && savedPos.bottom <= viewportHeight - 100) {
+        bottomVal = savedPos.bottom;
+        console.log('[STREAMING] Установлена позиция bottom:', savedPos.bottom);
+      } else {
+        console.log('[STREAMING] Сохранённая позиция bottom выходит за экран, используем default');
+      }
+    }
+    
+    if (useTop) {
+      initialStyle += `top: ${topVal}px !important; bottom: auto !important;`;
+    } else {
+      initialStyle += `bottom: ${bottomVal}px !important; top: auto !important;`;
     }
     
     overlayElement.style.cssText = initialStyle;
@@ -956,12 +1114,12 @@
     }
     
     overlayElement.innerHTML = `
-      <div style="margin-bottom: 12px;">
-        <strong style="font-size: 16px;">🎬 Movie Planner</strong>
-        <div style="margin-top: 8px; opacity: 0.9;">${titleText}</div>
+      <div style="margin-bottom: 12px !important; padding-right: 24px !important;">
+        <strong style="font-size: 16px !important; display: block !important;">🎬 Movie Planner</strong>
+        <div style="margin-top: 8px !important; opacity: 0.9 !important; font-size: 13px !important; line-height: 1.3 !important;">${titleText}</div>
       </div>
-      <div id="mpp-buttons-container"></div>
-      <button id="mpp-close" style="position: absolute; top: 8px; right: 8px; background: rgba(255,255,255,0.2); border: none; color: white; width: 24px; height: 24px; border-radius: 50%; cursor: pointer; font-size: 18px; line-height: 1;">×</button>
+      <div id="mpp-buttons-container" style="display: flex !important; flex-direction: column !important; gap: 8px !important; width: 100% !important;"></div>
+      <button id="mpp-close" style="position: absolute !important; top: 8px !important; right: 8px !important; background: rgba(255,255,255,0.2) !important; border: none !important; color: white !important; width: 24px !important; height: 24px !important; border-radius: 50% !important; cursor: pointer !important; font-size: 18px !important; line-height: 1 !important; display: flex !important; align-items: center !important; justify-content: center !important;">×</button>
     `;
     
     document.body.appendChild(overlayElement);
@@ -1086,97 +1244,194 @@
     const storageData = st ? await st.get(['has_notifications_access']) : {};
     const hasNotificationsAccess = storageData.has_notifications_access || false;
     
-    // Если сериал без определенной серии - показываем специальный UI
+    // Если сериал без определенной серии - показываем простой UI
     if (showSeriesUi && noEpisodeDetected) {
       if (!isInDatabase) {
-        // Сериал не в базе - показываем кнопку "Добавить в базу"
+        // Сериал НЕ в базе - показываем только кнопку "Добавить в базу"
         const addBtn = document.createElement('button');
-        addBtn.textContent = '➕ Добавить в базу';
+        addBtn.textContent = '➕ ДОБАВИТЬ В БАЗУ';
         addBtn.style.cssText = `
-          width: 100%;
-          padding: 10px;
-          background: white;
-          color: #667eea;
-          border: none;
-          border-radius: 6px;
-          font-weight: 600;
-          cursor: pointer;
-          margin-bottom: 8px;
+          width: 100% !important;
+          padding: 12px 16px !important;
+          background: white !important;
+          color: #667eea !important;
+          border: none !important;
+          border-radius: 8px !important;
+          font-weight: 700 !important;
+          cursor: pointer !important;
+          font-size: 14px !important;
+          letter-spacing: 0.5px !important;
+          box-sizing: border-box !important;
+          text-align: center !important;
+          display: flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+          min-height: 44px !important;
+          line-height: 1.2 !important;
         `;
         addBtn.addEventListener('click', () => handleAddToDatabase(info, filmData));
         container.appendChild(addBtn);
-      }
-      
-      // Показываем информацию о том, что нужно выбрать серию
-      const helpMsg = document.createElement('div');
-      helpMsg.style.cssText = 'padding: 10px; background: rgba(255,255,255,0.1); border-radius: 6px; text-align: center; font-size: 12px; margin-bottom: 8px;';
-      helpMsg.innerHTML = '📺 Выберите серию в плеере<br><small style="opacity: 0.8;">или используйте ручную отметку ниже</small>';
-      container.appendChild(helpMsg);
-      
-      // Если есть подписка - показываем форму ручной отметки
-      if (hasNotificationsAccess && (isInDatabase || filmData?.kp_id)) {
-        const manualForm = document.createElement('div');
-        manualForm.style.cssText = 'display: flex; gap: 6px; margin-bottom: 8px; align-items: center;';
-        manualForm.innerHTML = `
-          <input type="number" id="mpp-manual-season" placeholder="Сезон" min="1" style="flex: 1; padding: 8px; border: none; border-radius: 4px; font-size: 13px; width: 60px;">
-          <input type="number" id="mpp-manual-episode" placeholder="Серия" min="1" style="flex: 1; padding: 8px; border: none; border-radius: 4px; font-size: 13px; width: 60px;">
-          <button id="mpp-manual-mark" style="padding: 8px 12px; background: white; color: #667eea; border: none; border-radius: 4px; font-weight: 600; cursor: pointer; font-size: 13px;">✓</button>
-        `;
-        container.appendChild(manualForm);
+      } else {
+        // Сериал УЖЕ в базе - показываем следующую непросмотренную серию
+        const nextSeason = filmData?.next_unwatched_season || 1;
+        const nextEpisode = filmData?.next_unwatched_episode || 1;
         
-        // Кнопка "Отметить все предыдущие" для ручной отметки
-        const markAllManualBtn = document.createElement('button');
-        markAllManualBtn.id = 'mpp-manual-mark-all';
-        markAllManualBtn.textContent = '✅ Отметить все до указанной';
-        markAllManualBtn.style.cssText = `
-          width: 100%;
-          padding: 8px;
-          background: rgba(255,255,255,0.2);
-          color: white;
-          border: 1px solid rgba(255,255,255,0.3);
-          border-radius: 6px;
-          font-weight: 600;
-          cursor: pointer;
-          font-size: 12px;
-          margin-bottom: 8px;
-        `;
-        container.appendChild(markAllManualBtn);
-        
-        // Обработчики для ручной отметки
-        setTimeout(() => {
-          const seasonInput = document.getElementById('mpp-manual-season');
-          const episodeInput = document.getElementById('mpp-manual-episode');
-          const markBtn = document.getElementById('mpp-manual-mark');
-          const markAllBtn = document.getElementById('mpp-manual-mark-all');
+        if (hasNotificationsAccess) {
+          // Информация о следующей серии
+          const nextEpInfo = document.createElement('div');
+          nextEpInfo.style.cssText = 'padding: 12px !important; background: rgba(255,255,255,0.15) !important; border-radius: 8px !important; text-align: center !important; margin-bottom: 10px !important;';
+          nextEpInfo.innerHTML = `<span style="font-size: 12px; opacity: 0.9;">Следующая серия:</span><br><b style="font-size: 16px;">${nextSeason} сезон, ${nextEpisode} серия</b>`;
+          container.appendChild(nextEpInfo);
           
-          // Устанавливаем значение по умолчанию (следующая непросмотренная)
-          if (filmData?.next_unwatched_season && filmData?.next_unwatched_episode) {
-            seasonInput.value = filmData.next_unwatched_season;
-            episodeInput.value = filmData.next_unwatched_episode;
-          } else {
-            seasonInput.value = '1';
-            episodeInput.value = '1';
+          // Кнопка отметки текущей серии
+          const markBtn = document.createElement('button');
+          markBtn.textContent = `✅ Отметить ${nextSeason}×${nextEpisode}`;
+          markBtn.style.cssText = `
+            width: 100% !important;
+            padding: 12px 16px !important;
+            background: white !important;
+            color: #667eea !important;
+            border: none !important;
+            border-radius: 8px !important;
+            font-weight: 700 !important;
+            cursor: pointer !important;
+            font-size: 14px !important;
+            box-sizing: border-box !important;
+            text-align: center !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            min-height: 44px !important;
+            line-height: 1.2 !important;
+          `;
+          markBtn.addEventListener('click', async () => {
+            const manualInfo = { ...info, season: nextSeason, episode: nextEpisode, noEpisodeDetected: false };
+            await handleMarkEpisode(manualInfo, filmData, false);
+          });
+          container.appendChild(markBtn);
+          
+          // Кнопка "Отметить все до этой" если это не 1×1
+          if (nextSeason > 1 || nextEpisode > 1) {
+            const markAllBtn = document.createElement('button');
+            markAllBtn.textContent = '✅ Отметить все до этой';
+            markAllBtn.style.cssText = `
+              width: 100% !important;
+              padding: 10px 16px !important;
+              background: rgba(255,255,255,0.2) !important;
+              color: white !important;
+              border: 1px solid rgba(255,255,255,0.3) !important;
+              border-radius: 8px !important;
+              font-weight: 600 !important;
+              cursor: pointer !important;
+              font-size: 13px !important;
+              box-sizing: border-box !important;
+              text-align: center !important;
+              display: flex !important;
+              align-items: center !important;
+              justify-content: center !important;
+              min-height: 40px !important;
+              line-height: 1.2 !important;
+            `;
+            markAllBtn.addEventListener('click', async () => {
+              const manualInfo = { ...info, season: nextSeason, episode: nextEpisode, noEpisodeDetected: false };
+              await handleMarkEpisode(manualInfo, filmData, true);
+            });
+            container.appendChild(markAllBtn);
           }
+        } else {
+          // Нет подписки - только информация
+          const noAccessMsg = document.createElement('div');
+          noAccessMsg.style.cssText = 'padding: 12px !important; background: rgba(255,255,255,0.1) !important; border-radius: 8px !important; text-align: center !important; font-size: 12px !important;';
+          noAccessMsg.innerHTML = '🔒 Для отметки серий нужна подписка';
+          container.appendChild(noAccessMsg);
+        }
+      }
+      return;
+    }
+    
+    // Если ФИЛЬМ без определенных данных (lordfilm) - показываем простой UI
+    if (!showSeriesUi && noEpisodeDetected) {
+      if (!isInDatabase) {
+        // Фильм НЕ в базе - показываем кнопку "Добавить в базу"
+        const addBtn = document.createElement('button');
+        addBtn.textContent = '➕ ДОБАВИТЬ В БАЗУ';
+        addBtn.style.cssText = `
+          width: 100% !important;
+          padding: 12px 16px !important;
+          background: white !important;
+          color: #667eea !important;
+          border: none !important;
+          border-radius: 8px !important;
+          font-weight: 700 !important;
+          cursor: pointer !important;
+          font-size: 14px !important;
+          letter-spacing: 0.5px !important;
+          box-sizing: border-box !important;
+          text-align: center !important;
+          display: flex !important;
+          align-items: center !important;
+          justify-content: center !important;
+          min-height: 44px !important;
+          line-height: 1.2 !important;
+        `;
+        addBtn.addEventListener('click', () => handleAddToDatabase(info, filmData));
+        container.appendChild(addBtn);
+      } else {
+        // Фильм УЖЕ в базе
+        if (!filmData?.watched) {
+          // Не просмотрен - предлагаем отметить
+          const markBtn = document.createElement('button');
+          markBtn.textContent = '✅ Отметить просмотренным';
+          markBtn.style.cssText = `
+            width: 100% !important;
+            padding: 12px 16px !important;
+            background: white !important;
+            color: #667eea !important;
+            border: none !important;
+            border-radius: 8px !important;
+            font-weight: 700 !important;
+            cursor: pointer !important;
+            font-size: 14px !important;
+            box-sizing: border-box !important;
+            text-align: center !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            min-height: 44px !important;
+            line-height: 1.2 !important;
+          `;
+          markBtn.addEventListener('click', () => handleMarkFilmWatched(info, filmData));
+          container.appendChild(markBtn);
+        } else if (!filmData?.rated) {
+          // Просмотрен, но не оценен - предлагаем оценить
+          const rateInfo = document.createElement('div');
+          rateInfo.style.cssText = 'padding: 10px !important; background: rgba(255,255,255,0.1) !important; border-radius: 8px !important; text-align: center !important; margin-bottom: 10px !important; font-size: 12px !important;';
+          rateInfo.innerHTML = '✓ Фильм просмотрен';
+          container.appendChild(rateInfo);
           
-          const handleManualMark = async (markAllPrevious) => {
-            const s = parseInt(seasonInput?.value);
-            const e = parseInt(episodeInput?.value);
-            if (!s || !e || s < 1 || e < 1) {
-              alert('Укажите корректные сезон и серию');
-              return;
-            }
-            const manualInfo = { ...info, season: s, episode: e, noEpisodeDetected: false };
-            await handleMarkEpisode(manualInfo, filmData, markAllPrevious);
-          };
-          
-          markBtn?.addEventListener('click', () => handleManualMark(false));
-          markAllBtn?.addEventListener('click', () => handleManualMark(true));
-        }, 0);
-      } else if (!hasNotificationsAccess) {
-        const noAccessMsg = document.createElement('div');
-        noAccessMsg.style.cssText = 'padding: 8px; background: rgba(255,255,255,0.1); border-radius: 6px; text-align: center; font-size: 11px;';
-        noAccessMsg.innerHTML = '🔒 Для отметки серий нужна подписка';
-        container.appendChild(noAccessMsg);
+          const rateBtn = document.createElement('button');
+          rateBtn.textContent = '⭐ Оценить фильм';
+          rateBtn.style.cssText = `
+            width: 100% !important;
+            padding: 12px !important;
+            background: white !important;
+            color: #667eea !important;
+            border: none !important;
+            border-radius: 8px !important;
+            font-weight: 700 !important;
+            cursor: pointer !important;
+            font-size: 14px !important;
+            box-sizing: border-box !important;
+          `;
+          rateBtn.addEventListener('click', () => showRatingButtons(info, filmData));
+          container.appendChild(rateBtn);
+        } else {
+          // Уже и просмотрен, и оценен
+          const doneInfo = document.createElement('div');
+          doneInfo.style.cssText = 'padding: 12px !important; background: rgba(255,255,255,0.1) !important; border-radius: 8px !important; text-align: center !important; font-size: 13px !important;';
+          doneInfo.innerHTML = '✓ Фильм просмотрен и оценен';
+          container.appendChild(doneInfo);
+        }
       }
       return;
     }
@@ -1192,15 +1447,22 @@
           const markCurrentBtn = document.createElement('button');
           markCurrentBtn.textContent = `✅ Отметить серию ${info.season || '?'}×${info.episode || '?'}`;
           markCurrentBtn.style.cssText = `
-            width: 100%;
-            padding: 10px;
-            background: white;
-            color: #667eea;
-            border: none;
-            border-radius: 6px;
-            font-weight: 600;
-            cursor: pointer;
-            margin-bottom: 8px;
+            width: 100% !important;
+            padding: 12px 16px !important;
+            background: white !important;
+            color: #667eea !important;
+            border: none !important;
+            border-radius: 8px !important;
+            font-weight: 700 !important;
+            cursor: pointer !important;
+            font-size: 14px !important;
+            box-sizing: border-box !important;
+            text-align: center !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            min-height: 44px !important;
+            line-height: 1.2 !important;
           `;
           markCurrentBtn.addEventListener('click', () => handleMarkEpisode(info, filmData, false));
           container.appendChild(markCurrentBtn);
@@ -1210,15 +1472,22 @@
             const markAllBtn = document.createElement('button');
             markAllBtn.textContent = '✅ Отметить все предыдущие';
             markAllBtn.style.cssText = `
-              width: 100%;
-              padding: 10px;
-              background: rgba(255,255,255,0.2);
-              color: white;
-              border: 1px solid rgba(255,255,255,0.3);
-              border-radius: 6px;
-              font-weight: 600;
-              cursor: pointer;
-              margin-bottom: 8px;
+              width: 100% !important;
+              padding: 10px 16px !important;
+              background: rgba(255,255,255,0.2) !important;
+              color: white !important;
+              border: 1px solid rgba(255,255,255,0.3) !important;
+              border-radius: 8px !important;
+              font-weight: 600 !important;
+              cursor: pointer !important;
+              font-size: 13px !important;
+              box-sizing: border-box !important;
+              text-align: center !important;
+              display: flex !important;
+              align-items: center !important;
+              justify-content: center !important;
+              min-height: 40px !important;
+              line-height: 1.2 !important;
             `;
             markAllBtn.addEventListener('click', () => handleMarkEpisode(info, filmData, true));
             container.appendChild(markAllBtn);
@@ -1233,15 +1502,22 @@
       const addBtn = document.createElement('button');
       addBtn.textContent = '➕ Добавить в базу';
       addBtn.style.cssText = `
-        width: 100%;
-        padding: 10px;
-        background: white;
-        color: #667eea;
-        border: none;
-        border-radius: 6px;
-        font-weight: 600;
-        cursor: pointer;
-        margin-bottom: 8px;
+        width: 100% !important;
+        padding: 12px 16px !important;
+        background: white !important;
+        color: #667eea !important;
+        border: none !important;
+        border-radius: 8px !important;
+        font-weight: 700 !important;
+        cursor: pointer !important;
+        font-size: 14px !important;
+        box-sizing: border-box !important;
+        text-align: center !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        min-height: 44px !important;
+        line-height: 1.2 !important;
       `;
       addBtn.addEventListener('click', () => handleAddToDatabase(info, filmData));
       container.appendChild(addBtn);
@@ -1258,15 +1534,22 @@
             const markCurrentBtn = document.createElement('button');
             markCurrentBtn.textContent = `✅ Отметить серию ${info.season || '?'}×${info.episode || '?'}`;
             markCurrentBtn.style.cssText = `
-              width: 100%;
-              padding: 10px;
-              background: white;
-              color: #667eea;
-              border: none;
-              border-radius: 6px;
-              font-weight: 600;
-              cursor: pointer;
-              margin-bottom: 8px;
+              width: 100% !important;
+              padding: 12px 16px !important;
+              background: white !important;
+              color: #667eea !important;
+              border: none !important;
+              border-radius: 8px !important;
+              font-weight: 700 !important;
+              cursor: pointer !important;
+              font-size: 14px !important;
+              box-sizing: border-box !important;
+              text-align: center !important;
+              display: flex !important;
+              align-items: center !important;
+              justify-content: center !important;
+              min-height: 44px !important;
+              line-height: 1.2 !important;
             `;
             markCurrentBtn.addEventListener('click', () => handleMarkEpisode(info, filmData, false));
             container.appendChild(markCurrentBtn);
@@ -1278,15 +1561,22 @@
             const markAllBtn = document.createElement('button');
             markAllBtn.textContent = '✅ Отметить все предыдущие';
             markAllBtn.style.cssText = `
-              width: 100%;
-              padding: 10px;
-              background: rgba(255,255,255,0.2);
-              color: white;
-              border: 1px solid rgba(255,255,255,0.3);
-              border-radius: 6px;
-              font-weight: 600;
-              cursor: pointer;
-              margin-bottom: 8px;
+              width: 100% !important;
+              padding: 10px 16px !important;
+              background: rgba(255,255,255,0.2) !important;
+              color: white !important;
+              border: 1px solid rgba(255,255,255,0.3) !important;
+              border-radius: 8px !important;
+              font-weight: 600 !important;
+              cursor: pointer !important;
+              font-size: 13px !important;
+              box-sizing: border-box !important;
+              text-align: center !important;
+              display: flex !important;
+              align-items: center !important;
+              justify-content: center !important;
+              min-height: 40px !important;
+              line-height: 1.2 !important;
             `;
             markAllBtn.addEventListener('click', () => handleMarkEpisode(info, filmData, true));
             container.appendChild(markAllBtn);
@@ -1297,7 +1587,7 @@
         if (!hasNotificationsAccess) {
           // Нет подписки - показываем только информацию
           const noAccessMsg = document.createElement('div');
-          noAccessMsg.style.cssText = 'padding: 12px; background: rgba(255,255,255,0.1); border-radius: 6px; text-align: center; font-size: 13px; margin-bottom: 8px;';
+          noAccessMsg.style.cssText = 'padding: 12px !important; background: rgba(255,255,255,0.1) !important; border-radius: 8px !important; text-align: center !important; font-size: 13px !important;';
           noAccessMsg.innerHTML = '🔒 Для отметки фильмов нужна подписка "Уведомления" или "Пакетная"<br><small style="opacity: 0.8;">Доступно только добавление в базу</small>';
           container.appendChild(noAccessMsg);
         } else {
@@ -1306,15 +1596,22 @@
             const markWatchedBtn = document.createElement('button');
             markWatchedBtn.textContent = '✅ Отметить как просмотренный';
             markWatchedBtn.style.cssText = `
-              width: 100%;
-              padding: 10px;
-              background: white;
-              color: #667eea;
-              border: none;
-              border-radius: 6px;
-              font-weight: 600;
-              cursor: pointer;
-              margin-bottom: 8px;
+              width: 100% !important;
+              padding: 12px 16px !important;
+              background: white !important;
+              color: #667eea !important;
+              border: none !important;
+              border-radius: 8px !important;
+              font-weight: 700 !important;
+              cursor: pointer !important;
+              font-size: 14px !important;
+              box-sizing: border-box !important;
+              text-align: center !important;
+              display: flex !important;
+              align-items: center !important;
+              justify-content: center !important;
+              min-height: 44px !important;
+              line-height: 1.2 !important;
             `;
             markWatchedBtn.addEventListener('click', () => handleMarkFilmWatched(info, filmData));
             container.appendChild(markWatchedBtn);
@@ -1384,6 +1681,45 @@
   function alertReloadPage() {
     try { alert('Расширение обновилось. Обновите страницу (F5).'); } catch (_) {}
   }
+  
+  // Показать временное уведомление (toast) вместо alert
+  function showToast(message, duration = 2500) {
+    // Удаляем предыдущий toast если есть
+    const existingToast = document.getElementById('mpp-toast');
+    if (existingToast) existingToast.remove();
+    
+    const toast = document.createElement('div');
+    toast.id = 'mpp-toast';
+    toast.textContent = message;
+    toast.style.cssText = `
+      position: fixed;
+      bottom: 100px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 14px;
+      font-weight: 600;
+      z-index: 999999;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      pointer-events: none;
+    `;
+    document.body.appendChild(toast);
+    
+    // Показываем
+    setTimeout(() => { toast.style.opacity = '1'; }, 10);
+    
+    // Скрываем и удаляем
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      setTimeout(() => toast.remove(), 300);
+    }, duration);
+  }
 
   async function handleAddToDatabase(info, filmData) {
     try {
@@ -1414,17 +1750,24 @@
         if (response.ok) {
           const result = await response.json();
           if (result.success) {
-            // Обновляем filmData с новым film_id и устанавливаем has_unwatched_before
-            // Если текущая серия не первая (сезон > 1 или серия > 1), значит есть непросмотренные
+            // Обновляем filmData с новым film_id
+            // Для сериала устанавливаем следующую непросмотренную серию = 1×1
             const hasUnwatchedBefore = info.isSeries && info.season && info.episode && (info.season > 1 || info.episode > 1);
             currentFilmData = { 
               ...filmData, 
               film_id: result.film_id, 
               kp_id: filmData.kp_id,
               has_unwatched_before: hasUnwatchedBefore,
-              current_episode_watched: false
+              current_episode_watched: false,
+              watched: false,
+              rated: false,
+              // Для только что добавленного сериала - следующая серия 1×1
+              next_unwatched_season: info.isSeries ? 1 : undefined,
+              next_unwatched_episode: info.isSeries ? 1 : undefined,
+              is_series: info.isSeries
             };
             currentInfo = info;
+            showToast('✅ Добавлено в базу!');
             await renderButtons(info, currentFilmData);
           } else {
             alert('Ошибка: ' + (result.error || 'неизвестная ошибка'));
@@ -1473,23 +1816,23 @@
         if (response.ok) {
           const result = await response.json();
           if (result.success) {
-            alert('✅ Серия отмечена как просмотренная!');
+            showToast('✅ Серия отмечена!');
             removeOverlay();
           } else {
-            alert('Ошибка: ' + (result.error || 'неизвестная ошибка'));
+            showToast('❌ ' + (result.error || 'Ошибка'), 3000);
           }
         } else {
-          alert('Ошибка сервера: ' + response.status);
+          showToast('❌ Ошибка сервера: ' + response.status, 3000);
         }
       } catch (fetchError) {
         if (isContextInvalidated(fetchError)) { alertReloadPage(); return; }
         console.error('[STREAMING] Ошибка fetch при отметке серии:', fetchError);
-        alert('Ошибка подключения к серверу. Проверьте интернет-соединение.');
+        showToast('❌ Ошибка подключения', 3000);
       }
     } catch (e) {
       if (isContextInvalidated(e)) { alertReloadPage(); return; }
       console.error('[STREAMING] Ошибка отметки серии:', e);
-      alert('Ошибка отметки серии: ' + (e.message || 'неизвестная ошибка'));
+      showToast('❌ Ошибка: ' + (e.message || 'неизвестная'), 3000);
     }
   }
 
@@ -1681,9 +2024,28 @@
         }
       }
 
+      // Функция нормализации названия для сравнения
+      function normalizeTitle(title) {
+        if (!title) return '';
+        return title.toLowerCase()
+          .replace(/[ёЁ]/g, 'е')
+          .replace(/\s+/g, ' ')
+          .trim();
+      }
+      
+      // Проверка, совпадает ли название из API с названием на странице
+      function titlesMatch(pageTitle, apiTitle) {
+        const normPage = normalizeTitle(pageTitle);
+        const normApi = normalizeTitle(apiTitle);
+        return normPage === normApi || 
+               normPage.includes(normApi) || 
+               normApi.includes(normPage);
+      }
+
       // Сначала проверяем локальный кэш
       let kpId = await findInLocalCache(info);
       let filmData = null;
+      let cacheValid = true;
       
       if (kpId) {
         // Нашли в кэше - получаем данные о фильме
@@ -1703,18 +2065,32 @@
             const result = await response.json();
             console.log('[STREAMING] Результат film-info из кэша:', result);
             if (result.success) {
-              // ВАЖНО: film_id может быть 0 или null, проверяем явно
-              const filmId = (result.film_id !== undefined && result.film_id !== null) ? result.film_id : null;
-              filmData = {
-                kp_id: kpId,
-                film_id: filmId,
-                watched: result.watched || false,
-                rated: result.rated || false,
-                has_unwatched_before: result.has_unwatched_before || false,
-                current_episode_watched: result.current_episode_watched || false,
-                is_series: !!result.film?.is_series
-              };
-              console.log('[STREAMING] filmData после парсинга:', filmData);
+              // Проверяем, совпадает ли название из API с названием на странице
+              const apiTitle = result.film?.title || result.film?.nameRu || result.film?.name || result.film?.nameOriginal || '';
+              const pageTitle = (getSearchBaseTitle(info) || info.title || '').trim();
+              
+              console.log('[STREAMING] Проверка совпадения названий. Страница:', pageTitle, 'API:', apiTitle);
+              
+              if (apiTitle && pageTitle && !titlesMatch(pageTitle, apiTitle)) {
+                console.log('[STREAMING] Кэш невалиден: название не совпадает. Страница:', pageTitle, 'API:', apiTitle);
+                cacheValid = false;
+                kpId = null; // Сбрасываем, чтобы сделать новый поиск
+              } else if (!apiTitle) {
+                console.log('[STREAMING] Внимание: apiTitle пустой, пропускаем проверку');
+              } else {
+                // ВАЖНО: film_id может быть 0 или null, проверяем явно
+                const filmId = (result.film_id !== undefined && result.film_id !== null) ? result.film_id : null;
+                filmData = {
+                  kp_id: kpId,
+                  film_id: filmId,
+                  watched: result.watched || false,
+                  rated: result.rated || false,
+                  has_unwatched_before: result.has_unwatched_before || false,
+                  current_episode_watched: result.current_episode_watched || false,
+                  is_series: !!result.film?.is_series
+                };
+                console.log('[STREAMING] filmData после парсинга:', filmData);
+              }
             } else {
               console.error('[STREAMING] API вернул success: false:', result);
             }
@@ -1732,17 +2108,27 @@
               if (retryResponse.ok) {
                 const retryResult = await retryResponse.json();
                 if (retryResult.success) {
-                  const filmId = (retryResult.film_id !== undefined && retryResult.film_id !== null) ? retryResult.film_id : null;
-                  filmData = {
-                    kp_id: kpId,
-                    film_id: filmId,
-                    watched: retryResult.watched || false,
-                    rated: retryResult.rated || false,
-                    has_unwatched_before: retryResult.has_unwatched_before || false,
-                    current_episode_watched: retryResult.current_episode_watched || false,
-                    is_series: !!retryResult.film?.is_series
-                  };
-                  console.log('[STREAMING] Повторный запрос успешен, film_id:', filmId);
+                  // Проверяем совпадение названия и в retry
+                  const retryApiTitle = retryResult.film?.title || retryResult.film?.nameRu || retryResult.film?.name || retryResult.film?.nameOriginal || '';
+                  const retryPageTitle = (getSearchBaseTitle(info) || info.title || '').trim();
+                  
+                  if (retryApiTitle && retryPageTitle && !titlesMatch(retryPageTitle, retryApiTitle)) {
+                    console.log('[STREAMING] Retry: кэш невалиден, название не совпадает:', retryPageTitle, 'vs', retryApiTitle);
+                    cacheValid = false;
+                    kpId = null;
+                  } else {
+                    const filmId = (retryResult.film_id !== undefined && retryResult.film_id !== null) ? retryResult.film_id : null;
+                    filmData = {
+                      kp_id: kpId,
+                      film_id: filmId,
+                      watched: retryResult.watched || false,
+                      rated: retryResult.rated || false,
+                      has_unwatched_before: retryResult.has_unwatched_before || false,
+                      current_episode_watched: retryResult.current_episode_watched || false,
+                      is_series: !!retryResult.film?.is_series
+                    };
+                    console.log('[STREAMING] Повторный запрос успешен, film_id:', filmId);
+                  }
                 } else {
                   throw new Error(retryResult.error || 'Unknown error');
                 }
@@ -1770,31 +2156,17 @@
             return;
           }
         }
-      } else {
+      }
+      
+      // Если кэш невалиден или kpId не найден - делаем поиск
+      if (!kpId || !filmData) {
         const searchType = info.isSeries ? 'TV_SERIES' : 'FILM';
         const baseTitle = (getSearchBaseTitle(info) || info.title || '').trim();
         const yearParam = info.year ? `&year=${info.year}` : '';
         const searchKeyword = baseTitle;
         console.log('[STREAMING] Поиск (название + год, как /search и Letterboxd):', { keyword: searchKeyword, year: info.year, type: searchType });
         
-        // Функция нормализации названия для сравнения
-        function normalizeTitle(title) {
-          if (!title) return '';
-          return title.toLowerCase()
-            .replace(/[ёЁ]/g, 'е')
-            .replace(/\s+/g, ' ')
-            .trim();
-        }
-        
-        // Проверка, совпадает ли название из поиска с названием на странице
-        function titlesMatch(pageTitle, searchResultTitle) {
-          const normPage = normalizeTitle(pageTitle);
-          const normSearch = normalizeTitle(searchResultTitle);
-          // Точное совпадение или одно содержит другое
-          return normPage === normSearch || 
-                 normPage.includes(normSearch) || 
-                 normSearch.includes(normPage);
-        }
+        // Используем normalizeTitle и titlesMatch, определённые выше
         
         async function doSearch(keyw, yParam) {
           try {

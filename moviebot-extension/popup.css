@@ -192,6 +192,18 @@ h3 {
     border: 1px solid #e0e0e0;
 }
 
+/* Гарантируем, что film-info виден когда нет класса hidden */
+.film-info:not(.hidden) {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+/* Скрываем film-info когда есть класс hidden */
+.film-info.hidden {
+    display: none !important;
+}
+
 .film-status {
     margin: 10px 0;
     padding: 8px;

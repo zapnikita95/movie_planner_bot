@@ -80,6 +80,17 @@ function resetExtensionState() {
 
 // Инициализация
 document.addEventListener('DOMContentLoaded', async () => {
+  console.log('[POPUP INIT] DOMContentLoaded запущен');
+  
+  
+  // Проверяем начальное состояние элементов
+  const initCheck = {
+    authScreen: document.getElementById('auth-screen')?.classList?.toString(),
+    mainScreen: document.getElementById('main-screen')?.classList?.toString(),
+    filmInfo: document.getElementById('film-info')?.classList?.toString()
+  };
+  console.log('[POPUP INIT] Начальное состояние элементов:', initCheck);
+  
   // Скрываем блок подтверждения при инициализации
   const confirmationEl = document.getElementById('film-confirmation');
   if (confirmationEl) {
@@ -468,25 +479,37 @@ async function detectAndLoadFilm(url, urlChanged = true) {
     const isStreaming = streamingHosts.some(h => hostname.includes(h));
 
     if (isStreaming && chatId && userId) {
+      console.log('[POPUP] Стриминговый сайт, пробуем получить pageInfo');
       try {
         const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        console.log('[POPUP] Текущая вкладка:', tabs?.[0]?.id);
         if (tabs && tabs[0]) {
           const pageInfo = await new Promise((resolve) => {
             chrome.tabs.sendMessage(tabs[0].id, { action: 'get_streaming_page_info' }, (r) => {
-              if (chrome.runtime.lastError) resolve(null);
-              else resolve(r || null);
+              if (chrome.runtime.lastError) {
+                console.log('[POPUP] Ошибка sendMessage:', chrome.runtime.lastError.message);
+                resolve(null);
+              } else {
+                console.log('[POPUP] pageInfo получен:', r);
+                resolve(r || null);
+              }
             });
           });
           if (pageInfo && pageInfo.title) {
             // Всегда загружаем данные через API, даже если сезон/серия не определены
             // Это позволит показать информацию о фильме/сериале и предложить действия
+            console.log('[POPUP] Вызываем loadFromStreamingPage');
             await loadFromStreamingPage(pageInfo);
             return;
+          } else {
+            console.log('[POPUP] pageInfo не содержит title, пропускаем');
           }
         }
       } catch (e) {
-        console.log('[POPUP] get_streaming_page_info:', e);
+        console.log('[POPUP] get_streaming_page_info ошибка:', e);
       }
+    } else {
+      console.log('[POPUP] Не стриминговый сайт или нет chatId/userId:', { isStreaming, chatId, userId });
     }
 
     if (filmInfo) {
@@ -570,8 +593,15 @@ function showAuthScreen() {
 }
 
 function showMainScreen() {
-  document.getElementById('auth-screen').classList.add('hidden');
-  document.getElementById('main-screen').classList.remove('hidden');
+  console.log('[POPUP] showMainScreen вызван');
+  const authScreen = document.getElementById('auth-screen');
+  const mainScreen = document.getElementById('main-screen');
+  if (authScreen) authScreen.classList.add('hidden');
+  if (mainScreen) {
+    mainScreen.classList.remove('hidden');
+    mainScreen.style.display = 'block';
+    console.log('[POPUP] main-screen показан, hidden=', mainScreen.classList.contains('hidden'));
+  }
 }
 
 async function handleBind() {
@@ -835,22 +865,34 @@ async function loadFilmByKeyword(keyword, year, source) {
 }
 
 async function loadFromStreamingPage(info) {
+  console.log('[POPUP] loadFromStreamingPage вызван с info:', info);
   const filmInfo = document.getElementById('film-info');
   const titleEl = document.getElementById('film-title');
   const yearEl = document.getElementById('film-year');
   if (filmInfo) {
     filmInfo.classList.remove('hidden');
-    filmInfo.style.display = '';
+    filmInfo.removeAttribute('style');
+    filmInfo.style.cssText = 'display: block !important; visibility: visible !important; opacity: 1 !important;';
+    filmInfo.offsetHeight; // Форсируем перерисовку
   }
   if (titleEl) titleEl.textContent = 'Ищем на странице...';
   if (yearEl) yearEl.textContent = '';
 
-  let baseTitle = (info.title || '').replace(/\s*[—\-].*$/, '').replace(/\s*\([^)]*[Чч]асть\s*\d+[^)]*\)\s*$/i, '').replace(/\s*\([^)]*[Сс]езон[^)]*\)\s*$/i, '').replace(/\s+серия\s+\d+$/i, '').trim();
+  // Очищаем название от года в скобках, части, сезона и т.д.
+  let baseTitle = (info.title || '')
+    .replace(/\s*\(\d{4}\)\s*$/i, '')           // "(2026)" в конце
+    .replace(/\s*\(\d{4}\)$/i, '')               // "(2026)" в конце без пробелов
+    .replace(/\s*[—\-].*$/, '')                  // " — ..." после тире
+    .replace(/\s*\([^)]*[Чч]асть\s*\d+[^)]*\)\s*$/i, '')  // "(Часть 1)"
+    .replace(/\s*\([^)]*[Сс]езон[^)]*\)\s*$/i, '')       // "(Сезон 1)"
+    .replace(/\s+серия\s+\d+$/i, '')             // "серия 5"
+    .trim();
   baseTitle = baseTitle || info.title;
   const keyword = baseTitle;
   const year = info.year || '';
   const type = info.isSeries ? 'TV_SERIES' : 'FILM';
   const searchUrl = `${API_BASE_URL}/api/extension/search-film-by-keyword?keyword=${encodeURIComponent(keyword)}&type=${type}${year ? `&year=${encodeURIComponent(year)}` : ''}`;
+  console.log('[POPUP] Поиск:', { keyword, year, type, searchUrl });
 
   try {
     let searchRes;
@@ -862,7 +904,9 @@ async function loadFromStreamingPage(info) {
       return;
     }
     const searchJson = searchRes.data || {};
+    console.log('[POPUP] Результат поиска:', searchJson);
     if (!searchJson.success || !searchJson.kp_id) {
+      console.log('[POPUP] Фильм не найден в поиске');
       if (titleEl) titleEl.textContent = 'Не найден';
       if (yearEl) yearEl.textContent = 'Попробуйте другую страницу';
       return;
@@ -870,36 +914,45 @@ async function loadFromStreamingPage(info) {
 
     let filmUrl = `${API_BASE_URL}/api/extension/film-info?kp_id=${searchJson.kp_id}&chat_id=${chatId}&user_id=${userId}`;
     if (info.season != null && info.episode != null) filmUrl += `&season=${info.season}&episode=${info.episode}`;
+    console.log('[POPUP] Запрос film-info:', filmUrl);
     let filmRes;
     try {
       filmRes = await streamingApiRequest('GET', filmUrl);
     } catch (e) {
+      console.error('[POPUP] Ошибка film-info:', e);
       if (titleEl) titleEl.textContent = 'Ошибка загрузки';
       if (yearEl) yearEl.textContent = (e && e.message) || 'Проверьте подключение';
       return;
     }
     const filmJson = filmRes.data || {};
+    console.log('[POPUP] Результат film-info:', filmJson);
     if (!filmJson.success || !filmJson.film) {
+      console.log('[POPUP] film-info не успешен');
       if (titleEl) titleEl.textContent = 'Ошибка загрузки';
       if (yearEl) yearEl.textContent = filmJson.error || filmRes.error || '';
       return;
     }
 
     try {
+      console.log('[POPUP] Вызываем displayFilmInfo');
       displayFilmInfo(filmJson.film, filmJson);
+      console.log('[POPUP] displayFilmInfo завершён успешно');
     } catch (e) {
-      console.error('Ошибка displayFilmInfo:', e);
+      console.error('[POPUP] Ошибка displayFilmInfo:', e);
       if (titleEl) titleEl.textContent = 'Ошибка отображения';
-      if (yearEl) yearEl.textContent = '';
+      if (yearEl) yearEl.textContent = e.message || '';
       return;
     }
 
+    // Добавляем streaming-специфичные кнопки
+    console.log('[POPUP] Добавляем streaming кнопки, info:', info);
     const actionsEl = document.getElementById('film-actions');
     if (actionsEl) {
       const kpId = searchJson.kp_id;
       const filmId = filmJson.film_id;
       
       if (info.isSeries && info.season != null && info.episode != null) {
+        console.log('[POPUP] Сериал с сезоном/серией:', info.season, info.episode);
         // Сериал с определенными сезоном/серией
         const markBtn = document.createElement('button');
         markBtn.textContent = `Отметить серию ${info.season}×${info.episode}`;
@@ -1082,6 +1135,53 @@ async function loadFromStreamingPage(info) {
     if (titleEl) titleEl.textContent = 'Ошибка загрузки';
     if (yearEl) yearEl.textContent = (err && err.message) || 'Попробуйте позже';
   }
+  
+  // ФИНАЛЬНАЯ ПРОВЕРКА: убеждаемся что элементы видны
+  console.log('[POPUP] loadFromStreamingPage ЗАВЕРШЁН, финальная проверка:');
+  const finalFilmInfo = document.getElementById('film-info');
+  const finalTitle = document.getElementById('film-title');
+  console.log('[POPUP] ФИНАЛ: filmInfo.display=', finalFilmInfo?.style?.display, 'title=', finalTitle?.textContent, 'height=', finalFilmInfo?.offsetHeight);
+  
+  // Скрываем оригинальный film-info (будем использовать streaming-film-info)
+  if (finalFilmInfo) {
+    finalFilmInfo.style.display = 'none';
+  }
+  
+  // Создаём блок с информацией о фильме напрямую в контейнере
+  const mainContainer = document.querySelector('#main-screen .container');
+  const header = mainContainer?.querySelector('.header');
+  if (mainContainer && header && finalTitle?.textContent) {
+    // Удаляем старый блок если есть
+    const oldBlock = document.getElementById('streaming-film-info');
+    if (oldBlock) oldBlock.remove();
+    
+    const filmDiv = document.createElement('div');
+    filmDiv.id = 'streaming-film-info';
+    filmDiv.style.cssText = 'background: white; border: 1px solid #e0e0e0; padding: 20px; margin-top: 15px; border-radius: 12px; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);';
+    filmDiv.innerHTML = `
+      <h2 style="margin: 0 0 8px 0; color: #333; font-size: 20px; font-weight: 600;">${finalTitle.textContent}</h2>
+      <p style="margin: 0 0 15px 0; color: #666; font-size: 14px;">${document.getElementById('film-year')?.textContent || ''}</p>
+      <div id="streaming-actions" style="display: flex; flex-direction: column; gap: 8px;"></div>
+    `;
+    
+    // Вставляем после header
+    header.insertAdjacentElement('afterend', filmDiv);
+    
+    // ПЕРЕМЕЩАЕМ оригинальные кнопки (чтобы сохранить обработчики)
+    const actionsEl = document.getElementById('film-actions');
+    const streamingActions = document.getElementById('streaming-actions');
+    if (actionsEl && streamingActions) {
+      while (actionsEl.firstChild) {
+        const btn = actionsEl.firstChild;
+        if (btn.tagName === 'BUTTON') {
+          btn.style.cssText = 'padding: 12px !important; border-radius: 8px !important; border: none !important; cursor: pointer !important; font-size: 14px !important; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important; color: white !important; width: 100% !important; font-weight: 500 !important; box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3) !important;';
+        }
+        streamingActions.appendChild(btn);
+      }
+    }
+    
+    console.log('[POPUP] Блок стриминга создан с кнопками:', streamingActions?.children?.length);
+  }
 }
 
 async function loadFilmByUrl(url) {
@@ -1153,31 +1253,72 @@ function displayFilmInfo(film, data, showConfirmation = false) {
   
   // ОБЯЗАТЕЛЬНО показываем блок film-info
   const filmInfo = document.getElementById('film-info');
+  console.log('[DISPLAY FILM] filmInfo элемент ДО:', filmInfo?.classList?.toString(), filmInfo?.style?.display);
   if (filmInfo) {
+    // Сначала убираем все стили, которые могут скрывать элемент
     filmInfo.classList.remove('hidden');
-    filmInfo.style.display = ''; // Убираем style.display = 'none'
+    filmInfo.removeAttribute('style'); // Убираем все инлайн стили
+    
+    // Устанавливаем видимость
+    filmInfo.style.cssText = 'display: block !important; visibility: visible !important; opacity: 1 !important;';
+    
+    // Форсируем перерисовку браузера
+    filmInfo.offsetHeight; // Reflow trick
+    
+    console.log('[DISPLAY FILM] film-info ПОСЛЕ:', filmInfo.classList.toString(), filmInfo.style.display, filmInfo.offsetHeight);
+  } else {
+    console.error('[DISPLAY FILM] ОШИБКА: film-info элемент не найден!');
   }
   
   const titleEl = document.getElementById('film-title');
   const yearEl = document.getElementById('film-year');
-  if (titleEl) titleEl.textContent = film.title;
-  if (yearEl) yearEl.textContent = film.year || '';
+  console.log('[DISPLAY FILM] titleEl:', titleEl, 'yearEl:', yearEl);
+  if (titleEl) {
+    titleEl.textContent = film.title || 'Без названия';
+    titleEl.style.color = '#333'; // Убедимся что текст виден
+    console.log('[DISPLAY FILM] Название установлено:', film.title, 'innerHTML=', titleEl.innerHTML);
+  }
+  if (yearEl) {
+    yearEl.textContent = film.year || '';
+    yearEl.style.color = '#666';
+  }
+  
+  // ОТЛАДКА: Проверяем что элементы видны
+  console.log('[DISPLAY FILM] ПРОВЕРКА ВИДИМОСТИ:', {
+    filmInfo_display: filmInfo?.style?.display,
+    filmInfo_visibility: filmInfo?.style?.visibility,
+    filmInfo_offsetHeight: filmInfo?.offsetHeight,
+    filmInfo_offsetWidth: filmInfo?.offsetWidth,
+    title_text: titleEl?.textContent,
+    mainScreen_hidden: document.getElementById('main-screen')?.classList?.contains('hidden')
+  });
   
   const statusEl = document.getElementById('film-status');
-  statusEl.innerHTML = '';
-  
-  if (data.in_database) {
-    statusEl.innerHTML += '<span class="badge in-db">В базе</span>';
-  }
-  if (data.watched) {
-    statusEl.innerHTML += '<span class="badge watched">Просмотрено</span>';
-  }
-  if (data.has_plan) {
-    statusEl.innerHTML += '<span class="badge has-plan">В расписании</span>';
+  console.log('[DISPLAY FILM] statusEl:', statusEl);
+  if (statusEl) {
+    statusEl.innerHTML = '';
+    
+    if (data.in_database) {
+      statusEl.innerHTML += '<span class="badge in-db">В базе</span>';
+    }
+    if (data.watched) {
+      statusEl.innerHTML += '<span class="badge watched">Просмотрено</span>';
+    }
+    if (data.has_plan) {
+      statusEl.innerHTML += '<span class="badge has-plan">В расписании</span>';
+    }
   }
   
   const actionsEl = document.getElementById('film-actions');
+  console.log('[DISPLAY FILM] actionsEl:', actionsEl);
+  if (!actionsEl) {
+    console.error('[DISPLAY FILM] ОШИБКА: film-actions элемент не найден!');
+    return;
+  }
   actionsEl.innerHTML = '';
+  
+  // ОТЛАДКА: Добавляем тестовый текст, чтобы убедиться что кнопки создаются
+  console.log('[DISPLAY FILM] Создаём кнопки, data.in_database=', data.in_database);
   
   // Логика кнопок как в боте:
   // 1. Если фильм НЕ в базе - показываем "Добавить в базу" и "Запланировать просмотр"
@@ -1229,6 +1370,8 @@ function displayFilmInfo(film, data, showConfirmation = false) {
     showPlanningForm();
   });
   actionsEl.appendChild(planBtn);
+  
+  console.log('[DISPLAY FILM] Кнопки добавлены, actionsEl.innerHTML=', actionsEl.innerHTML.substring(0, 100));
   
   // Если есть план "в кино", добавляем кнопку "Добавить билеты"
   if (data.has_plan && data.plan_type === 'cinema' && data.plan_id && hasTicketsAccess) {

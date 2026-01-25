@@ -2670,7 +2670,7 @@ def create_web_app(bot):
                                     INSERT INTO movies (chat_id, kp_id, title, year, link, is_series, online_link)
                                     VALUES (%s, %s, %s, %s, %s, %s, %s)
                                     RETURNING id
-                                """, (chat_id, str(kp_id), info.get('title'), info.get('year'), link, is_series, online_link))
+                                """, (chat_id, str(kp_id), info.get('title'), info.get('year'), link, 1 if is_series else 0, online_link))
                                 row = cursor.fetchone()
                                 film_id = row.get('id') if isinstance(row, dict) else (row[0] if row else None)
                                 conn.commit()
