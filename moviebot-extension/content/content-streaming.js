@@ -1467,8 +1467,8 @@
           markCurrentBtn.addEventListener('click', () => handleMarkEpisode(info, filmData, false));
           container.appendChild(markCurrentBtn);
           
-          // Показываем кнопку "Отметить все предыдущие" если это не первая серия
-          if (info.season && info.episode && (info.season > 1 || info.episode > 1)) {
+          // Показываем кнопку "Отметить все предыдущие" только если есть непросмотренные до текущей
+          if (info.season && info.episode && filmData.has_unwatched_before) {
             const markAllBtn = document.createElement('button');
             markAllBtn.textContent = '✅ Отметить все предыдущие';
             markAllBtn.style.cssText = `
@@ -1554,10 +1554,8 @@
             markCurrentBtn.addEventListener('click', () => handleMarkEpisode(info, filmData, false));
             container.appendChild(markCurrentBtn);
           }
-          // Показываем кнопку "Отметить все предыдущие" если:
-          // 1. has_unwatched_before === true (есть непросмотренные до текущей)
-          // 2. ИЛИ это не первая серия (season > 1 или episode > 1) - на случай если только что добавили
-          if (info.season && info.episode && (filmData.has_unwatched_before || info.season > 1 || info.episode > 1)) {
+          // Показываем кнопку "Отметить все предыдущие" только если есть непросмотренные до текущей
+          if (info.season && info.episode && filmData.has_unwatched_before) {
             const markAllBtn = document.createElement('button');
             markAllBtn.textContent = '✅ Отметить все предыдущие';
             markAllBtn.style.cssText = `
@@ -1638,16 +1636,21 @@
       btn.textContent = '⭐';
       btn.dataset.rating = i;
       btn.style.cssText = `
-        flex: 1 1 0;
-        min-width: 0;
-        height: 32px;
-        background: rgba(255,255,255,0.2);
-        color: white;
-        border: 1px solid rgba(255,255,255,0.3);
-        border-radius: 6px;
-        cursor: pointer;
-        font-size: 16px;
-        transition: all 0.2s;
+        flex: 1 1 0 !important;
+        min-width: 0 !important;
+        height: 32px !important;
+        background: rgba(255,255,255,0.2) !important;
+        color: white !important;
+        border: 1px solid rgba(255,255,255,0.3) !important;
+        border-radius: 6px !important;
+        cursor: pointer !important;
+        font-size: 14px !important;
+        transition: all 0.2s !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        padding: 0 !important;
+        line-height: 1 !important;
       `;
       
       btn.addEventListener('click', () => handleRating(info, filmData, i));

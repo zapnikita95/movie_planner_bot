@@ -979,8 +979,8 @@ async function loadFromStreamingPage(info) {
         });
         actionsEl.appendChild(markBtn);
         
-        // Кнопка "Отметить все предыдущие" если это не первая серия
-        if (info.season > 1 || info.episode > 1) {
+        // Кнопка "Отметить все предыдущие" - только если есть непросмотренные серии ДО текущей
+        if ((info.season > 1 || info.episode > 1) && filmJson.has_unwatched_before) {
           const markAllBtn = document.createElement('button');
           markAllBtn.textContent = 'Отметить все предыдущие';
           markAllBtn.className = 'btn btn-secondary';
@@ -1106,28 +1106,98 @@ async function loadFromStreamingPage(info) {
         }, 0);
       } else if (!info.isSeries) {
         // Фильм
-        const markBtn = document.createElement('button');
-        markBtn.textContent = 'Отметить фильм просмотренным';
-        markBtn.className = 'btn btn-primary';
-        markBtn.style.marginTop = '8px';
-        markBtn.addEventListener('click', async () => {
-          markBtn.disabled = true;
-          try {
-            const r = await streamingApiRequest('POST', `${API_BASE_URL}/api/extension/mark-film-watched`, {
-              chat_id: chatId,
-              user_id: userId,
-              kp_id: kpId,
-              film_id: filmId,
-              online_link: info.url || undefined
+        // Функция для создания блока оценки
+        const createRatingBlock = () => {
+          const ratingDiv = document.createElement('div');
+          ratingDiv.style.cssText = 'margin-top: 12px; padding: 12px; background: #f8f9fa; border-radius: 8px; text-align: center;';
+          ratingDiv.innerHTML = `
+            <p style="margin: 0 0 10px 0; font-size: 14px; color: #333;">Оцените фильм:</p>
+            <div style="display: flex; justify-content: center; gap: 4px;" id="rating-stars">
+              ${[1,2,3,4,5,6,7,8,9,10].map(n => `<button data-rating="${n}" style="width: 28px; height: 28px; padding: 0; border: 1px solid #ddd; border-radius: 4px; background: #fff; cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center;">${n}</button>`).join('')}
+            </div>
+          `;
+          actionsEl.appendChild(ratingDiv);
+          
+          // Добавляем обработчики
+          ratingDiv.querySelectorAll('button[data-rating]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+              const rating = parseInt(btn.dataset.rating);
+              ratingDiv.querySelectorAll('button').forEach(b => b.disabled = true);
+              try {
+                const r = await streamingApiRequest('POST', `${API_BASE_URL}/api/extension/rate-film`, {
+                  chat_id: chatId,
+                  user_id: userId,
+                  kp_id: kpId,
+                  film_id: filmId,
+                  rating: rating
+                });
+                if (r.data && r.data.success) {
+                  ratingDiv.innerHTML = `<p style="margin: 0; color: #28a745; font-size: 14px;">✅ Оценка ${rating}/10 сохранена!</p>`;
+                } else {
+                  ratingDiv.innerHTML = `<p style="margin: 0; color: #dc3545; font-size: 14px;">❌ Ошибка сохранения оценки</p>`;
+                }
+              } catch (e) {
+                console.error('Ошибка отправки оценки:', e);
+                ratingDiv.innerHTML = `<p style="margin: 0; color: #dc3545; font-size: 14px;">❌ Ошибка сохранения оценки</p>`;
+              }
             });
-            if (r.data && r.data.success) markBtn.textContent = 'Отмечено ✓';
-            else markBtn.disabled = false;
-          } catch (e) {
-            console.error('Ошибка отметки фильма:', e);
-            markBtn.disabled = false;
+          });
+        };
+        
+        // Если фильм уже просмотрен
+        if (filmJson.watched) {
+          // Если ещё не оценён - показываем блок оценки
+          if (!filmJson.rated) {
+            createRatingBlock();
+          } else {
+            const watchedLabel = document.createElement('p');
+            watchedLabel.style.cssText = 'margin: 8px 0; color: #28a745; font-size: 14px;';
+            watchedLabel.textContent = '✅ Фильм уже просмотрен и оценён';
+            actionsEl.appendChild(watchedLabel);
           }
-        });
-        actionsEl.appendChild(markBtn);
+        } else {
+          // Если не просмотрен - показываем кнопку отметки
+          const markBtn = document.createElement('button');
+          markBtn.textContent = 'Отметить фильм просмотренным';
+          markBtn.className = 'btn btn-primary';
+          markBtn.style.marginTop = '8px';
+          markBtn.addEventListener('click', async () => {
+            markBtn.disabled = true;
+            markBtn.textContent = '⏳ Отмечаем...';
+            try {
+              const r = await streamingApiRequest('POST', `${API_BASE_URL}/api/extension/mark-film-watched`, {
+                chat_id: chatId,
+                user_id: userId,
+                kp_id: kpId,
+                film_id: filmId,
+                online_link: info.url || undefined
+              });
+              if (r.data && r.data.success) {
+                markBtn.textContent = '✅ Просмотрено!';
+                markBtn.style.background = '#28a745';
+                // Показываем блок оценки через секунду
+                setTimeout(() => {
+                  markBtn.remove();
+                  createRatingBlock();
+                }, 1000);
+              } else {
+                markBtn.textContent = '❌ Ошибка';
+                markBtn.disabled = false;
+                setTimeout(() => {
+                  markBtn.textContent = 'Отметить фильм просмотренным';
+                }, 2000);
+              }
+            } catch (e) {
+              console.error('Ошибка отметки фильма:', e);
+              markBtn.textContent = '❌ Ошибка';
+              markBtn.disabled = false;
+              setTimeout(() => {
+                markBtn.textContent = 'Отметить фильм просмотренным';
+              }, 2000);
+            }
+          });
+          actionsEl.appendChild(markBtn);
+        }
       }
     }
   } catch (err) {
@@ -1338,6 +1408,33 @@ function displayFilmInfo(film, data, showConfirmation = false) {
       dbBtn.textContent = '⏳ Добавляем...';
       try {
         await addFilmToDatabase(film.kp_id);
+        // После успешного добавления меняем кнопку на "Удалить"
+        dbBtn.textContent = '✅ Добавлено!';
+        setTimeout(() => {
+          dbBtn.textContent = '🗑️ Удалить из базы';
+          dbBtn.className = 'btn btn-secondary';
+          dbBtn.disabled = false;
+          // Меняем обработчик на удаление
+          dbBtn.onclick = async () => {
+            if (isProcessing) return;
+            if (confirm('Вы уверены, что хотите удалить фильм из базы?')) {
+              isProcessing = true;
+              dbBtn.disabled = true;
+              dbBtn.textContent = '⏳ Удаляем...';
+              try {
+                await deleteFilmFromDatabase(film.kp_id);
+              } finally {
+                isProcessing = false;
+              }
+            }
+          };
+        }, 1500);
+      } catch (e) {
+        dbBtn.textContent = '❌ Ошибка';
+        dbBtn.disabled = false;
+        setTimeout(() => {
+          dbBtn.textContent = '➕ Добавить в базу';
+        }, 2000);
       } finally {
         isProcessing = false;
       }
