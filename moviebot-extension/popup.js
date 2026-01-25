@@ -369,8 +369,9 @@ async function detectAndLoadFilm(url, urlChanged = true) {
       if (actionsEl) actionsEl.innerHTML = '';
     }
     
-    // Кинопоиск
-    const kpMatch = url.match(/kinopoisk\.ru\/(film|series)\/(\d+)/i);
+    // Кинопоиск (НО НЕ hd.kinopoisk.ru - там hash ID, обрабатывается как стриминг)
+    const isHdKinopoisk = url.includes('hd.kinopoisk.ru');
+    const kpMatch = !isHdKinopoisk && url.match(/kinopoisk\.ru\/(film|series)\/(\d+)/i);
     if (kpMatch) {
       const kpId = kpMatch[2];
       // Пытаемся получить данные от content script, если нет - используем URL
@@ -1165,11 +1166,30 @@ async function loadFromStreamingPage(info) {
             markBtn.disabled = true;
             markBtn.textContent = '⏳ Отмечаем...';
             try {
+              let currentFilmId = filmId;
+              
+              // Если фильм не в базе - сначала добавляем
+              if (!currentFilmId) {
+                console.log('[POPUP] Фильм не в базе, добавляем перед отметкой...');
+                markBtn.textContent = '⏳ Добавляем в базу...';
+                const addRes = await streamingApiRequest('POST', `${API_BASE_URL}/api/extension/add-film`, {
+                  kp_id: kpId,
+                  chat_id: chatId
+                });
+                if (addRes.data && addRes.data.success && addRes.data.film_id) {
+                  currentFilmId = addRes.data.film_id;
+                  console.log('[POPUP] Фильм добавлен, film_id:', currentFilmId);
+                  markBtn.textContent = '⏳ Отмечаем...';
+                } else {
+                  throw new Error('Не удалось добавить фильм в базу');
+                }
+              }
+              
               const r = await streamingApiRequest('POST', `${API_BASE_URL}/api/extension/mark-film-watched`, {
                 chat_id: chatId,
                 user_id: userId,
                 kp_id: kpId,
-                film_id: filmId,
+                film_id: currentFilmId,
                 online_link: info.url || undefined
               });
               if (r.data && r.data.success) {
