@@ -14,8 +14,19 @@ logger = logging.getLogger(__name__)
 
 # Переменные окружения
 TOKEN = os.getenv('BOT_TOKEN')
-KP_TOKEN = os.getenv('KP_TOKEN')
+KP_TOKEN = os.getenv('KP_TOKEN')  # Токен для kinopoiskapiunofficial.tech
+POISKKINO_TOKEN = os.getenv('POISKKINO_TOKEN')  # Токен для poiskkino.dev (резервный API)
 DATABASE_URL = os.getenv('DATABASE_URL')
+
+# Настройки API и fallback
+# PRIMARY_API: 'kinopoisk_unofficial' или 'poiskkino'
+PRIMARY_API = os.getenv('PRIMARY_API', 'kinopoisk_unofficial').strip().lower()
+# Включить fallback на резервный API при ошибках
+FALLBACK_ENABLED = os.getenv('FALLBACK_ENABLED', 'true').strip().lower() == 'true'
+# Порог последовательных ошибок для переключения на fallback (по умолчанию 20)
+FALLBACK_THRESHOLD = int(os.getenv('FALLBACK_THRESHOLD', '20'))
+# Время в секундах до сброса счётчика ошибок (по умолчанию 5 минут)
+FALLBACK_RESET_TIMEOUT = int(os.getenv('FALLBACK_RESET_TIMEOUT', '300'))
 
 # Логирование токена для отладки (только первые и последние символы)
 if TOKEN:
@@ -23,6 +34,20 @@ if TOKEN:
     logger.info(f"[CONFIG] BOT_TOKEN загружен: {token_preview}")
 else:
     logger.error("[CONFIG] BOT_TOKEN НЕ ЗАГРУЖЕН! Проверьте переменные окружения.")
+
+# Логирование настроек API
+logger.info(f"[CONFIG] PRIMARY_API: {PRIMARY_API}")
+logger.info(f"[CONFIG] FALLBACK_ENABLED: {FALLBACK_ENABLED}")
+logger.info(f"[CONFIG] FALLBACK_THRESHOLD: {FALLBACK_THRESHOLD}")
+if KP_TOKEN:
+    logger.info("[CONFIG] KP_TOKEN (kinopoiskapiunofficial) загружен")
+else:
+    logger.warning("[CONFIG] KP_TOKEN (kinopoiskapiunofficial) НЕ ЗАГРУЖЕН!")
+if POISKKINO_TOKEN:
+    logger.info("[CONFIG] POISKKINO_TOKEN загружен")
+else:
+    if PRIMARY_API == 'poiskkino' or FALLBACK_ENABLED:
+        logger.warning("[CONFIG] POISKKINO_TOKEN НЕ ЗАГРУЖЕН! Fallback на poiskkino.dev не будет работать.")
 
 # Настройки ЮKassa (из переменных окружения)
 YOOKASSA_SHOP_ID = os.getenv('YOOKASSA_SHOP_ID', '').strip() if os.getenv('YOOKASSA_SHOP_ID') else None

@@ -8139,20 +8139,8 @@ def _random_final(call, chat_id, user_id):
                 
                 try:
                     # Формируем ссылку в зависимости от типа
-                    # Сначала пробуем получить информацию из API, чтобы определить тип
-                    from moviebot.api.kinopoisk_api import get_film_info
-                    film_api_info = None
-                    try:
-                        film_api_info = get_film_info(similar_kp_id)
-                    except:
-                        pass
-                    
-                    if film_api_info and film_api_info.get('type') == 'TV_SERIES':
-                        link = f"https://www.kinopoisk.ru/series/{similar_kp_id}/"
-                    else:
-                        link = f"https://www.kinopoisk.ru/film/{similar_kp_id}/"
-                    
-                    film_info = extract_movie_info(link)
+                    # Сначала получаем информацию через extract_movie_info по kp_id напрямую
+                    film_info = extract_movie_info(similar_kp_id)
                     request_count += 1
                     
                     if film_info and check_film_matches_criteria(film_info, periods, genres, directors, actors):
