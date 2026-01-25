@@ -1692,7 +1692,7 @@ def handle_season_all_toggle(call):
 @bot.callback_query_handler(func=lambda call: call.data.startswith("rate_film:"))
 def rate_film_callback(call):
     """Обработчик кнопки 'Оценить'"""
-    from moviebot.states import rating_messages
+    from moviebot.states import rating_messages, user_private_handler_state
     try:
         try:
             bot.answer_callback_query(call.id)
@@ -1782,6 +1782,16 @@ def rate_film_callback(call):
                 )
                 rating_messages[msg.message_id] = f"kp_id:{kp_id}"
                 logger.info(f"[RATE FILM] Добавлено в rating_messages: msg_id={msg.message_id} → kp_id:{kp_id}")
+                # В личке добавляем состояние для обработки следующего сообщения без реплая
+                if call.message.chat.type == 'private':
+                    user_private_handler_state[user_id] = {
+                        'handler': 'rate_film',
+                        'prompt_message_id': msg.message_id,
+                        'kp_id': kp_id,
+                        'film_id': None,
+                        'title': title
+                    }
+                    logger.info(f"[RATE FILM] Установлено user_private_handler_state для user_id={user_id}")
             except telebot.apihelper.ApiTelegramException as api_err:
                 if "can't parse entities" in str(api_err):
                     logger.warning(f"[RATE FILM] MarkdownV2 сломался, fallback на plain текст")
@@ -1792,6 +1802,16 @@ def rate_film_callback(call):
                     )
                     rating_messages[msg.message_id] = f"kp_id:{kp_id}"
                     logger.info(f"[RATE FILM] Добавлено (fallback): msg_id={msg.message_id}")
+                    # В личке добавляем состояние для обработки следующего сообщения без реплая
+                    if call.message.chat.type == 'private':
+                        user_private_handler_state[user_id] = {
+                            'handler': 'rate_film',
+                            'prompt_message_id': msg.message_id,
+                            'kp_id': kp_id,
+                            'film_id': None,
+                            'title': title
+                        }
+                        logger.info(f"[RATE FILM] Установлено user_private_handler_state (fallback) для user_id={user_id}")
                 else:
                     raise
             return
@@ -1834,6 +1854,16 @@ def rate_film_callback(call):
                 # Регистрируем сообщение для обработки ответов (изменение оценки)
                 rating_messages[msg.message_id] = film_id
                 logger.info(f"[RATE FILM] rating_messages обновлено (изменение оценки): msg_id={msg.message_id} → film_id={film_id}")
+                # В личке добавляем состояние для обработки следующего сообщения без реплая
+                if call.message.chat.type == 'private':
+                    user_private_handler_state[user_id] = {
+                        'handler': 'rate_film',
+                        'prompt_message_id': msg.message_id,
+                        'kp_id': kp_id,
+                        'film_id': film_id,
+                        'title': title
+                    }
+                    logger.info(f"[RATE FILM] Установлено user_private_handler_state (изменение оценки) для user_id={user_id}")
             except telebot.apihelper.ApiTelegramException as api_err:
                 if "can't parse entities" in str(api_err):
                     logger.warning(f"[RATE FILM] MarkdownV2 сломался (уже оценено), fallback на plain")
@@ -1845,6 +1875,16 @@ def rate_film_callback(call):
                     # Регистрируем сообщение для обработки ответов (изменение оценки)
                     rating_messages[msg.message_id] = film_id
                     logger.info(f"[RATE FILM] rating_messages обновлено (изменение оценки, fallback): msg_id={msg.message_id} → film_id={film_id}")
+                    # В личке добавляем состояние для обработки следующего сообщения без реплая
+                    if call.message.chat.type == 'private':
+                        user_private_handler_state[user_id] = {
+                            'handler': 'rate_film',
+                            'prompt_message_id': msg.message_id,
+                            'kp_id': kp_id,
+                            'film_id': film_id,
+                            'title': title
+                        }
+                        logger.info(f"[RATE FILM] Установлено user_private_handler_state (изменение оценки, fallback) для user_id={user_id}")
                 else:
                     raise
         else:
@@ -1861,6 +1901,16 @@ def rate_film_callback(call):
                 )
                 rating_messages[msg.message_id] = film_id
                 logger.info(f"[RATE FILM] rating_messages обновлено: msg_id={msg.message_id} → film_id={film_id}")
+                # В личке добавляем состояние для обработки следующего сообщения без реплая
+                if call.message.chat.type == 'private':
+                    user_private_handler_state[user_id] = {
+                        'handler': 'rate_film',
+                        'prompt_message_id': msg.message_id,
+                        'kp_id': kp_id,
+                        'film_id': film_id,
+                        'title': title
+                    }
+                    logger.info(f"[RATE FILM] Установлено user_private_handler_state для user_id={user_id}")
             except telebot.apihelper.ApiTelegramException as api_err:
                 if "can't parse entities" in str(api_err):
                     logger.warning(f"[RATE FILM] MarkdownV2 сломался, fallback на plain")
@@ -1871,6 +1921,16 @@ def rate_film_callback(call):
                     )
                     rating_messages[msg.message_id] = film_id
                     logger.info(f"[RATE FILM] rating_messages обновлено (fallback): msg_id={msg.message_id}")
+                    # В личке добавляем состояние для обработки следующего сообщения без реплая
+                    if call.message.chat.type == 'private':
+                        user_private_handler_state[user_id] = {
+                            'handler': 'rate_film',
+                            'prompt_message_id': msg.message_id,
+                            'kp_id': kp_id,
+                            'film_id': film_id,
+                            'title': title
+                        }
+                        logger.info(f"[RATE FILM] Установлено user_private_handler_state (fallback) для user_id={user_id}")
                 else:
                     raise
 

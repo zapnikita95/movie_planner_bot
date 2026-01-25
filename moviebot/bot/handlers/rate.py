@@ -373,8 +373,20 @@ def handle_rating_internal(message, rating):
                                     conn.close()
                         current_msg = current_msg.reply_to_message if hasattr(current_msg, 'reply_to_message') else None
 
-    # 2. Глобальный поиск — один lock на весь цикл
-    if not film_id and not message.reply_to_message:
+    # 2. Проверка user_private_handler_state для личных чатов без реплая
+    if not film_id and not kp_id and not message.reply_to_message and message.chat.type == 'private':
+        from moviebot.states import user_private_handler_state
+        if user_id in user_private_handler_state:
+            state = user_private_handler_state[user_id]
+            if state.get('handler') == 'rate_film':
+                kp_id = state.get('kp_id')
+                film_id = state.get('film_id')
+                logger.info(f"[RATE] kp_id={kp_id}, film_id={film_id} из user_private_handler_state")
+                # Очищаем состояние после использования
+                del user_private_handler_state[user_id]
+    
+    # 3. Глобальный поиск — один lock на весь цикл
+    if not film_id and not kp_id and not message.reply_to_message:
         logger.info("[RATE] Глобальный поиск по rating_messages")
         conn = get_db_connection()
         cur = get_db_cursor()
@@ -404,8 +416,8 @@ def handle_rating_internal(message, rating):
             cur.close()
             conn.close()
 
-    # 3. kp_id из текста
-    if not film_id:
+    # 4. kp_id из текста
+    if not film_id and not kp_id:
         text = message.text or ""
         if 'kinopoisk.ru' in text or 'kinopoisk.com' in text:
             kp_id = extract_kp_id_from_text(text)
@@ -414,7 +426,7 @@ def handle_rating_internal(message, rating):
             if 'kinopoisk.ru' in reply_text or 'kinopoisk.com' in reply_text:
                 kp_id = extract_kp_id_from_text(reply_text)
 
-    # 4. Добавление фильма
+    # 5. Добавление фильма
     if not film_id and kp_id:
         logger.info(f"[RATE] Добавляем фильм: kp_id={kp_id}")
         link = f"https://www.kinopoisk.ru/film/{kp_id}/"

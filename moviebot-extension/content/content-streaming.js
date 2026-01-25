@@ -176,18 +176,27 @@
         return !!(title?.textContent?.includes('сезон') || title?.textContent?.includes('серии'));
       },
       title: {
-        selector: 'meta[property="og:title"]',
+        selector: 'meta[property="og:title"], title',
         extract: (el) => {
-          const c = (el?.content || '').trim();
-          const before = c.split(/\s+[Сс]езон\s*\d/i)[0]?.trim();
-          return before || c.split(/[\(\[]/)[0]?.trim() || null;
+          const c = (el?.content || el?.textContent || '').trim();
+          // Берём название до первой скобки: "Бык (фильм, 2019) ..." -> "Бык"
+          const beforeParen = c.split(/\s*\(/)[0]?.trim();
+          if (beforeParen) return beforeParen;
+          // Если скобок нет, пробуем по сезону
+          const beforeSeason = c.split(/\s+[Сс]езон\s*\d/i)[0]?.trim();
+          return beforeSeason || c.split(/[\(\[]/)[0]?.trim() || null;
         }
       },
       year: {
-        selector: 'span[test-id="meta_release_date"]',
+        selector: 'span[test-id="meta_release_date"], title, meta[property="og:title"]',
         extract: (el) => {
-          const raw = el?.textContent?.trim() || '';
-          const y = raw.split('-')[0]?.trim();
+          // Сначала пробуем из span с датой
+          const raw = el?.textContent || el?.content || '';
+          // Из title/og:title: "Бык (фильм, 2019)" -> "2019"
+          const yearMatch = raw.match(/\((?:фильм|сериал)[,\s]+(\d{4})/i);
+          if (yearMatch) return yearMatch[1];
+          // Из span: "2019" или "2019-2020"
+          const y = raw.trim().split('-')[0]?.trim();
           return /^\d{4}$/.test(y) ? y : (raw.match(/\d{4}/)?.[0] || null);
         }
       },
@@ -200,13 +209,19 @@
           m = t.match(/Сезон\s*(\d+)[.\s]*Серия\s*(\d+)/i);
           return m ? { season: parseInt(m[1]), episode: parseInt(m[2]) } : null;
         }
+      },
+      // Проверка страницы: только /movie/... и /serial/...
+      isValidPage: () => {
+        const path = window.location.pathname || '';
+        return /^\/(movie|serial)\/[^/]+/.test(path);
       }
     },
     
     'kinopoisk.ru,hd.kinopoisk.ru': {
       isSeries: () => {
-        const title = document.querySelector('title[data-tid="HdSeoHead"], title');
-        return title?.textContent?.includes('(сериал') || false;
+        const titleEl = document.querySelector('title[data-tid="HdSeoHead"], title');
+        const t = titleEl?.textContent || '';
+        return /\(сериал\b/i.test(t) || /\bсериал\b/i.test(t);
       },
       title: {
         selector: 'title[data-tid="HdSeoHead"], title',
@@ -223,7 +238,7 @@
         selector: '.styles_subtitle__PPaVH, .styles_extraInfo__A3zOn div, [data-tid="ContentInfoItem"], .styles_info-item_subtitle__zFUmG, .ContentInfoItem_root__J1fBw span',
         extract: (el) => {
           const t = el?.textContent?.trim() || '';
-          const m = t.match(/(\d+)\s*сезон[.\s]*(\d+)\s*серия/i);
+          const m = t.match(/(\d+)\s*сезон[.\s,]*(\d+)\s*серия/i);
           return m ? { season: parseInt(m[1]), episode: parseInt(m[2]) } : null;
         }
       }
@@ -274,8 +289,10 @@
         selector: 'meta[property="og:title"]',
         extract: (el) => {
           const text = (el?.content || el?.getAttribute?.('content') || '').trim();
-          const m = text.match(/Плеер\s+(?:сериал|фильм)\s+(.+?)\s+серия\s+\d+/i);
-          if (m) return m[1].trim();
+          const mSeries = text.match(/Плеер\s+(?:сериал|фильм)\s+(.+?)\s+серия\s+\d+/i);
+          if (mSeries) return mSeries[1].trim();
+          const mFilm = text.match(/Плеер\s+фильм\s+(.+?)\s*\((\d{4})\)/i);
+          if (mFilm) return mFilm[1].trim();
           return text.replace(/Плеер\s+(?:сериал|фильм)\s+/i, '').split(/\s+серия\s+\d+/i)[0]?.trim()
             || text.split(/[,(（]/)[0]?.replace(/Плеер\s+(?:сериал|фильм)\s+/i, '').trim() || null;
         }
@@ -285,7 +302,10 @@
         extract: (el) => {
           const text = el?.content || el?.getAttribute?.('content') || '';
           const m = text.match(/сезон\s*\d+\s*,\s*(\d{4})/i);
-          return m ? m[1] : (text.match(/(\d{4})/)?.[1] || null);
+          if (m) return m[1];
+          const mFilm = text.match(/Плеер\s+фильм\s+.+?\s*\((\d{4})\)/i);
+          if (mFilm) return mFilm[1];
+          return (text.match(/(\d{4})/)?.[1] || null);
         }
       },
       searchBaseTitle: (title) => {
@@ -364,27 +384,48 @@
     'rezka,hdrezka': {
       isSeries: () => {
         const h1 = document.querySelector('h1.full-article__title');
-        return h1?.textContent?.includes('сезон') || h1?.textContent?.includes('серия') || false;
+        if (!h1) return false;
+        const txt = h1.textContent || '';
+        if (/сезон|серия/i.test(txt)) return true;
+        const seasonSpan = h1.querySelector('.season');
+        return !!(seasonSpan && /сезон|серия/i.test(seasonSpan.textContent || ''));
       },
       title: {
         selector: 'h1.full-article__title',
         extract: (el) => {
-          const text = el?.textContent || '';
-          return text.split(/\d{4}|сезон|серия/)[0]?.trim() || null;
+          const text = (el?.textContent || '').replace(/\s+/g, ' ').trim();
+          const before = text.split(/\d{4}|сезон|серия/i)[0]?.trim() || '';
+          return before || null;
         }
       },
       year: {
         selector: 'h1.full-article__title span',
-        extract: (el) => el?.textContent?.match(/\d{4}/)?.[0]
+        extract: (el) => {
+          const m = (el?.textContent || '').match(/\d{4}/);
+          return m ? m[0] : null;
+        }
       },
       seasonEpisode: {
-        selector: '.headText_3i3, .select__item-text',
-        extract: (el) => {
-          const t = el?.textContent?.trim() || '';
-          const s = t.match(/Сезон\s*(\d+)/i)?.[1];
-          const e = t.match(/Серия\s*(\d+)/i)?.[1];
-          if (s || e) {
-            return { season: s ? parseInt(s) : null, episode: e ? parseInt(e) : null };
+        getSeasonEpisode: () => {
+          const parseNum = (t, kind) => {
+            if (!t || typeof t !== 'string') return null;
+            const s = String(t).trim();
+            const m = kind === 'season'
+              ? (s.match(/(\d+)\s*сезон/i) || s.match(/Сезон\s*(\d+)/i))
+              : (s.match(/(\d+)\s*серия/i) || s.match(/Серия\s*(\d+)/i));
+            return m ? parseInt(m[1]) : null;
+          };
+          let season = null, episode = null;
+          const cplayS = document.querySelector('#player .list_5Wf > div:nth-child(1) .headText_3i3');
+          const cplayE = document.querySelector('#player .list_5Wf > div:nth-child(2) .headText_3i3');
+          if (cplayS) season = parseNum(cplayS.textContent, 'season');
+          if (cplayE) episode = parseNum(cplayE.textContent, 'episode');
+          const aplayS = document.querySelector('#allplay .selects.ui > div:nth-child(1) .select__item-text');
+          const aplayE = document.querySelector('#allplay .selects.ui > div:nth-child(2) .select__item-text');
+          if (aplayS && season == null) season = parseNum(aplayS.textContent, 'season');
+          if (aplayE && episode == null) episode = parseNum(aplayE.textContent, 'episode');
+          if (season != null || episode != null) {
+            return { season: season ?? null, episode: episode ?? null };
           }
           return null;
         }
@@ -397,24 +438,49 @@
         return breadcrumb?.textContent?.includes('Сериалы') || false;
       },
       title: {
-        selector: '#dle-speedbar span[itemprop="name"]:last-child',
+        selector: '#dle-speedbar a[itemprop="item"]:last-of-type span[itemprop="name"], #dle-speedbar span[itemprop="name"]:last-child',
         extract: (el) => {
-          const text = el?.textContent?.trim() || '';
-          return text.replace(/\s*\(\d{4}\)$/, '').trim() || null;
+          const text = (el?.textContent || '').trim();
+          return text.replace(/\s*\(\d{4}\)\s*$/, '').trim() || null;
         }
       },
       year: {
-        selector: '#dle-speedbar span[itemprop="name"]:last-child',
-        extract: (el) => el?.textContent?.match(/\d{4}/)?.[0]
+        selector: '#dle-speedbar a[itemprop="item"]:last-of-type span[itemprop="name"], #dle-speedbar span[itemprop="name"]:last-child',
+        extract: (el) => (el?.textContent || '').match(/\d{4}/)?.[0]
       },
       seasonEpisode: {
-        selector: '.headText_3i3, .select__item-text, .item-el.item-st',
-        extract: (el) => {
-          const t = el?.textContent?.trim() || '';
-          const s = t.match(/Сезон\s*(\d+)/i)?.[1] || t.match(/(\d+)\s*сезон/i)?.[1];
-          const e = t.match(/(\d+)\s*серия/i)?.[1];
-          if (s || e) {
-            return { season: s ? parseInt(s) : null, episode: e ? parseInt(e) : null };
+        getSeasonEpisode: () => {
+          const parseNum = (t, kind) => {
+            if (!t || typeof t !== 'string') return null;
+            const s = String(t).trim();
+            if (kind === 'season') {
+              const m = s.match(/Сезон\s*(\d+)/i) || s.match(/(\d+)\s*сезон/i);
+              return m ? parseInt(m[1]) : null;
+            }
+            const m = s.match(/(\d+)\s*серия/i) || s.match(/Серия\s*(\d+)/i) || s.match(/Эпизод\s*(\d+)/i);
+            return m ? parseInt(m[1], 10) : null;
+          };
+          let season = null, episode = null;
+          const cplayS = document.querySelector('#player .list_5Wf > div:nth-child(1) .headText_3i3');
+          const cplayE = document.querySelector('#player .list_5Wf > div:nth-child(2) .headText_3i3');
+          if (cplayS) season = parseNum(cplayS.textContent, 'season');
+          if (cplayE) episode = parseNum(cplayE.textContent, 'episode');
+          const aplayS = document.querySelector('#allplay .selects.ui > div:nth-child(1) .select__item-text');
+          const aplayE = document.querySelector('#allplay .selects.ui > div:nth-child(2) .select__item-text');
+          if (aplayS && season == null) season = parseNum(aplayS.textContent, 'season');
+          if (aplayE && episode == null) episode = parseNum(aplayE.textContent, 'episode');
+          const ctrlS = document.querySelector('#controls-root > div > div:nth-child(1) > div > div');
+          const ctrlE = document.querySelector('#controls-root > div > div:nth-child(2) > div > div');
+          if (ctrlS && season == null) season = parseNum(ctrlS.textContent, 'season');
+          if (ctrlE && episode == null) episode = parseNum(ctrlE.textContent, 'episode');
+          const items = document.querySelectorAll('.item-el.item-st');
+          items.forEach((el) => {
+            const t = (el?.textContent || '').trim();
+            if (/сезон/i.test(t)) { if (season == null) season = parseNum(t, 'season'); }
+            else if (/серия|эпизод/i.test(t)) { if (episode == null) episode = parseNum(t, 'episode'); }
+          });
+          if (season != null || episode != null) {
+            return { season: season ?? null, episode: episode ?? null };
           }
           return null;
         }
@@ -422,23 +488,40 @@
     },
     
     'allserial': {
-      isSeries: () => true, // На этом сайте только сериалы
+      isSeries: () => true,
       title: {
         selector: 'h1.short-title',
-        extract: (el) => el?.textContent?.split(/\d+\s*сезон/)[0]?.trim() || null
+        extract: (el) => (el?.textContent || '').split(/\d+\s*сезон/)[0]?.trim() || null
       },
       year: {
-        selector: 'span[itemprop="datePublished"]',
-        extract: (el) => el?.textContent?.trim()
+        selector: 'main article ul li span[itemprop="datePublished"], span[itemprop="datePublished"]',
+        extract: (el) => (el?.textContent || '').trim().replace(/\D/g, '').slice(0, 4) || null
       },
       seasonEpisode: {
-        selector: '.jq-selectbox__select-text span',
-        extract: (el) => {
-          const t = el?.textContent?.trim() || '';
-          const s = t.match(/(\d+)\s*сезон/i)?.[1];
-          const e = t.match(/(\d+)\s*серия/i)?.[1];
-          if (s || e) {
-            return { season: s ? parseInt(s) : null, episode: e ? parseInt(e) : null };
+        getSeasonEpisode: () => {
+          const parseNum = (t, kind) => {
+            if (!t || typeof t !== 'string') return null;
+            const s = String(t).trim();
+            const m = kind === 'season'
+              ? (s.match(/(\d+)\s*сезон/i) || s.match(/Сезон\s*(\d+)/i))
+              : (s.match(/(\d+)\s*серия/i) || s.match(/Серия\s*(\d+)/i));
+            return m ? parseInt(m[1], 10) : null;
+          };
+          let season = null, episode = null;
+          const fs = document.querySelector('#filterS-styler .jq-selectbox__select-text span');
+          const fe = document.querySelector('#filterE-styler .jq-selectbox__select-text span');
+          if (fs) season = parseNum(fs.textContent, 'season');
+          if (fe) episode = parseNum(fe.textContent, 'episode');
+          const cplayS = document.querySelector('#player .list_5Wf > div:nth-child(1) .headText_3i3');
+          const cplayE = document.querySelector('#player .list_5Wf > div:nth-child(2) .headText_3i3');
+          if (cplayS && season == null) season = parseNum(cplayS.textContent, 'season');
+          if (cplayE && episode == null) episode = parseNum(cplayE.textContent, 'episode');
+          const aplayS = document.querySelector('#allplay .selects.ui > div:nth-child(1) .select__item-text');
+          const aplayE = document.querySelector('#allplay .selects.ui > div:nth-child(2) .select__item-text');
+          if (aplayS && season == null) season = parseNum(aplayS.textContent, 'season');
+          if (aplayE && episode == null) episode = parseNum(aplayE.textContent, 'episode');
+          if (season != null || episode != null) {
+            return { season: season ?? null, episode: episode ?? null };
           }
           return null;
         }
@@ -446,23 +529,50 @@
     },
     
     'boxserial': {
-      isSeries: () => true, // На этом сайте только сериалы
+      isSeries: () => true,
       title: {
-        selector: '.page__titles h1',
-        extract: (el) => el?.textContent?.split(/1,2,3|сезон/)[0]?.trim() || null
+        selector: '.page__titles h1, article .page__header h1',
+        extract: (el) => (el?.textContent || '').split(/[1,2,3]|сезон/i)[0]?.replace(/\s+смотреть.*$/i, '').trim() || null
       },
       year: {
-        selector: 'ul.page__info li:nth-child(1) span:nth-child(2)',
-        extract: (el) => el?.textContent?.trim()
+        selector: '.page__info ul li:nth-child(1), ul.page__info li:first-child',
+        extract: (el) => {
+          const m = (el?.textContent || '').trim().match(/\d{4}/);
+          return m ? m[0] : null;
+        }
       },
       seasonEpisode: {
-        selector: '[data-v-dac944a7], .headText_3i3, .select__item-text',
-        extract: (el) => {
-          const t = el?.textContent?.trim() || '';
-          const s = t.match(/Сезон\s*(\d+)/i)?.[1];
-          const e = t.match(/(Эпизод|серия)\s*(\d+)/i)?.[2];
-          if (s || e) {
-            return { season: s ? parseInt(s) : null, episode: e ? parseInt(e) : null };
+        getSeasonEpisode: () => {
+          const parseNum = (t, kind) => {
+            if (!t || typeof t !== 'string') return null;
+            const s = String(t).trim();
+            if (kind === 'season') {
+              const m = s.match(/Сезон\s*(\d+)/i) || s.match(/(\d+)\s*сезон/i);
+              return m ? parseInt(m[1], 10) : null;
+            }
+            const m = s.match(/(\d+)\s*серия/i) || s.match(/Серия\s*(\d+)/i) || s.match(/Эпизод\s*(\d+)/i);
+            return m ? parseInt(m[1], 10) : null;
+          };
+          let season = null, episode = null;
+          const ctrlS = document.querySelector('#controls-root > div > div:nth-child(1) > div > div');
+          const ctrlE = document.querySelector('#controls-root > div > div:nth-child(2) > div > div');
+          if (ctrlS) season = parseNum(ctrlS.textContent, 'season');
+          if (ctrlE) episode = parseNum(ctrlE.textContent, 'episode');
+          const cplayS = document.querySelector('#player .list_5Wf > div:nth-child(1) .headText_3i3');
+          const cplayE = document.querySelector('#player .list_5Wf > div:nth-child(2) .headText_3i3');
+          if (cplayS && season == null) season = parseNum(cplayS.textContent, 'season');
+          if (cplayE && episode == null) episode = parseNum(cplayE.textContent, 'episode');
+          const aplayS = document.querySelector('#allplay .selects.ui > div:nth-child(1) .select__item-text');
+          const aplayE = document.querySelector('#allplay .selects.ui > div:nth-child(2) .select__item-text');
+          if (aplayS && season == null) season = parseNum(aplayS.textContent, 'season');
+          if (aplayE && episode == null) episode = parseNum(aplayE.textContent, 'episode');
+          document.querySelectorAll('.item-el.item-st').forEach((el) => {
+            const t = (el?.textContent || '').trim();
+            if (/сезон/i.test(t) && season == null) season = parseNum(t, 'season');
+            else if (/серия|эпизод/i.test(t) && episode == null) episode = parseNum(t, 'episode');
+          });
+          if (season != null || episode != null) {
+            return { season: season ?? null, episode: episode ?? null };
           }
           return null;
         }
@@ -509,14 +619,24 @@
     }
     if (hostname.includes('premier.one')) {
       if (path.startsWith('/series') || path === '/movies' || path.startsWith('/movies')) return true;
-      if (!/\/show\/[^/]+\/season\/\d+\/episode\/\d+/.test(path)) return true;
       return false;
     }
     if (hostname.includes('hd.kinopoisk')) {
+      if ((path || '').startsWith('/profiles')) return true;
       if (path === '' || path === '/') {
         const q = new URLSearchParams(window.location.search || '');
         if (!q.has('continueWatching') && !q.has('playingContentId')) return true;
       }
+      return false;
+    }
+    if (hostname.includes('start.ru')) {
+      if (path === '/auth' || path.startsWith('/auth')) return true;
+      return false;
+    }
+    // OKKO: показывать виджет только на /movie/... и /serial/...
+    if (hostname.includes('okko.tv')) {
+      // Только страницы фильмов и сериалов
+      if (!/^\/(movie|serial)\/[^/]+/.test(path)) return true;
       return false;
     }
     return false;
@@ -554,6 +674,9 @@
     }
     if (config.seasonEpisode) {
       if (config.seasonEpisode.fromUrl) seasonEpisode = config.seasonEpisode.fromUrl();
+      if (!seasonEpisode && typeof config.seasonEpisode.getSeasonEpisode === 'function') {
+        seasonEpisode = config.seasonEpisode.getSeasonEpisode();
+      }
       if (!seasonEpisode && config.seasonEpisode.selector) {
         const el = document.querySelector(config.seasonEpisode.selector);
         if (el && config.seasonEpisode.extract) seasonEpisode = config.seasonEpisode.extract(el);
@@ -821,9 +944,16 @@
     
     let safeTitle = (info.title || '').replace(/\s*\(\d{4}\)\s*$/, '').trim();
     const yearPart = info.year ? ` (${info.year})` : '';
-    const titleText = info.isSeries
-      ? `${safeTitle}${yearPart} - ${info.season || '?'} сезон, ${info.episode || '?'} серия`
-      : `${safeTitle}${yearPart}`;
+    let titleText;
+    if (info.isSeries) {
+      if (info.noEpisodeDetected) {
+        titleText = `${safeTitle}${yearPart} (сериал)`;
+      } else {
+        titleText = `${safeTitle}${yearPart} - ${info.season || '?'} сезон, ${info.episode || '?'} серия`;
+      }
+    } else {
+      titleText = `${safeTitle}${yearPart}`;
+    }
     
     overlayElement.innerHTML = `
       <div style="margin-bottom: 12px;">
@@ -948,15 +1078,111 @@
     const isInDatabase = filmId !== null && filmId !== undefined;
     const isUnknown = filmId === undefined;
     const showSeriesUi = !!(info.isSeries && (filmData?.is_series === undefined || filmData?.is_series === true));
+    const noEpisodeDetected = !!info.noEpisodeDetected;
     
-    console.log('[STREAMING] renderButtons: isInDatabase=', isInDatabase, 'isUnknown=', isUnknown, 'film_id=', filmId, 'showSeriesUi=', showSeriesUi);
+    console.log('[STREAMING] renderButtons: isInDatabase=', isInDatabase, 'isUnknown=', isUnknown, 'film_id=', filmId, 'showSeriesUi=', showSeriesUi, 'noEpisodeDetected=', noEpisodeDetected);
+    
+    const st = storageLocal();
+    const storageData = st ? await st.get(['has_notifications_access']) : {};
+    const hasNotificationsAccess = storageData.has_notifications_access || false;
+    
+    // Если сериал без определенной серии - показываем специальный UI
+    if (showSeriesUi && noEpisodeDetected) {
+      if (!isInDatabase) {
+        // Сериал не в базе - показываем кнопку "Добавить в базу"
+        const addBtn = document.createElement('button');
+        addBtn.textContent = '➕ Добавить в базу';
+        addBtn.style.cssText = `
+          width: 100%;
+          padding: 10px;
+          background: white;
+          color: #667eea;
+          border: none;
+          border-radius: 6px;
+          font-weight: 600;
+          cursor: pointer;
+          margin-bottom: 8px;
+        `;
+        addBtn.addEventListener('click', () => handleAddToDatabase(info, filmData));
+        container.appendChild(addBtn);
+      }
+      
+      // Показываем информацию о том, что нужно выбрать серию
+      const helpMsg = document.createElement('div');
+      helpMsg.style.cssText = 'padding: 10px; background: rgba(255,255,255,0.1); border-radius: 6px; text-align: center; font-size: 12px; margin-bottom: 8px;';
+      helpMsg.innerHTML = '📺 Выберите серию в плеере<br><small style="opacity: 0.8;">или используйте ручную отметку ниже</small>';
+      container.appendChild(helpMsg);
+      
+      // Если есть подписка - показываем форму ручной отметки
+      if (hasNotificationsAccess && (isInDatabase || filmData?.kp_id)) {
+        const manualForm = document.createElement('div');
+        manualForm.style.cssText = 'display: flex; gap: 6px; margin-bottom: 8px; align-items: center;';
+        manualForm.innerHTML = `
+          <input type="number" id="mpp-manual-season" placeholder="Сезон" min="1" style="flex: 1; padding: 8px; border: none; border-radius: 4px; font-size: 13px; width: 60px;">
+          <input type="number" id="mpp-manual-episode" placeholder="Серия" min="1" style="flex: 1; padding: 8px; border: none; border-radius: 4px; font-size: 13px; width: 60px;">
+          <button id="mpp-manual-mark" style="padding: 8px 12px; background: white; color: #667eea; border: none; border-radius: 4px; font-weight: 600; cursor: pointer; font-size: 13px;">✓</button>
+        `;
+        container.appendChild(manualForm);
+        
+        // Кнопка "Отметить все предыдущие" для ручной отметки
+        const markAllManualBtn = document.createElement('button');
+        markAllManualBtn.id = 'mpp-manual-mark-all';
+        markAllManualBtn.textContent = '✅ Отметить все до указанной';
+        markAllManualBtn.style.cssText = `
+          width: 100%;
+          padding: 8px;
+          background: rgba(255,255,255,0.2);
+          color: white;
+          border: 1px solid rgba(255,255,255,0.3);
+          border-radius: 6px;
+          font-weight: 600;
+          cursor: pointer;
+          font-size: 12px;
+          margin-bottom: 8px;
+        `;
+        container.appendChild(markAllManualBtn);
+        
+        // Обработчики для ручной отметки
+        setTimeout(() => {
+          const seasonInput = document.getElementById('mpp-manual-season');
+          const episodeInput = document.getElementById('mpp-manual-episode');
+          const markBtn = document.getElementById('mpp-manual-mark');
+          const markAllBtn = document.getElementById('mpp-manual-mark-all');
+          
+          // Устанавливаем значение по умолчанию (следующая непросмотренная)
+          if (filmData?.next_unwatched_season && filmData?.next_unwatched_episode) {
+            seasonInput.value = filmData.next_unwatched_season;
+            episodeInput.value = filmData.next_unwatched_episode;
+          } else {
+            seasonInput.value = '1';
+            episodeInput.value = '1';
+          }
+          
+          const handleManualMark = async (markAllPrevious) => {
+            const s = parseInt(seasonInput?.value);
+            const e = parseInt(episodeInput?.value);
+            if (!s || !e || s < 1 || e < 1) {
+              alert('Укажите корректные сезон и серию');
+              return;
+            }
+            const manualInfo = { ...info, season: s, episode: e, noEpisodeDetected: false };
+            await handleMarkEpisode(manualInfo, filmData, markAllPrevious);
+          };
+          
+          markBtn?.addEventListener('click', () => handleManualMark(false));
+          markAllBtn?.addEventListener('click', () => handleManualMark(true));
+        }, 0);
+      } else if (!hasNotificationsAccess) {
+        const noAccessMsg = document.createElement('div');
+        noAccessMsg.style.cssText = 'padding: 8px; background: rgba(255,255,255,0.1); border-radius: 6px; text-align: center; font-size: 11px;';
+        noAccessMsg.innerHTML = '🔒 Для отметки серий нужна подписка';
+        container.appendChild(noAccessMsg);
+      }
+      return;
+    }
     
     if (isUnknown && filmData?.kp_id) {
       if (showSeriesUi) {
-        const st = storageLocal();
-        const storageData = st ? await st.get(['has_notifications_access']) : {};
-        const hasNotificationsAccess = storageData.has_notifications_access || false;
-        
         if (!hasNotificationsAccess) {
           const noAccessMsg = document.createElement('div');
           noAccessMsg.style.cssText = 'padding: 12px; background: rgba(255,255,255,0.1); border-radius: 6px; text-align: center; font-size: 13px; margin-bottom: 8px;';
@@ -978,6 +1204,25 @@
           `;
           markCurrentBtn.addEventListener('click', () => handleMarkEpisode(info, filmData, false));
           container.appendChild(markCurrentBtn);
+          
+          // Показываем кнопку "Отметить все предыдущие" если это не первая серия
+          if (info.season && info.episode && (info.season > 1 || info.episode > 1)) {
+            const markAllBtn = document.createElement('button');
+            markAllBtn.textContent = '✅ Отметить все предыдущие';
+            markAllBtn.style.cssText = `
+              width: 100%;
+              padding: 10px;
+              background: rgba(255,255,255,0.2);
+              color: white;
+              border: 1px solid rgba(255,255,255,0.3);
+              border-radius: 6px;
+              font-weight: 600;
+              cursor: pointer;
+              margin-bottom: 8px;
+            `;
+            markAllBtn.addEventListener('click', () => handleMarkEpisode(info, filmData, true));
+            container.appendChild(markAllBtn);
+          }
         }
       }
       return;
@@ -1001,10 +1246,6 @@
       addBtn.addEventListener('click', () => handleAddToDatabase(info, filmData));
       container.appendChild(addBtn);
     } else {
-      const st = storageLocal();
-      const storageData = st ? await st.get(['has_notifications_access']) : {};
-      const hasNotificationsAccess = storageData.has_notifications_access || false;
-      
       if (showSeriesUi) {
         if (!hasNotificationsAccess) {
           // Нет подписки - показываем только информацию
@@ -1030,7 +1271,10 @@
             markCurrentBtn.addEventListener('click', () => handleMarkEpisode(info, filmData, false));
             container.appendChild(markCurrentBtn);
           }
-          if (info.season && info.episode && filmData.has_unwatched_before) {
+          // Показываем кнопку "Отметить все предыдущие" если:
+          // 1. has_unwatched_before === true (есть непросмотренные до текущей)
+          // 2. ИЛИ это не первая серия (season > 1 или episode > 1) - на случай если только что добавили
+          if (info.season && info.episode && (filmData.has_unwatched_before || info.season > 1 || info.episode > 1)) {
             const markAllBtn = document.createElement('button');
             markAllBtn.textContent = '✅ Отметить все предыдущие';
             markAllBtn.style.cssText = `
@@ -1090,16 +1334,16 @@
     container.innerHTML = '<div style="margin-bottom: 8px; font-weight: 600;">Оцените фильм:</div>';
     
     const ratingContainer = document.createElement('div');
-    ratingContainer.style.cssText = 'display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px;';
+    ratingContainer.style.cssText = 'display: flex; gap: 2px; flex-wrap: nowrap; margin-bottom: 8px;';
     
     for (let i = 1; i <= 10; i++) {
       const btn = document.createElement('button');
       btn.textContent = '⭐';
       btn.dataset.rating = i;
       btn.style.cssText = `
-        flex: 1;
-        min-width: 28px;
-        height: 36px;
+        flex: 1 1 0;
+        min-width: 0;
+        height: 32px;
         background: rgba(255,255,255,0.2);
         color: white;
         border: 1px solid rgba(255,255,255,0.3);
@@ -1170,7 +1414,17 @@
         if (response.ok) {
           const result = await response.json();
           if (result.success) {
-            currentFilmData = { ...filmData, film_id: result.film_id, kp_id: filmData.kp_id };
+            // Обновляем filmData с новым film_id и устанавливаем has_unwatched_before
+            // Если текущая серия не первая (сезон > 1 или серия > 1), значит есть непросмотренные
+            const hasUnwatchedBefore = info.isSeries && info.season && info.episode && (info.season > 1 || info.episode > 1);
+            currentFilmData = { 
+              ...filmData, 
+              film_id: result.film_id, 
+              kp_id: filmData.kp_id,
+              has_unwatched_before: hasUnwatchedBefore,
+              current_episode_watched: false
+            };
+            currentInfo = info;
             await renderButtons(info, currentFilmData);
           } else {
             alert('Ошибка: ' + (result.error || 'неизвестная ошибка'));
@@ -1378,11 +1632,13 @@
       }
     }
     
-    // Для сериалов: показываем виджет ТОЛЬКО если определены сезон и серия
+    // Для сериалов без сезона/серии: показываем виджет с предложением добавить в базу
+    // и выбрать серию вручную. Если сезон/серия определены - показываем обычный виджет
     // Для фильмов: показываем всегда (если есть title)
     if (info.isSeries && (!info.season || !info.episode)) {
-      console.log('[STREAMING] Пропуск: сериал, но нет сезона/серии');
-      return;
+      console.log('[STREAMING] Сериал без сезона/серии - показываем упрощенный виджет');
+      // Продолжаем выполнение, но флаг info.noEpisodeDetected = true
+      info.noEpisodeDetected = true;
     }
     
     // Проверяем защиту от спама
@@ -1520,6 +1776,26 @@
         const yearParam = info.year ? `&year=${info.year}` : '';
         const searchKeyword = baseTitle;
         console.log('[STREAMING] Поиск (название + год, как /search и Letterboxd):', { keyword: searchKeyword, year: info.year, type: searchType });
+        
+        // Функция нормализации названия для сравнения
+        function normalizeTitle(title) {
+          if (!title) return '';
+          return title.toLowerCase()
+            .replace(/[ёЁ]/g, 'е')
+            .replace(/\s+/g, ' ')
+            .trim();
+        }
+        
+        // Проверка, совпадает ли название из поиска с названием на странице
+        function titlesMatch(pageTitle, searchResultTitle) {
+          const normPage = normalizeTitle(pageTitle);
+          const normSearch = normalizeTitle(searchResultTitle);
+          // Точное совпадение или одно содержит другое
+          return normPage === normSearch || 
+                 normPage.includes(normSearch) || 
+                 normSearch.includes(normPage);
+        }
+        
         async function doSearch(keyw, yParam) {
           try {
             const r = await apiRequest('GET', `/api/extension/search-film-by-keyword?keyword=${encodeURIComponent(keyw)}${yParam}&type=${searchType}`);
@@ -1545,6 +1821,25 @@
         }
         try {
           let searchResult = await doSearch(searchKeyword, yearParam);
+          
+          // Специальная проверка для IVI: если название не совпадает, пробуем без года
+          if (searchResult && hostname.includes('ivi.ru')) {
+            const resultTitle = searchResult.film?.nameRu || searchResult.film?.nameOriginal || '';
+            if (!titlesMatch(baseTitle, resultTitle)) {
+              console.log('[STREAMING] IVI: название не совпадает, пробуем без года. Страница:', baseTitle, 'Результат:', resultTitle);
+              const searchWithoutYear = await doSearch(searchKeyword, '');
+              if (searchWithoutYear) {
+                const newResultTitle = searchWithoutYear.film?.nameRu || searchWithoutYear.film?.nameOriginal || '';
+                if (titlesMatch(baseTitle, newResultTitle)) {
+                  console.log('[STREAMING] IVI: нашли совпадение без года:', newResultTitle);
+                  searchResult = searchWithoutYear;
+                } else {
+                  console.log('[STREAMING] IVI: и без года название не совпадает:', newResultTitle);
+                }
+              }
+            }
+          }
+          
           if (!searchResult && info.year && searchKeyword) {
             console.log('[STREAMING] Повторная попытка поиска без года (как fallback)');
             searchResult = await doSearch(searchKeyword, '');
@@ -1624,11 +1919,68 @@
   // ────────────────────────────────────────────────
   // Инициализация и наблюдение за изменениями
   // ────────────────────────────────────────────────
+  
+  // Обработчик fullscreen для захвата сезона/серии
+  function handleFullscreenChange() {
+    // При входе в fullscreen пытаемся повторно определить сезон/серию
+    setTimeout(() => {
+      const info = getContentInfo();
+      console.log('[STREAMING] Fullscreen change, пытаемся обновить info:', info);
+      if (info && info.title) {
+        // Если ранее не определили сезон/серию, но теперь определили - обновляем
+        if (info.season && info.episode && currentInfo?.noEpisodeDetected) {
+          console.log('[STREAMING] Fullscreen: теперь определены сезон/серия:', info.season, info.episode);
+          const key = getContentKey(info);
+          lastShown[key] = 0; // Сбрасываем кулдаун
+          lastContentHash = ''; // Сбрасываем хеш
+          checkAndShowOverlay();
+        }
+      }
+    }, 1500); // Даём время плееру обновить UI
+  }
+  
+  // Наблюдатель за кликом на кнопку fullscreen (для сайтов где fullscreen API не работает)
+  function setupFullscreenButtonObserver() {
+    // Селекторы кнопок fullscreen для разных сайтов
+    const fullscreenSelectors = [
+      // HDRezka/allplay
+      '#allplay [data-allplay="fullscreen"]',
+      '#allplay .allplay__control[data-allplay="fullscreen"]',
+      'button[data-allplay="fullscreen"]',
+      // Buzzoola player
+      '.controls-right button[aria-label*="экран"]',
+      '.controls-right button[aria-label*="fullscreen"]',
+      '[data-testid="fullscreen-btn"]',
+      // Generic
+      '.player-fullscreen-button',
+      '[class*="fullscreen"]',
+      'button[title*="Полноэкранный"]',
+      'button[title*="fullscreen"]'
+    ];
+    
+    document.addEventListener('click', (e) => {
+      const target = e.target.closest(fullscreenSelectors.join(', '));
+      if (target) {
+        console.log('[STREAMING] Клик на кнопку fullscreen');
+        handleFullscreenChange();
+      }
+    }, true);
+  }
+  
   function init() {
     // Первая проверка через 3 секунды после загрузки
     setTimeout(() => {
       checkAndShowOverlay();
     }, 3000);
+    
+    // Настраиваем наблюдение за fullscreen
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+    
+    // Настраиваем наблюдение за кликом на кнопку fullscreen
+    setupFullscreenButtonObserver();
     
       // Наблюдение за изменениями DOM (debounce 5 секунд для лучшей реакции на смену серий)
       const observer = new MutationObserver(() => {

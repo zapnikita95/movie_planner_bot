@@ -478,11 +478,10 @@ async function detectAndLoadFilm(url, urlChanged = true) {
             });
           });
           if (pageInfo && pageInfo.title) {
-            const ok = !pageInfo.isSeries || (pageInfo.season != null && pageInfo.episode != null);
-            if (ok) {
-              await loadFromStreamingPage(pageInfo);
-              return;
-            }
+            // Всегда загружаем данные через API, даже если сезон/серия не определены
+            // Это позволит показать информацию о фильме/сериале и предложить действия
+            await loadFromStreamingPage(pageInfo);
+            return;
           }
         }
       } catch (e) {
@@ -897,13 +896,15 @@ async function loadFromStreamingPage(info) {
 
     const actionsEl = document.getElementById('film-actions');
     if (actionsEl) {
+      const kpId = searchJson.kp_id;
+      const filmId = filmJson.film_id;
+      
       if (info.isSeries && info.season != null && info.episode != null) {
+        // Сериал с определенными сезоном/серией
         const markBtn = document.createElement('button');
         markBtn.textContent = `Отметить серию ${info.season}×${info.episode}`;
         markBtn.className = 'btn btn-primary';
         markBtn.style.marginTop = '8px';
-        const kpId = searchJson.kp_id;
-        const filmId = filmJson.film_id;
         markBtn.addEventListener('click', async () => {
           markBtn.disabled = true;
           try {
@@ -913,7 +914,8 @@ async function loadFromStreamingPage(info) {
               kp_id: kpId,
               film_id: filmId,
               season: info.season,
-              episode: info.episode
+              episode: info.episode,
+              online_link: info.url || undefined
             });
             if (r.data && r.data.success) markBtn.textContent = 'Отмечено ✓';
             else markBtn.disabled = false;
@@ -923,13 +925,138 @@ async function loadFromStreamingPage(info) {
           }
         });
         actionsEl.appendChild(markBtn);
+        
+        // Кнопка "Отметить все предыдущие" если это не первая серия
+        if (info.season > 1 || info.episode > 1) {
+          const markAllBtn = document.createElement('button');
+          markAllBtn.textContent = 'Отметить все предыдущие';
+          markAllBtn.className = 'btn btn-secondary';
+          markAllBtn.style.marginTop = '4px';
+          markAllBtn.addEventListener('click', async () => {
+            markAllBtn.disabled = true;
+            try {
+              const r = await streamingApiRequest('POST', `${API_BASE_URL}/api/extension/mark-episode`, {
+                chat_id: chatId,
+                user_id: userId,
+                kp_id: kpId,
+                film_id: filmId,
+                season: info.season,
+                episode: info.episode,
+                mark_all_previous: true,
+                online_link: info.url || undefined
+              });
+              if (r.data && r.data.success) markAllBtn.textContent = 'Отмечено ✓';
+              else markAllBtn.disabled = false;
+            } catch (e) {
+              console.error('Ошибка отметки серий:', e);
+              markAllBtn.disabled = false;
+            }
+          });
+          actionsEl.appendChild(markAllBtn);
+        }
+      } else if (info.isSeries) {
+        // Сериал без определенных сезона/серии - показываем ручной ввод
+        const helpText = document.createElement('div');
+        helpText.style.cssText = 'font-size: 12px; color: #666; margin: 8px 0;';
+        helpText.textContent = 'Сезон/серия не определены. Выберите в плеере или укажите вручную:';
+        actionsEl.appendChild(helpText);
+        
+        // Форма ручного ввода
+        const manualForm = document.createElement('div');
+        manualForm.style.cssText = 'display: flex; gap: 6px; margin: 8px 0; align-items: center;';
+        manualForm.innerHTML = `
+          <input type="number" id="popup-manual-season" placeholder="Сезон" min="1" style="flex: 1; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px;">
+          <input type="number" id="popup-manual-episode" placeholder="Серия" min="1" style="flex: 1; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px;">
+        `;
+        actionsEl.appendChild(manualForm);
+        
+        // Кнопка отметки
+        const markManualBtn = document.createElement('button');
+        markManualBtn.textContent = 'Отметить серию';
+        markManualBtn.className = 'btn btn-primary';
+        markManualBtn.style.marginTop = '4px';
+        markManualBtn.addEventListener('click', async () => {
+          const seasonInput = document.getElementById('popup-manual-season');
+          const episodeInput = document.getElementById('popup-manual-episode');
+          const s = parseInt(seasonInput?.value);
+          const e = parseInt(episodeInput?.value);
+          if (!s || !e || s < 1 || e < 1) {
+            alert('Укажите корректные сезон и серию');
+            return;
+          }
+          markManualBtn.disabled = true;
+          try {
+            const r = await streamingApiRequest('POST', `${API_BASE_URL}/api/extension/mark-episode`, {
+              chat_id: chatId,
+              user_id: userId,
+              kp_id: kpId,
+              film_id: filmId,
+              season: s,
+              episode: e,
+              online_link: info.url || undefined
+            });
+            if (r.data && r.data.success) markManualBtn.textContent = 'Отмечено ✓';
+            else markManualBtn.disabled = false;
+          } catch (err) {
+            console.error('Ошибка отметки серии:', err);
+            markManualBtn.disabled = false;
+          }
+        });
+        actionsEl.appendChild(markManualBtn);
+        
+        // Кнопка "Отметить все до указанной"
+        const markAllManualBtn = document.createElement('button');
+        markAllManualBtn.textContent = 'Отметить все до указанной';
+        markAllManualBtn.className = 'btn btn-secondary';
+        markAllManualBtn.style.marginTop = '4px';
+        markAllManualBtn.addEventListener('click', async () => {
+          const seasonInput = document.getElementById('popup-manual-season');
+          const episodeInput = document.getElementById('popup-manual-episode');
+          const s = parseInt(seasonInput?.value);
+          const e = parseInt(episodeInput?.value);
+          if (!s || !e || s < 1 || e < 1) {
+            alert('Укажите корректные сезон и серию');
+            return;
+          }
+          markAllManualBtn.disabled = true;
+          try {
+            const r = await streamingApiRequest('POST', `${API_BASE_URL}/api/extension/mark-episode`, {
+              chat_id: chatId,
+              user_id: userId,
+              kp_id: kpId,
+              film_id: filmId,
+              season: s,
+              episode: e,
+              mark_all_previous: true,
+              online_link: info.url || undefined
+            });
+            if (r.data && r.data.success) markAllManualBtn.textContent = 'Отмечено ✓';
+            else markAllManualBtn.disabled = false;
+          } catch (err) {
+            console.error('Ошибка отметки серий:', err);
+            markAllManualBtn.disabled = false;
+          }
+        });
+        actionsEl.appendChild(markAllManualBtn);
+        
+        // Устанавливаем значения по умолчанию (следующая непросмотренная)
+        setTimeout(() => {
+          const seasonInput = document.getElementById('popup-manual-season');
+          const episodeInput = document.getElementById('popup-manual-episode');
+          if (filmJson.next_unwatched_season && filmJson.next_unwatched_episode) {
+            if (seasonInput) seasonInput.value = filmJson.next_unwatched_season;
+            if (episodeInput) episodeInput.value = filmJson.next_unwatched_episode;
+          } else {
+            if (seasonInput) seasonInput.value = '1';
+            if (episodeInput) episodeInput.value = '1';
+          }
+        }, 0);
       } else if (!info.isSeries) {
+        // Фильм
         const markBtn = document.createElement('button');
         markBtn.textContent = 'Отметить фильм просмотренным';
         markBtn.className = 'btn btn-primary';
         markBtn.style.marginTop = '8px';
-        const kpId = searchJson.kp_id;
-        const filmId = filmJson.film_id;
         markBtn.addEventListener('click', async () => {
           markBtn.disabled = true;
           try {

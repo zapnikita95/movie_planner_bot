@@ -1589,7 +1589,7 @@ def check_rate_reply(message):
     """Проверка для handler ответа на запрос оценки (реплай или следующее сообщение в личке)"""
     is_private = message.chat.type == 'private'
     
-    from moviebot.states import rating_messages
+    from moviebot.states import rating_messages, user_private_handler_state
     
     if not message.text or not message.text.strip().isdigit():
         return False
@@ -1598,9 +1598,13 @@ def check_rate_reply(message):
         return False
     
     if not message.reply_to_message:
-        # Без реплая принимаем только в личке, и только если есть конкретный активный запрос
-        # Но так как без реплая мы не можем точно определить, на какой запрос отвечает пользователь,
-        # лучше требовать реплай всегда для строгости
+        # Без реплая принимаем только в личке, если есть активное состояние rate_film
+        if is_private:
+            user_id = message.from_user.id
+            if user_id in user_private_handler_state:
+                state = user_private_handler_state[user_id]
+                if state.get('handler') == 'rate_film':
+                    return True
         return False
     
     # Если реплай — проверяем, что это ответ на сообщение с запросом оценки
