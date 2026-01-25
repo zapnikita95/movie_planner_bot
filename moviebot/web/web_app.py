@@ -2831,7 +2831,7 @@ def create_web_app(bot):
                     similar = get_similars(kp_id)
                     if similar:
                         from moviebot.bot.callbacks.film_callbacks import send_recommendations_message
-                        send_recommendations_message(bot, chat_id, user_id, kp_id, similar)
+                        send_recommendations_message(bot, chat_id, user_id, kp_id, similar, source_film_title=film_title)
                         recommendations_sent = True
                 except Exception as e:
                     logger.error(f"[EXTENSION API] Ошибка получения рекомендаций: {e}", exc_info=True)
