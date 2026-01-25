@@ -903,7 +903,7 @@ def clean_home_plans():
                 sunday = yesterday
 
                 cursor_local.execute('''
-                    SELECT p.id, p.film_id, p.chat_id, m.title, m.link
+                    SELECT p.id, p.film_id, p.chat_id, m.title, m.link, m.kp_id
                     FROM plans p
                     JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
                     WHERE p.plan_type = 'home' 
@@ -912,7 +912,6 @@ def clean_home_plans():
 
                 weekend_rows = cursor_local.fetchall()
 
-                # Группируем по чатам для отправки одного сообщения на чат
                 weekend_plans_by_chat = {}
                 for row in weekend_rows:
                     plan_id = row.get('id') if isinstance(row, dict) else row[0]
@@ -920,6 +919,7 @@ def clean_home_plans():
                     chat_id = row.get('chat_id') if isinstance(row, dict) else row[2]
                     title = row.get('title') if isinstance(row, dict) else row[3]
                     link = row.get('link') if isinstance(row, dict) else row[4]
+                    kp_id = row.get('kp_id') if isinstance(row, dict) else (row[5] if len(row) > 5 else None)
                     
                     if chat_id not in weekend_plans_by_chat:
                         weekend_plans_by_chat[chat_id] = []
@@ -927,7 +927,8 @@ def clean_home_plans():
                         'plan_id': plan_id,
                         'film_id': film_id,
                         'title': title,
-                        'link': link
+                        'link': link,
+                        'kp_id': str(kp_id) if kp_id is not None else None
                     })
                 
                 # Удаляем планы и отправляем сообщения
@@ -949,17 +950,16 @@ def clean_home_plans():
                             
                             markup = InlineKeyboardMarkup(row_width=1)
                             for plan_info in plans:
-                                if plan_info.get('link'):
+                                kp_id = plan_info.get('kp_id')
+                                if kp_id:
                                     button_text = f"🎬 {plan_info['title']}"
                                     if len(button_text) > 64:
                                         button_text = button_text[:61] + "..."
-                                    markup.add(InlineKeyboardButton(button_text, url=plan_info['link']))
+                                    markup.add(InlineKeyboardButton(button_text, callback_data=f"show_film_info:{kp_id}"))
                             
-                            # Отправляем сообщение с кнопками, если они есть
-                            if markup.keyboard:  # Проверяем, что есть кнопки
+                            if markup.keyboard:
                                 bot.send_message(chat_id, message_text, parse_mode='HTML', reply_markup=markup)
                             else:
-                                # Если кнопок нет (нет ссылок), отправляем без кнопок
                                 bot.send_message(chat_id, message_text, parse_mode='HTML')
                         except Exception as e:
                             logger.error(f"[CLEAN HOME PLANS] Ошибка отправки сообщения для выходных: {e}", exc_info=True)
@@ -988,13 +988,13 @@ def clean_home_plans():
                 count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
 
                 if count == 0:
-                    # Получаем информацию о фильме для кнопки
-                    cursor_local.execute('SELECT title, link FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                    cursor_local.execute('SELECT title, link, kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
                     movie_row = cursor_local.fetchone()
                     
                     if movie_row:
                         title = movie_row.get('title') if isinstance(movie_row, dict) else movie_row[0]
                         link = movie_row.get('link') if isinstance(movie_row, dict) else movie_row[1]
+                        kp_id = movie_row.get('kp_id') if isinstance(movie_row, dict) else (movie_row[2] if len(movie_row) > 2 else None)
                         
                         if chat_id not in plans_by_chat:
                             plans_by_chat[chat_id] = []
@@ -1002,7 +1002,8 @@ def clean_home_plans():
                             'plan_id': plan_id,
                             'film_id': film_id,
                             'title': title,
-                            'link': link
+                            'link': link,
+                            'kp_id': str(kp_id) if kp_id is not None else None
                         })
 
             # Удаляем планы и отправляем сообщения
@@ -1024,17 +1025,16 @@ def clean_home_plans():
                         
                         markup = InlineKeyboardMarkup(row_width=1)
                         for plan_info in plans:
-                            if plan_info.get('link'):
+                            kp_id = plan_info.get('kp_id')
+                            if kp_id:
                                 button_text = f"🎬 {plan_info['title']}"
                                 if len(button_text) > 64:
                                     button_text = button_text[:61] + "..."
-                                markup.add(InlineKeyboardButton(button_text, url=plan_info['link']))
+                                markup.add(InlineKeyboardButton(button_text, callback_data=f"show_film_info:{kp_id}"))
                         
-                        # Отправляем сообщение с кнопками, если они есть
-                        if markup.keyboard:  # Проверяем, что есть кнопки
+                        if markup.keyboard:
                             bot.send_message(chat_id, message_text, parse_mode='HTML', reply_markup=markup)
                         else:
-                            # Если кнопок нет (нет ссылок), отправляем без кнопок
                             bot.send_message(chat_id, message_text, parse_mode='HTML')
                     except Exception as e:
                         logger.error(f"[CLEAN HOME PLANS] Ошибка отправки сообщения: {e}", exc_info=True)

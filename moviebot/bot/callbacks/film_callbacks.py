@@ -1703,6 +1703,21 @@ def back_to_film_description(call):
         except Exception as final_err:
             logger.error(f"[BACK TO FILM] Ошибка в блоке обработки ошибок: {final_err}", exc_info=True)
 
+def _handle_show_film_by_kp_id(call):
+    """Общая логика для show_film: и show_film_info: — показывает описание по kp_id."""
+    kp_id_str = call.data.split(":", 1)[1].strip() if ":" in call.data else ""
+    if not kp_id_str:
+        return
+    call.data = f"show_film:{kp_id_str}"
+    show_film_callback(call)
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("show_film_info:"))
+def show_film_info_callback(call):
+    """Обработчик кнопки «📖 Перейти к описанию» из уведомления об оценке и рекомендаций."""
+    _handle_show_film_by_kp_id(call)
+
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("show_film:"))
 def show_film_callback(call):
     """Обработчик кнопки «📖 К описанию» — показывает описание фильма (аналог back_to_film_description)"""
@@ -1815,29 +1830,19 @@ def send_rating_message(bot, chat_id, user_id, kp_id, film_id, rating, film_titl
         cursor = get_db_cursor()
         
         try:
-            # Получаем информацию о фильме, если не передана
             if not film_title:
-                cursor.execute("SELECT title, online_link FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
+                cursor.execute("SELECT title FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
                 row = cursor.fetchone()
                 if row:
                     film_title = row.get('title') if isinstance(row, dict) else row[0]
-                    online_link = row.get('online_link') if isinstance(row, dict) else (row[1] if len(row) > 1 else None)
                 else:
                     film_title = "Фильм"
-                    online_link = None
-            else:
-                cursor.execute("SELECT online_link FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
-                row = cursor.fetchone()
-                online_link = row.get('online_link') if row and isinstance(row, dict) else (row[0] if row and len(row) > 0 else None)
             
-            # Формируем сообщение
+            # Формируем сообщение (кнопку «Онлайн-кинотеатр» для отмеченных просмотренными не показываем)
             text = f"⭐ <b>{film_title}</b>\n\nОценка: {rating}/10"
             
             markup = InlineKeyboardMarkup(row_width=1)
             markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"show_film_info:{kp_id}"))
-            
-            if online_link:
-                markup.add(InlineKeyboardButton("🎬 Онлайн-кинотеатр", url=online_link))
             
             bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
         finally:
@@ -1852,32 +1857,30 @@ def send_rating_message(bot, chat_id, user_id, kp_id, film_id, rating, film_titl
     except Exception as e:
         logger.error(f"[FILM CALLBACKS] Ошибка отправки сообщения об оценке: {e}", exc_info=True)
 
-def send_recommendations_message(bot, chat_id, user_id, kp_id, similar_films):
-    """Отправляет сообщение в бота с рекомендациями"""
+def send_recommendations_message(bot, chat_id, user_id, kp_id, similar_films, source_film_title=None):
+    """Отправляет сообщение в бота с рекомендациями. source_film_title — название фильма, к которому рекомендации."""
     try:
-        # get_similars возвращает список кортежей (filmId, name, is_series)
         if not similar_films or len(similar_films) == 0:
             return
         
-        text = "🎬 <b>Похожие фильмы и сериалы:</b>\n\n"
+        source = source_film_title or "фильму"
+        text = f"🔥 <b>Похожие на «{source}»:</b>\n\n"
         markup = InlineKeyboardMarkup(row_width=1)
         
-        for film in similar_films[:5]:  # Показываем до 5 рекомендаций
-            # get_similars возвращает кортеж (filmId, name, is_series)
+        for film in similar_films[:5]:
             if isinstance(film, tuple) and len(film) >= 2:
                 film_kp_id = film[0]
                 film_title = film[1]
-                film_year = ''  # В кортеже нет года
+                is_series = bool(film[2]) if len(film) >= 3 else False
             else:
-                # Если это dict (на случай изменения API)
                 film_kp_id = film.get('filmId')
                 film_title = film.get('nameRu') or film.get('nameEn') or 'Без названия'
-                film_year = film.get('year') or ''
+                is_series = bool(film.get('is_series', False))
             
             if film_kp_id:
-                year_str = f" ({film_year})" if film_year else ""
-                text += f"• <b>{film_title}</b>{year_str}\n"
-                markup.add(InlineKeyboardButton(f"📖 {film_title}", callback_data=f"show_film_info:{film_kp_id}"))
+                em = "📺" if is_series else "🎬"
+                text += f"• {em} <b>{film_title}</b>\n"
+                markup.add(InlineKeyboardButton(f"{em} {film_title}", callback_data=f"show_film_info:{film_kp_id}"))
         
         markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"show_film_info:{kp_id}"))
         
