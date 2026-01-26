@@ -4604,12 +4604,23 @@ def ensure_movie_in_database(chat_id, kp_id, link, info, user_id=None):
                 # Добавляем фильм в базу
                 logger.info(f"[ENSURE MOVIE] Фильм не найден, добавляю в БД")
                 logger.info(f"[ENSURE MOVIE] Данные: title={info.get('title', 'N/A')}, year={info.get('year', 'N/A')}, is_series={info.get('is_series', False)}")
+                
+                # Обрабатываем year: если это "—" или не число, ставим None
+                year_value = info.get('year')
+                if year_value and year_value != '—':
+                    try:
+                        year_value = int(year_value)
+                    except (ValueError, TypeError):
+                        year_value = None
+                else:
+                    year_value = None
+                
                 cursor_local.execute('''
                     INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series, added_by, added_at, source)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), 'link')
                     ON CONFLICT (chat_id, kp_id) DO UPDATE SET link = EXCLUDED.link, is_series = EXCLUDED.is_series
                     RETURNING id
-                ''', (chat_id, link, str(kp_id), info['title'], info['year'], info['genres'], info['description'], 
+                ''', (chat_id, link, str(kp_id), info['title'], year_value, info['genres'], info['description'], 
                       info['director'], info['actors'], 1 if info.get('is_series') else 0, user_id))
                 
                 result = cursor_local.fetchone()

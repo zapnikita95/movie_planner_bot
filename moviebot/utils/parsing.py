@@ -5,7 +5,7 @@ import re
 import logging
 import pytz
 from datetime import datetime, timedelta
-from moviebot.config import MONTHS_MAP, DAYS_FULL, PLANS_TZ
+from moviebot.config import MONTHS_MAP, DAYS_FULL, TIME_OF_DAY_MAP, PLANS_TZ
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from moviebot.database.db_operations import get_user_timezone, get_user_timezone_or_default
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
@@ -346,12 +346,21 @@ def parse_plan_date_text(text: str, user_id: int) -> datetime | None:
         pass  # если нет — идём дальше
 
     extracted_time = None
-    time_match = re.search(r'\b(\d{1,2}):(\d{2})\b', text)
-    if time_match:
-        hour = int(time_match.group(1))
-        minute = int(time_match.group(2))
-        if 0 <= hour <= 23 and 0 <= minute <= 59:
+    
+    # Сначала проверяем время дня (утро, день, вечер)
+    for phrase, (hour, minute) in TIME_OF_DAY_MAP.items():
+        if phrase in text:
             extracted_time = (hour, minute)
+            break
+    
+    # Если время дня не найдено, пытаемся извлечь время из формата HH:MM
+    if extracted_time is None:
+        time_match = re.search(r'\b(\d{1,2}):(\d{2})\b', text)
+        if time_match:
+            hour = int(time_match.group(1))
+            minute = int(time_match.group(2))
+            if 0 <= hour <= 23 and 0 <= minute <= 59:
+                extracted_time = (hour, minute)
 
     plan_dt = None
 
