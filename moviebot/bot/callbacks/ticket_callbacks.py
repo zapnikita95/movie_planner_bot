@@ -172,11 +172,11 @@ def ticket_back_to_list_callback(call):
     show_cinema_sessions(chat_id, user_id, None)
 
 
-# 4. Кнопка "➕ Добавить новое событие" - показывает меню выбора типа события
+# 4. Кнопка "⬅️ К списку мероприятий" / "➕ Добавить новое событие" - показывает список мероприятий
 @bot.callback_query_handler(func=lambda call: call.data.startswith("ticket_new"))
 def ticket_new_callback(call):
-    """Обработчик кнопки 'Добавить новое событие' - показывает выбор типа билета"""
-    logger.info(f"[TICKET CALLBACK] ticket_new (выбор типа события) сработал, user_id={call.from_user.id}, data={call.data}")
+    """Обработчик кнопки 'К списку мероприятий' - показывает список запланированных сеансов (как /ticket)"""
+    logger.info(f"[TICKET CALLBACK] ticket_new (список мероприятий) сработал, user_id={call.from_user.id}, data={call.data}")
     
     try:
         bot.answer_callback_query(call.id)
@@ -201,30 +201,21 @@ def ticket_new_callback(call):
         parts = call.data.split(":")
         file_id = parts[1] if len(parts) > 1 else None
         
-        markup = InlineKeyboardMarkup(row_width=1)
-        markup.add(InlineKeyboardButton("➕ Добавить фильм", callback_data=f"ticket_new_film:{file_id}" if file_id else "ticket_new_film"))
-        #markup.add(InlineKeyboardButton("🎤 Добавить билет", callback_data="ticket:add_event"))
-        markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+        # Очищаем состояние, если есть
+        if user_id in user_ticket_state:
+            del user_ticket_state[user_id]
+            logger.info(f"[TICKET] Состояние очищено при переходе к списку мероприятий")
         
+        # Показываем список мероприятий (как команда /ticket)
+        from moviebot.bot.handlers.series import show_cinema_sessions
+        show_cinema_sessions(chat_id, user_id, file_id)
+        
+        # Удаляем старое сообщение, если возможно
         try:
-            bot.edit_message_text(
-                "🎫 <b>Добавление билета</b>",
-                chat_id,
-                call.message.message_id,
-                reply_markup=markup,
-                parse_mode='HTML'
-            )
-        except Exception as edit_e:
-            logger.error(f"[TICKET NEW] Ошибка при редактировании сообщения: {edit_e}", exc_info=True)
-            try:
-                bot.send_message(
-                    chat_id,
-                    "🎫 <b>Добавление билета</b>",
-                    reply_markup=markup,
-                    parse_mode='HTML'
-                )
-            except Exception as send_e:
-                logger.error(f"[TICKET NEW] Ошибка при отправке сообщения: {send_e}", exc_info=True)
+            bot.delete_message(chat_id, call.message.message_id)
+        except:
+            pass  # Игнорируем ошибки удаления
+        
     except Exception as e:
         logger.error(f"[TICKET NEW] Ошибка: {e}", exc_info=True)
         try:
