@@ -130,10 +130,20 @@
         return false;
       },
       title: {
-        selector: 'title, meta[property="og:title"]',
+        selector: '#root .headerBar .breadCrumbs__item:first-child a span[itemprop="name"], title, meta[property="og:title"]',
         extract: (el) => {
+          // Приоритет: breadcrumb с itemprop="name"
+          if (el?.getAttribute?.('itemprop') === 'name') {
+            const text = el?.textContent?.trim() || '';
+            // Обрезаем до скобки если есть
+            const beforeParen = text.split(/\s*\(/)[0]?.trim();
+            return beforeParen || text || null;
+          }
+          // Fallback: title или og:title
           const text = el?.textContent || el?.content || '';
-          let cleanTitle = text.split(/[:|]/)[0]?.trim() || '';
+          // Обрезаем до скобки если есть
+          let cleanTitle = text.split(/\s*\(/)[0]?.trim() || '';
+          cleanTitle = cleanTitle.split(/[:|]/)[0]?.trim() || '';
           cleanTitle = cleanTitle.replace(/^Сериал\s+/i, '');
           cleanTitle = cleanTitle.split(/\s+смотреть/i)[0]?.trim() || cleanTitle;
           cleanTitle = cleanTitle.split(/\s+в хорошем/i)[0]?.trim() || cleanTitle;
@@ -156,11 +166,47 @@
         extract: (el) => el?.textContent?.trim() || null
       },
       seasonEpisode: {
-        selector: '.postersListDesktop__listTitle span, .serieBadge button div, .nbl-button__primaryText',
+        selector: '#root .headerBar .breadCrumbs__item:nth-child(2) a span[itemprop="name"], #root .headerBar .breadCrumbs__item:nth-child(3) div span[itemprop="name"], .postersListDesktop__listTitle span, .serieBadge button div, .nbl-button__primaryText, .meta__serieBadge button div',
         extract: (el) => {
           const t = el?.textContent?.trim() || '';
-          const m = t.match(/(\d+)\s*сезон.*?(\d+)\s*серия/i) || t.match(/Серия (\d+) сезон (\d+)/i);
-          return m ? { season: parseInt(m[2] || m[1]), episode: parseInt(m[1] || m[2]) } : null;
+          // Формат "Серия 3 сезон 3" - сначала серия, потом сезон (обратный порядок!)
+          const mReverse = t.match(/Серия\s+(\d+)\s+сезон\s+(\d+)/i);
+          if (mReverse) {
+            return { season: parseInt(mReverse[2]), episode: parseInt(mReverse[1]) };
+          }
+          // Обычный формат "3 сезон, 3 серия" или "сезон 3, серия 3"
+          const m = t.match(/(\d+)\s*сезон.*?(\d+)\s*серия/i) || t.match(/сезон\s*(\d+).*?серия\s*(\d+)/i);
+          if (m) {
+            return { season: parseInt(m[1]), episode: parseInt(m[2]) };
+          }
+          // Если это отдельный элемент с сезоном или серией
+          if (t.match(/^\d+\s*сезон$/i)) {
+            const seasonNum = parseInt(t.match(/(\d+)/)?.[1]);
+            // Ищем серию в соседнем элементе
+            const episodeEl = document.querySelector('#root .headerBar .breadCrumbs__item:nth-child(3) div span[itemprop="name"]');
+            if (episodeEl) {
+              const episodeText = episodeEl.textContent?.trim() || '';
+              const episodeMatch = episodeText.match(/(\d+)\s*серия/i);
+              if (episodeMatch && seasonNum) {
+                return { season: seasonNum, episode: parseInt(episodeMatch[1]) };
+              }
+            }
+            return seasonNum ? { season: seasonNum, episode: null } : null;
+          }
+          if (t.match(/^\d+\s*серия$/i)) {
+            const episodeNum = parseInt(t.match(/(\d+)/)?.[1]);
+            // Ищем сезон в соседнем элементе
+            const seasonEl = document.querySelector('#root .headerBar .breadCrumbs__item:nth-child(2) a span[itemprop="name"]');
+            if (seasonEl) {
+              const seasonText = seasonEl.textContent?.trim() || '';
+              const seasonMatch = seasonText.match(/(\d+)\s*сезон/i);
+              if (seasonMatch && episodeNum) {
+                return { season: parseInt(seasonMatch[1]), episode: episodeNum };
+              }
+            }
+            return episodeNum ? { season: null, episode: episodeNum } : null;
+          }
+          return null;
         }
       }
     },
@@ -336,6 +382,12 @@
           }
           return null;
         }
+      },
+      // Проверка страницы: исключаем главную страницу
+      isValidPage: () => {
+        const path = window.location.pathname || '';
+        // Главная страница - только "/"
+        return path !== '/' && path !== '';
       }
     },
     
@@ -346,9 +398,27 @@
         return /сериал/i.test(t) || false;
       },
       title: {
-        selector: 'meta[property="og:title"]',
+        selector: '#root .r15qqrn5 main .t8imw3x .t1dmv9mm div .n18nc5fw span[data-test="player-content-name"], meta[property="og:title"]',
         extract: (el) => {
+          // Приоритет: span с data-test="player-content-name"
+          if (el?.getAttribute?.('data-test') === 'player-content-name') {
+            const text = el?.textContent?.trim() || '';
+            // Обрезаем до скобки если есть
+            const beforeParen = text.split(/\s*\(/)[0]?.trim();
+            return beforeParen || text || null;
+          }
+          // Fallback: meta[property="og:title"]
           const text = (el?.content || el?.getAttribute?.('content') || '').trim();
+          // Обрезаем до скобки - берем только название до "("
+          const beforeParen = text.split(/\s*\(/)[0]?.trim();
+          if (beforeParen) {
+            // Убираем префиксы типа "Плеер сериал" или "Плеер фильм"
+            let clean = beforeParen.replace(/^Плеер\s+(?:сериал|фильм|мультсериал)\s+/i, '').trim();
+            // Убираем "смотреть фильм онлайн" и подобное
+            clean = clean.replace(/\s+смотреть\s+(?:фильм|сериал|мультсериал)\s+онлайн.*$/i, '').trim();
+            return clean || null;
+          }
+          // Старый fallback для совместимости
           const mSeries = text.match(/Плеер\s+(?:сериал|фильм)\s+(.+?)\s+серия\s+\d+/i);
           if (mSeries) return mSeries[1].trim();
           const mFilm = text.match(/Плеер\s+фильм\s+(.+?)\s*\((\d{4})\)/i);
@@ -361,11 +431,12 @@
         selector: 'meta[property="og:title"]',
         extract: (el) => {
           const text = el?.content || el?.getAttribute?.('content') || '';
-          const m = text.match(/сезон\s*\d+\s*,\s*(\d{4})/i);
+          // Ищем год в скобках после названия: "Название (2025) смотреть..."
+          const m = text.match(/\((\d{4})\)/);
           if (m) return m[1];
-          const mFilm = text.match(/Плеер\s+фильм\s+.+?\s*\((\d{4})\)/i);
-          if (mFilm) return mFilm[1];
-          return (text.match(/(\d{4})/)?.[1] || null);
+          // Fallback: ищем любой 4-значный год
+          const m2 = text.match(/(\d{4})/);
+          return m2 ? m2[1] : null;
         }
       },
       searchBaseTitle: (title) => {
@@ -417,8 +488,14 @@
         return title?.textContent?.includes('Сериал') || false;
       },
       title: {
-        selector: 'title[data-next-head], title',
+        selector: '#player-popup-data .PlayerData_title__SRmNd, title[data-next-head], title',
         extract: (el) => {
+          // Приоритет: PlayerData_title__SRmNd из popup плеера
+          if (el?.classList?.contains?.('PlayerData_title__SRmNd')) {
+            const text = el?.textContent?.trim() || '';
+            return text || null;
+          }
+          // Fallback: title
           const text = el?.textContent || '';
           // "Сериал Побег (2026) смотреть онлайн..." → "Побег"
           let title = text.replace(/^(Сериал|Фильм)\s+/, '').split(/смотреть/)[0]?.trim() || '';
@@ -432,7 +509,7 @@
         extract: (el) => el?.textContent?.match(/\((\d{4})\)/)?.[1] || el?.textContent?.match(/(\d{4})/)?.[1]
       },
       seasonEpisode: {
-        selector: '.PlayButton_playButtonContext__4XH_C, .PlayerData_episodeInfo__D7dT7',
+        selector: '#player-popup-data .PlayerData_episodeInfo__D7dT7, .PlayButton_playButtonContext__4XH_C, .PlayerData_episodeInfo__D7dT7',
         extract: (el) => {
           const t = el?.textContent?.trim() || '';
           // Формат: "1 сезон, 1 серия" или "1 сезон,  1 серия" (с двойным пробелом)
@@ -442,7 +519,9 @@
           }
           return null;
         }
-      }
+      },
+      // Флаг для отслеживания клика на play на главной
+      playButtonClicked: false
     },
     
     'rezka,hdrezka': {
@@ -703,12 +782,27 @@
 
   function isCatalogOrMainPage() {
     const path = (window.location.pathname || '').replace(/\/$/, '') || '/';
+    const config = getSiteConfig();
+    
+    // Проверяем isValidPage из конфигурации (если есть)
+    if (config?.isValidPage && typeof config.isValidPage === 'function') {
+      if (!config.isValidPage()) return true;
+    }
+    
     if (hostname.includes('amediateka')) {
+      // На главной странице виджет показываем только после клика на play
+      if (path === '' || path === '/') {
+        // Проверяем флаг playButtonClicked
+        if (!config?.playButtonClicked) return true;
+        return false; // После клика на play - показываем виджет
+      }
       // Виджет только на /watch/... страницах
       if (!path.startsWith('/watch/')) return true; // Всё остальное - пропускаем
       return false;
     }
     if (hostname.includes('premier.one')) {
+      // Главная страница - пропускаем
+      if (path === '' || path === '/') return true;
       if (path.startsWith('/series') || path === '/movies' || path.startsWith('/movies')) return true;
       return false;
     }
@@ -1865,8 +1959,40 @@
         if (response.ok) {
           const result = await response.json();
           if (result.success) {
+            // Обновляем данные из API для получения актуального состояния
+            try {
+              const filmInfoUrl = `/api/extension/film-info?kp_id=${filmData.kp_id}&chat_id=${data.linked_chat_id}&user_id=${data.linked_user_id}`;
+              const filmInfoResponse = await apiRequest('GET', filmInfoUrl);
+              if (filmInfoResponse.ok) {
+                const filmInfoResult = await filmInfoResponse.json();
+                if (filmInfoResult.film) {
+                  currentFilmData = {
+                    ...filmData,
+                    watched: true,
+                    rated: filmInfoResult.film.rated || false
+                  };
+                  renderButtons(info, currentFilmData);
+                  // Если фильм не оценен, показываем оценку
+                  if (!currentFilmData.rated) {
+                    setTimeout(() => {
+                      showRatingButtons(info, currentFilmData);
+                    }, 500);
+                  }
+                  return;
+                }
+              }
+            } catch (e) {
+              console.error('[STREAMING] Ошибка получения обновленных данных:', e);
+            }
+            // Fallback если не удалось получить обновленные данные
             currentFilmData = { ...filmData, watched: true };
             renderButtons(info, currentFilmData);
+            // Показываем оценку если фильм не оценен
+            if (!filmData.rated) {
+              setTimeout(() => {
+                showRatingButtons(info, currentFilmData);
+              }, 500);
+            }
           } else {
             alert('Ошибка: ' + (result.error || 'неизвестная ошибка'));
           }
@@ -2343,6 +2469,84 @@
   }
   
   function init() {
+    // Отслеживание клика на play кнопку на amediateka.ru (главная страница)
+    if (hostname.includes('amediateka')) {
+      const playButtonSelectors = [
+        '.CardItem_cardItemLink__V3AQE .CardItem_play__0vEuz',
+        '.CardItem_play__0vEuz',
+        '[class*="CardItem_play"]',
+        'svg[viewBox="0 0 48 48"]', // SVG play кнопка
+        'img[alt="Play"]'
+      ];
+      
+      document.addEventListener('click', (e) => {
+        const target = e.target.closest(playButtonSelectors.join(', ')) || 
+                       e.target.closest('a[href*="/watch/"]');
+        if (target) {
+          const config = getSiteConfig();
+          if (config) {
+            config.playButtonClicked = true;
+            console.log('[STREAMING] Клик на play кнопку на amediateka.ru');
+            // Ждем появления popup плеера и показываем виджет
+            setTimeout(() => {
+              checkAndShowOverlay();
+            }, 2000);
+          }
+        }
+      }, true);
+    }
+    
+    // Отслеживание переключения серий внутри плеера на rezka/hdrezka
+    if (hostname.includes('rezka') || hostname.includes('hdrezka') || hostname.includes('lordfilm')) {
+      // Отслеживаем клик на кнопку следующей серии
+      document.addEventListener('click', (e) => {
+        const nextBtn = e.target.closest('.episode-next, button.episode-next, [class*="episode-next"]');
+        const episodeItem = e.target.closest('.item_2mH, [class*="item"], .menu_2sa .item');
+        if (nextBtn || episodeItem) {
+          console.log('[STREAMING] Переключение серии в плеере');
+          // Ждем обновления DOM и показываем виджет
+          setTimeout(() => {
+            const info = getContentInfo();
+            if (info && info.title) {
+              const currentHash = getContentHash(info);
+              if (currentHash !== lastContentHash) {
+                console.log('[STREAMING] Обнаружено изменение серии (hash изменился):', currentHash);
+                lastContentHash = currentHash;
+                const key = getContentKey(info);
+                lastShown[key] = 0; // Сбрасываем кулдаун
+                checkAndShowOverlay();
+              }
+            }
+          }, 2000);
+        }
+      }, true);
+      
+      // Также отслеживаем изменения в плеере через MutationObserver
+      const playerObserver = new MutationObserver(() => {
+        const info = getContentInfo();
+        if (info && info.title) {
+          const currentHash = getContentHash(info);
+          if (currentHash !== lastContentHash && lastContentHash !== '') {
+            console.log('[STREAMING] Обнаружено изменение серии через MutationObserver');
+            lastContentHash = currentHash;
+            const key = getContentKey(info);
+            lastShown[key] = 0;
+            checkAndShowOverlay();
+          }
+        }
+      });
+      
+      // Наблюдаем за изменениями в контейнере плеера
+      const playerContainer = document.querySelector('#player, .player, [class*="player"]');
+      if (playerContainer) {
+        playerObserver.observe(playerContainer, {
+          childList: true,
+          subtree: true,
+          characterData: true
+        });
+      }
+    }
+    
     // Первая проверка через 3 секунды после загрузки
     setTimeout(() => {
       checkAndShowOverlay();
