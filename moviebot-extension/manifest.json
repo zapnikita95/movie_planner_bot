@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Movie Planner Bot",
-  "description": "Добавляй фильмы с Kinopoisk, IMDb, Letterboxd и билеты прямо в @movie_planner_bot",
+  "description": "Добавляй фильмы с Kinopoisk, IMDb, Letterboxd и билеты прямо в https://t.me/movie_planner_bot. Отслеживай просмотры серий и фильмов на стримингах (Иви, Окко, Premier, Wink, Start, Амедиатека, Rezka и другие). Отмечай просмотренные серии, оценивай фильмы - всё синхронизируется с базой в Telegram-боте.",
   "version": "1.1.4",
   "author": "Nikita Zaporozhets",
   "permissions": [
