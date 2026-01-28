@@ -290,12 +290,16 @@ def show_timezone_selection(chat_id, user_id, prompt_text="Выберите ча
         tz_display_map = {
             'Europe/Moscow': "Москва",
             'Europe/Belgrade': "Сербия",
+            'Europe/Kaliningrad': "Калининград (-1 МСК)",
             'Europe/Samara': "Самара (+1 МСК)",
             'Asia/Yekaterinburg': "Екатеринбург (+2 МСК)",
+            'Asia/Omsk': "Омск (+3 МСК)",
             'Asia/Novosibirsk': "Новосибирск (+4 МСК)",
+            'Asia/Irkutsk': "Иркутск (+5 МСК)",
             'Asia/Yakutsk': "Якутск (+6 МСК)",
             'Asia/Vladivostok': "Владивосток (+7 МСК)",
             'Asia/Magadan': "Магадан (+8 МСК)",
+            'Asia/Kamchatka': "Петропавловск-Камчатский (+9 МСК)",
         }
         current_tz_display = tz_display_map.get(tz_zone, tz_zone)
 
@@ -307,12 +311,16 @@ def show_timezone_selection(chat_id, user_id, prompt_text="Выберите ча
     tz_buttons = [
         ("🇷🇺 Москва (MSK)", "Europe/Moscow", "timezone:Moscow"),
         ("🇷🇸 Сербия (CET)", "Europe/Belgrade", "timezone:Serbia"),
+        ("🇷🇺 Калининград (-1 МСК)", "Europe/Kaliningrad", "timezone:Kaliningrad"),
         ("🇷🇺 Самара (+1 МСК)", "Europe/Samara", "timezone:Samara"),
         ("🇷🇺 Екатеринбург (+2 МСК)", "Asia/Yekaterinburg", "timezone:Yekaterinburg"),
+        ("🇷🇺 Омск (+3 МСК)", "Asia/Omsk", "timezone:Omsk"),
         ("🇷🇺 Новосибирск (+4 МСК)", "Asia/Novosibirsk", "timezone:Novosibirsk"),
+        ("🇷🇺 Иркутск (+5 МСК)", "Asia/Irkutsk", "timezone:Irkutsk"),
         ("🇷🇺 Якутск (+6 МСК)", "Asia/Yakutsk", "timezone:Yakutsk"),
         ("🇷🇺 Владивосток (+7 МСК)", "Asia/Vladivostok", "timezone:Vladivostok"),
         ("🇷🇺 Магадан (+8 МСК)", "Asia/Magadan", "timezone:Magadan"),
+        ("🇷🇺 Петропавловск-Камчатский (+9 МСК)", "Asia/Kamchatka", "timezone:Kamchatka"),
     ]
 
     markup = InlineKeyboardMarkup(row_width=1)
