@@ -64,7 +64,7 @@
   // Поддерживаемые сайты
   const supportedHosts = [
     'tvoe.live', 'ivi.ru', 'okko.tv', 'kinopoisk.ru', 'hd.kinopoisk.ru',
-    'premier.one', 'wink.ru', 'start.ru', 'amediateka.ru',
+    'premier.one', 'wink.ru', 'start.ru', 'amediateka.ru', 'kion.ru',
     'rezka.ag', 'rezka.ad', 'hdrezka', 'lordfilm', 'allserial', 'boxserial'
   ];
   
@@ -747,6 +747,83 @@
           return null;
         }
       }
+    },
+    
+    'kion.ru': {
+      isSeries: () => {
+        // Проверяем URL - если есть /serial/, это сериал
+        const path = window.location.pathname || '';
+        if (path.includes('/serial/')) return true;
+        // Проверяем title - если есть слово "сериал"
+        const title = document.querySelector('title');
+        if (title?.textContent?.includes('сериал')) return true;
+        // Проверяем URL на /video/.../sezon-.../seriya-... - это сериал
+        if (path.match(/\/video\/[^/]+\/sezon-\d+\/seriya-\d+/)) return true;
+        return false;
+      },
+      title: {
+        selector: 'web-movie-card .card-header-title, player-web-ui-header h1.title, title',
+        extract: (el) => {
+          // Приоритет: card-header-title на странице фильма/сериала
+          if (el?.classList?.contains?.('card-header-title')) {
+            const text = el?.textContent?.trim() || '';
+            return text || null;
+          }
+          // Приоритет: h1.title в плеере
+          if (el?.classList?.contains?.('title') && el?.tagName === 'H1') {
+            const text = el?.textContent?.trim() || '';
+            return text || null;
+          }
+          // Fallback: title - извлекаем из кавычек "«Название»"
+          const text = el?.textContent || '';
+          const match = text.match(/«([^»]+)»/);
+          if (match) return match[1].trim();
+          // Или берем до скобки
+          const beforeParen = text.split(/\s*\(/)[0]?.trim();
+          return beforeParen || null;
+        }
+      },
+      year: {
+        selector: 'title',
+        extract: (el) => {
+          const text = el?.textContent || '';
+          // Ищем год после слова "сериал" или "фильм": "сериал 2025" или "(2025)"
+          const match = text.match(/(?:сериал|фильм)\s+(\d{4})/) || text.match(/\((\d{4})/);
+          return match ? match[1] : null;
+        }
+      },
+      seasonEpisode: {
+        fromUrl: () => {
+          // Приоритет: из URL /video/.../sezon-1/seriya-2
+          const path = window.location.pathname || '';
+          const seasonMatch = path.match(/sezon-(\d+)/);
+          const episodeMatch = path.match(/seriya-(\d+)/);
+          if (seasonMatch && episodeMatch) {
+            return { season: parseInt(seasonMatch[1]), episode: parseInt(episodeMatch[1]) };
+          }
+          return null;
+        },
+        selector: 'player-web-ui-header .subtitle, web-card-content-buttons-redesign .caption-c1-medium-comp span',
+        extract: (el) => {
+          const t = el?.textContent?.trim() || '';
+          // Формат в плеере: "Сезон 1 | Серия 1"
+          const m1 = t.match(/Сезон\s+(\d+)\s*\|\s*Серия\s+(\d+)/i);
+          if (m1) {
+            return { season: parseInt(m1[1]), episode: parseInt(m1[2]) };
+          }
+          // Формат на странице сериала: "с 2 серии 1 сезона" (серия, потом сезон!)
+          const m2 = t.match(/(\d+)\s*серии.*?(\d+)\s*сезона/i);
+          if (m2) {
+            return { season: parseInt(m2[2]), episode: parseInt(m2[1]) };
+          }
+          // Обычный формат: "сезон 1 серия 2"
+          const m3 = t.match(/(\d+)\s*сезон.*?(\d+)\s*серия/i) || t.match(/сезон\s*(\d+).*?серия\s*(\d+)/i);
+          if (m3) {
+            return { season: parseInt(m3[1]), episode: parseInt(m3[2]) };
+          }
+          return null;
+        }
+      }
     }
   };
   
@@ -841,6 +918,14 @@
       if (/^\/(series|movies|films|collections|promo)/.test(path)) return true;
       // Только страницы просмотра: /watch/...
       if (!/^\/watch\/[^/]+/.test(path)) return true;
+      return false;
+    }
+    // KION: показывать виджет только на /film/..., /serial/..., и /video/...
+    if (hostname.includes('kion.ru')) {
+      // Главная страница - пропускаем
+      if (path === '' || path === '/') return true;
+      // Только страницы фильмов, сериалов и просмотра
+      if (!/^\/(film|serial|video)\//.test(path)) return true;
       return false;
     }
     return false;
