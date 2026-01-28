@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Movie Planner Bot",
   "description": "Добавляй фильмы в https://t.me/movie_planner_bot. Трекинг на Иви, Окко, Premier и др.",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "author": "Nikita Zaporozhets",
   "permissions": [
     "storage",
