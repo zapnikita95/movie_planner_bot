@@ -172,19 +172,61 @@ def handle_add_tag_reply(message):
     
     try:
         # Извлекаем название тега из кавычек
-        tag_name_match = re.search(r'["""]([^"""]+)["""]', text)
-        if not tag_name_match:
+        # Поддерживаем HTML внутри кавычек (например, ссылки)
+        # Ищем открывающую кавычку (любого типа)
+        quote_start = -1
+        quote_chars_open = ['"', '"', '«']
+        for char in quote_chars_open:
+            pos = text.find(char)
+            if pos != -1 and (quote_start == -1 or pos < quote_start):
+                quote_start = pos
+        
+        if quote_start == -1:
             bot.reply_to(message, "❌ Не найдено название подборки в кавычках. Пример: \"watch с Викулей\"")
             if user_id in user_add_tag_state:
                 del user_add_tag_state[user_id]
             return
         
-        tag_name = tag_name_match.group(1).strip()
+        # Ищем закрывающую кавычку - она должна быть после открывающей
+        # Ищем последнюю кавычку перед началом списка ID (пробел + цифра или ссылка)
+        quote_chars_close = ['"', '"', '»']
+        quote_end = -1
+        
+        # Находим позицию, где начинается список ID (первая цифра или ссылка после пробела)
+        # Ищем паттерн: пробел + цифра или пробел + http
+        id_start_pattern = re.search(r'\s+(\d+|https?://)', text[quote_start + 1:])
+        search_end = len(text)
+        if id_start_pattern:
+            # Ищем закрывающую кавычку только до начала списка ID
+            search_end = quote_start + 1 + id_start_pattern.start()
+        
+        # Ищем закрывающую кавычку в диапазоне от открывающей до начала списка ID
+        for i in range(search_end - 1, quote_start, -1):
+            if text[i] in quote_chars_close:
+                quote_end = i
+                break
+        
+        if quote_end == -1:
+            # Если не нашли закрывающую кавычку до списка ID, ищем последнюю кавычку в тексте
+            for i in range(len(text) - 1, quote_start, -1):
+                if text[i] in quote_chars_close:
+                    quote_end = i
+                    break
+        
+        if quote_end == -1:
+            bot.reply_to(message, "❌ Не найдена закрывающая кавычка в названии подборки.")
+            if user_id in user_add_tag_state:
+                del user_add_tag_state[user_id]
+            return
+        
+        tag_name = text[quote_start + 1:quote_end].strip()
         if not tag_name:
             bot.reply_to(message, "❌ Название подборки не может быть пустым.")
             if user_id in user_add_tag_state:
                 del user_add_tag_state[user_id]
             return
+        
+        logger.info(f"[ADD TAG] Извлечено название подборки (длина: {len(tag_name)}): '{tag_name[:100]}...' (первые 100 символов)")
         
         # Извлекаем все kp_id из текста
         kp_ids = set()
