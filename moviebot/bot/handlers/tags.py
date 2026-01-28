@@ -260,16 +260,29 @@ def handle_add_tag_reply(message):
         existing_tag_id = None
         existing_tag_code = None
         existing_tag_created_by = None
+        all_tags_with_same_name = []  # Все подборки с таким названием
         
         try:
             with db_lock:
-                cursor_check.execute('SELECT id, short_code, created_by FROM tags WHERE name = %s', (tag_name,))
-                row = cursor_check.fetchone()
-                if row:
-                    existing_tag_id = row.get('id') if isinstance(row, dict) else row[0]
-                    existing_tag_code = row.get('short_code') if isinstance(row, dict) else row[1]
-                    existing_tag_created_by = row.get('created_by') if isinstance(row, dict) else row[2]
-                    logger.info(f"[ADD TAG] Найдена существующая подборка с таким названием: id={existing_tag_id}, code={existing_tag_code}, created_by={existing_tag_created_by}")
+                # Получаем все подборки с таким названием
+                cursor_check.execute('SELECT id, short_code, created_by FROM tags WHERE name = %s ORDER BY id', (tag_name,))
+                rows = cursor_check.fetchall()
+                if rows:
+                    for row in rows:
+                        tag_id = row.get('id') if isinstance(row, dict) else row[0]
+                        tag_code = row.get('short_code') if isinstance(row, dict) else row[1]
+                        tag_created_by = row.get('created_by') if isinstance(row, dict) else row[2]
+                        all_tags_with_same_name.append({
+                            'id': tag_id,
+                            'short_code': tag_code,
+                            'created_by': tag_created_by
+                        })
+                    
+                    # Берем первую найденную для обратной совместимости
+                    existing_tag_id = all_tags_with_same_name[0]['id']
+                    existing_tag_code = all_tags_with_same_name[0]['short_code']
+                    existing_tag_created_by = all_tags_with_same_name[0]['created_by']
+                    logger.info(f"[ADD TAG] Найдена существующая подборка с таким названием: id={existing_tag_id}, code={existing_tag_code}, created_by={existing_tag_created_by}, всего найдено: {len(all_tags_with_same_name)}")
         except Exception as e:
             logger.error(f"[ADD TAG] Ошибка проверки существующей подборки: {e}", exc_info=True)
         finally:
@@ -307,7 +320,17 @@ def handle_add_tag_reply(message):
                     pass
             
             if new_films_count == 0:
-                bot.reply_to(message, f"ℹ️ Все указанные фильмы/сериалы уже есть в подборке <b>\"{sanitize_tag_name_for_html(tag_name)}\"</b>.", parse_mode='HTML')
+                # Формируем сообщение со ссылками на все подборки с таким названием
+                bot_username = bot.get_me().username
+                message_text = f"ℹ️ Все указанные фильмы/сериалы уже есть в подборке <b>\"{sanitize_tag_name_for_html(tag_name)}\"</b>.\n\n"
+                
+                if all_tags_with_same_name:
+                    message_text += "🔗 <b>Ссылки на подборки с таким названием:</b>\n"
+                    for idx, tag_info in enumerate(all_tags_with_same_name, 1):
+                        deep_link = f"https://t.me/{bot_username}?start=tag_{tag_info['short_code']}"
+                        message_text += f"{idx}. <code>{deep_link}</code>\n"
+                
+                bot.reply_to(message, message_text, parse_mode='HTML')
                 if user_id in user_add_tag_state:
                     del user_add_tag_state[user_id]
                 return
@@ -317,11 +340,25 @@ def handle_add_tag_reply(message):
             markup.add(InlineKeyboardButton("✅ Добавить к существующей подборке", callback_data=f"tag_add_to_existing:{existing_tag_id}:{tag_name}"))
             markup.add(InlineKeyboardButton("❌ Отмена", callback_data="tag_cancel_add"))
             
-            bot.reply_to(
-                message,
+            # Формируем сообщение со ссылками на все подборки с таким названием
+            bot_username = bot.get_me().username
+            message_text = (
                 f"📦 Подборка с названием <b>\"{sanitize_tag_name_for_html(tag_name)}\"</b> уже существует.\n\n"
                 f"Будет добавлено <b>{new_films_count}</b> новых фильмов/сериалов (дубли будут пропущены).\n\n"
-                f"Добавить фильмы к существующей подборке?",
+            )
+            
+            if all_tags_with_same_name:
+                message_text += "🔗 <b>Ссылки на подборки с таким названием:</b>\n"
+                for idx, tag_info in enumerate(all_tags_with_same_name, 1):
+                    deep_link = f"https://t.me/{bot_username}?start=tag_{tag_info['short_code']}"
+                    message_text += f"{idx}. <code>{deep_link}</code>\n"
+                message_text += "\n"
+            
+            message_text += "Добавить фильмы к существующей подборке?"
+            
+            bot.reply_to(
+                message,
+                message_text,
                 parse_mode='HTML',
                 reply_markup=markup
             )
