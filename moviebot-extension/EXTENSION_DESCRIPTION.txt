@@ -38,7 +38,7 @@ Movie Planner Bot Extension - Описание продукта
 
 7. Работа со стриминговыми платформами (НОВОЕ)
 - Автоматическое определение: Расширение автоматически определяет фильм или сериал на странице просмотра
-- Поддержка платформ: Иви, Окко, Premier, Wink, Start, Амедиатека, Rezka, HDRezka, Lordfilm, Allserial, Boxserial, HD Кинопоиск
+- Поддержка платформ: Иви, Твоё, Амедиатека и другие
 - Виджет на странице: Удобный виджет появляется на страницах просмотра с кнопками управления
 - Отметка серий: Отмечайте просмотренные серии прямо из виджета или popup расширения
 - Отметка фильмов: Отмечайте фильмы как просмотренные одним кликом
@@ -150,18 +150,7 @@ Movie Planner Bot Extension - Описание продукта
 - Letterboxd (letterboxd.com)
 
 Стриминговые платформы:
-- Иви (ivi.ru)
-- Окко (okko.tv)
-- Premier (premier.one)
-- Wink (wink.ru)
-- Start (start.ru)
-- Амедиатека (amediateka.ru)
-- Rezka (rezka.ad, rezka.ag и другие домены)
-- HDRezka (hdrezka.fans и другие домены)
-- Lordfilm (lordfilm132.ru и другие домены)
-- Allserial (allserial.my и другие домены)
-- Boxserial (boxserial.org)
-- TVoe (tvoe.live)
+- Иви, Твоё, Амедиатека и другие
 
 Сайты кинотеатров:
 - Афиша (afisha.ru, afisha.yandex.ru)

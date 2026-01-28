@@ -100,7 +100,7 @@ async function handleAddTicketsToPlan(message, tab, sendResponse) {
     chrome.notifications.create({
       type: 'basic',
       iconUrl: 'icons/icon48.png',
-      title: 'Movie Planner Bot',
+      title: 'Movie Planner',
       message: 'Скопируйте изображение билета и вставьте его в чат с ботом'
     });
   } catch (error) {

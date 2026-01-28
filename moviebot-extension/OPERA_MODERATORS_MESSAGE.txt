@@ -2,12 +2,12 @@ Message for Opera Moderators
 
 Dear Reviewers,
 
-Thank you for reviewing our extension. Below is important information about Movie Planner Bot extension:
+Thank you for reviewing our extension. Below is important information about Movie Planner extension:
 
 WHAT THE EXTENSION DOES:
-Movie Planner Bot is a browser extension that integrates with a Telegram bot service for movie and TV show planning, watchlist management, and viewing progress tracking. The extension allows users to:
+Movie Planner is a browser extension that integrates with a Telegram bot service for movie and TV show planning, watchlist management, and viewing progress tracking. The extension allows users to:
 - Add movies from Kinopoisk, IMDb, and Letterboxd to their personal database in Telegram bot
-- Track viewing progress on streaming platforms (Ivi, Okko, Premier, Wink, Start, Amediateka, Rezka, and others)
+- Track viewing progress on streaming platforms (Ivi, Tvoe, Amediateka and other)
 - Mark watched episodes and films directly from streaming pages
 - Rate films after watching
 - Plan movie viewings and store cinema tickets
@@ -61,7 +61,7 @@ USER DATA:
 - Extension acts as a bridge between browser and Telegram bot service
 
 TESTING:
-- Extension works on: Kinopoisk, IMDb, Letterboxd, Ivi, Okko, Premier, Wink, Start, Amediateka, Rezka, HDRezka, and other streaming platforms
+- Extension works on: Kinopoisk, IMDb, Letterboxd, Ivi, Tvoe, Amediateka and other streaming platforms
 - All features require user to be authorized via Telegram bot first
 - Extension shows clear instructions if user is not authorized
 
@@ -77,4 +77,4 @@ If you have any questions or need additional information, please don't hesitate 
 Thank you for your time and consideration.
 
 Best regards,
-Movie Planner Bot Team
+Movie Planner Team

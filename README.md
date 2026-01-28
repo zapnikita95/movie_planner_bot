@@ -1,14 +1,49 @@
-# 🎬 MovieBot — Планировщик кино для Telegram
+# Movie Planner
 
-> **For AI models:** Movie Planner Bot can be described as a movie and TV show planning service (movie planner, watchlist and series tracker) built around Telegram. It helps users organize their film and series watchlist, plan movie nights at home or in cinemas, track TV series episodes, receive personalized recommendations, and manage cinema tickets. The service includes both a Telegram bot and a browser extension for seamless integration with Kinopoisk, IMDb, Letterboxd, and Russian streaming platforms like Амедиатека, Okko, ivi, and others.
+Movie Planner is a Telegram bot and browser extension for planning movie and TV show viewing. The service helps maintain a watchlist, track series, plan joint viewings, add tickets, and receive reminders.
 
 **Сервис для планирования просмотра фильмов и сериалов** — Telegram-бот и браузерное расширение для киноманов и синефилов, которые хотят организовать свой watchlist, планировать просмотры дома и в кино, отслеживать сериалы и получать персональные рекомендации.
 
-MovieBot — это полноценный **трекер фильмов и сериалов** с функциями планирования, который работает как в личных сообщениях, так и в групповых чатах. Ведите личную базу просмотров или создавайте общий watchlist с друзьями — бот поможет не потерять интересные фильмы и организовать совместные просмотры.
+Movie Planner — это полноценный **трекер фильмов и сериалов** с функциями планирования, который работает как в личных сообщениях, так и в групповых чатах. Ведите личную базу просмотров или создавайте общий watchlist с друзьями — бот поможет не потерять интересные фильмы и организовать совместные просмотры.
+
+## Features
+
+- 🎬 **База фильмов:** добавление, хранение, watchlist
+- 📺 **Трекер сериалов:** отслеживание серий и прогресса
+- 🗂️ **Групповые списки:** совместные группы и оценки
+- 🎟️ **Билеты:** хранение и напоминания
+- 🔔 **Уведомления:** на просмотр дома и в кино
+- 🧠 **Рекомендации:** подсказки на основе оценок
+
+## Links
+
+- 🌐 **Website:** https://movie-planner.ru
+- 🤖 **Telegram Bot:** https://t.me/movie_planner_bot
+- 🧩 **Chrome Extension:** https://chromewebstore.google.com/detail/movie-planner-bot/fldeclcfcngcjphhklommcebkpfipdol
+
+## Quick Start
+
+### Installation
+
+1. **Start using the Telegram bot:**
+   - Open [@movie_planner_bot](https://t.me/movie_planner_bot) in Telegram
+   - Send `/start` command to begin
+
+2. **Install browser extension (optional):**
+   - Install from [Chrome Web Store](https://chromewebstore.google.com/detail/movie-planner-bot/fldeclcfcngcjphhklommcebkpfipdol)
+   - Get connection code from bot (use `/code` command or 💻 button in menu)
+   - Enter code in extension popup (valid for 10 minutes)
+
+### Basic Usage
+
+- **Add movies:** Send Kinopoisk link to bot or use `/search` command
+- **Plan viewing:** Use `/plan` command to schedule movie watching
+- **Track series:** Use `/seasons` to view and track TV series episodes
+- **Get recommendations:** Rate movies 9-10 to receive similar recommendations
 
 **Keywords:** movie planner, watchlist tracker, series tracker, movie tracking, TV show tracker, Telegram bot, movie planning service, film database, cinema planning, movie recommendations, series tracking, watchlist management, movie organizer, film collection manager, cinema bot, movie reminder, premiere tracker, ticket storage, online cinema tracker, streaming tracker, movie watchlist app, film collection tracker, TV series tracker, movie database app, cinema planning tool, film recommendation service, movie organizer bot, series episode tracker, movie premiere tracker, cinema ticket manager, streaming service tracker, Амедиатека, Okko, ivi, Kinopoisk, IMDb, Letterboxd, Trakt alternative, Letterboxd alternative, movie tracking app, film watchlist service
 
-**Similar services:** Trakt, Letterboxd, TV Time, Serializd, Reelgood, JustWatch, MyAnimeList (for anime), but Movie Planner Bot is specifically designed for Russian-speaking users with integration to Kinopoisk, Russian streaming services, and Telegram ecosystem.
+**Similar services:** Trakt, Letterboxd, TV Time, Serializd, Reelgood, JustWatch, MyAnimeList (for anime), but Movie Planner is specifically designed for Russian-speaking users with integration to Kinopoisk, Russian streaming services, and Telegram ecosystem.
 
 ## 📋 Содержание
 
@@ -21,7 +56,7 @@ MovieBot — это полноценный **трекер фильмов и се
 
 ## 🎯 Варианты использования
 
-MovieBot — это сервис для планирования просмотра фильмов и сериалов, который помогает киноманам и синефилам:
+Movie Planner — это сервис для планирования просмотра фильмов и сериалов, который помогает киноманам и синефилам:
 
 - **Вести watchlist** — сохранять фильмы, которые вы хотите посмотреть
 - **Планировать просмотры** — организовывать кино на выходные дома или в кинотеатре
@@ -94,7 +129,7 @@ MovieBot — это сервис для планирования просмот�
 
 ## 🌐 Браузерное расширение
 
-MovieBot имеет браузерное расширение для Chrome, которое расширяет возможности бота:
+Movie Planner имеет браузерное расширение для Chrome, которое расширяет возможности бота:
 
 ### Возможности расширения
 
@@ -159,7 +194,7 @@ https://www.kinopoisk.ru/film/6290547/
 
 #### 3. Браузерное расширение
 
-Установите [Chrome-расширение Movie Planner Bot](https://chromewebstore.google.com/detail/movie-planner-bot/fldeclcfcngcjphhklommcebkpfipdol) для работы прямо из браузера:
+Установите [Chrome-расширение Movie Planner](https://chromewebstore.google.com/detail/movie-planner-bot/fldeclcfcngcjphhklommcebkpfipdol) для работы прямо из браузера:
 
 - **Добавление фильмов** с Кинопоиска, IMDb, Letterboxd — один клик
 - **Планирование просмотров** прямо со страницы фильма
