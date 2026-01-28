@@ -1,0 +1,80 @@
+Message for Opera Moderators
+
+Dear Reviewers,
+
+Thank you for reviewing our extension. Below is important information about Movie Planner Bot extension:
+
+WHAT THE EXTENSION DOES:
+Movie Planner Bot is a browser extension that integrates with a Telegram bot service for movie and TV show planning, watchlist management, and viewing progress tracking. The extension allows users to:
+- Add movies from Kinopoisk, IMDb, and Letterboxd to their personal database in Telegram bot
+- Track viewing progress on streaming platforms (Ivi, Okko, Premier, Wink, Start, Amediateka, Rezka, and others)
+- Mark watched episodes and films directly from streaming pages
+- Rate films after watching
+- Plan movie viewings and store cinema tickets
+- All data is synchronized with the user's Telegram bot database
+
+PERMISSIONS EXPLANATION:
+
+1. Host Permissions (kinopoisk.ru, imdb.com, letterboxd.com, streaming platforms, etc.):
+   - Used to extract movie/series information from pages (titles, IDs, years)
+   - Used to detect content on streaming platforms and show tracking widgets
+   - All requests are made only to extract publicly available information
+   - No data is transmitted to third parties
+   - Data is only sent to our own API server (web-production-3921c.up.railway.app) for synchronization with Telegram bot
+
+2. Storage Permission:
+   - Stores user's Telegram bot authorization code (encrypted)
+   - Stores linked chat_id and user_id for API requests
+   - All data is stored locally in browser storage
+   - No personal data is collected or transmitted
+
+3. ActiveTab Permission:
+   - Used to get current page URL when user clicks extension icon
+   - Used to inject content scripts for movie detection
+   - Only active when user explicitly interacts with extension
+
+4. Tabs Permission:
+   - Used to get current tab URL for movie detection
+   - Required for popup functionality to show current page information
+   - No tab data is stored or transmitted
+
+5. Notifications Permission:
+   - Used to show notifications when user clicks "Add tickets" button on cinema websites
+   - Provides instructions on how to add tickets to Telegram bot
+   - Only shown on user action, not automatically
+
+6. ContextMenus Permission:
+   - Allows users to right-click on movie links and send them to Telegram bot
+   - Convenient way to add movies without opening extension popup
+
+PRIVACY AND SECURITY:
+- Extension requires user authorization via Telegram bot (one-time code)
+- All API requests are authenticated with user's credentials
+- No personal data is collected without user's explicit action
+- No tracking or analytics
+- No data sharing with third parties
+- All communication is with our own API server only
+
+USER DATA:
+- Extension only stores: Telegram bot authorization code, linked chat_id, user_id
+- All movie data is stored in user's Telegram bot database (not in extension)
+- Extension acts as a bridge between browser and Telegram bot service
+
+TESTING:
+- Extension works on: Kinopoisk, IMDb, Letterboxd, Ivi, Okko, Premier, Wink, Start, Amediateka, Rezka, HDRezka, and other streaming platforms
+- All features require user to be authorized via Telegram bot first
+- Extension shows clear instructions if user is not authorized
+
+COMPLIANCE:
+- Extension follows Manifest V3 standards
+- No malicious code or behavior
+- No unauthorized data collection
+- Respects user privacy
+- All permissions are necessary for core functionality
+
+If you have any questions or need additional information, please don't hesitate to contact us.
+
+Thank you for your time and consideration.
+
+Best regards,
+Movie Planner Bot Team

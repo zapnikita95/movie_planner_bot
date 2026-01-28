@@ -627,21 +627,33 @@ def handle_tag_deep_link(bot, message, short_code):
     text += f"📺 Сериалов: {series_count}\n\n"
     
     # Добавляем список фильмов и сериалов (только те, что есть в базе)
+    shown_films = 0
+    shown_series = 0
+    
     if films_list:
         text += "<b>🎬 Фильмы:</b>\n"
+        shown_films = min(10, len(films_list))
         for i, film_title in enumerate(films_list[:10], 1):  # Показываем до 10
             text += f"{i}. {film_title}\n"
-        if films_count > len(films_list):
-            text += f"... и еще {films_count - len(films_list)} фильмов\n"
         text += "\n"
     
     if series_list:
         text += "<b>📺 Сериалы:</b>\n"
+        shown_series = min(10, len(series_list))
         for i, series_title in enumerate(series_list[:10], 1):  # Показываем до 10
             text += f"{i}. {series_title}\n"
-        if series_count > len(series_list):
-            text += f"... и еще {series_count - len(series_list)} сериалов\n"
         text += "\n"
+    
+    # Вычисляем сколько осталось: (всего фильмов - показано фильмов) + (всего сериалов - показано сериалов)
+    remaining = (films_count - shown_films) + (series_count - shown_series)
+    if remaining > 0:
+        if remaining == 1:
+            if films_count > shown_films:
+                text += f"... и еще 1 фильм\n"
+            else:
+                text += f"... и еще 1 сериал\n"
+        else:
+            text += f"... и еще {remaining} фильмов/сериалов\n"
     
     text += "Добавить все фильмы и сериалы в вашу базу?"
     
