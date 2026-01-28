@@ -1622,32 +1622,49 @@
           noAccessMsg.style.cssText = 'padding: 12px; background: rgba(255,255,255,0.1); border-radius: 6px; text-align: center; font-size: 13px; margin-bottom: 8px;';
           noAccessMsg.innerHTML = '🔒 Для отметки серий нужна подписка "Уведомления" или "Пакетная"<br><small style="opacity: 0.8;">Доступно только добавление в базу</small>';
           container.appendChild(noAccessMsg);
-        } else if (!filmData.current_episode_watched) {
-          const markCurrentBtn = document.createElement('button');
-          markCurrentBtn.textContent = `✅ Отметить серию ${info.season || '?'}×${info.episode || '?'}`;
-          markCurrentBtn.style.cssText = `
-            width: 100% !important;
-            padding: 12px 16px !important;
-            background: white !important;
-            color: #667eea !important;
-            border: none !important;
-            border-radius: 8px !important;
-            font-weight: 700 !important;
-            cursor: pointer !important;
-            font-size: 14px !important;
-            box-sizing: border-box !important;
-            text-align: center !important;
-            display: flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-            min-height: 44px !important;
-            line-height: 1.2 !important;
-          `;
-          markCurrentBtn.addEventListener('click', () => handleMarkEpisode(info, filmData, false));
-          container.appendChild(markCurrentBtn);
+        } else {
+          // Определяем целевую серию: если текущая просмотрена, показываем следующую непросмотренную
+          let targetSeason = info.season;
+          let targetEpisode = info.episode;
           
-          // Показываем кнопку "Отметить все предыдущие" только если есть непросмотренные до текущей
-          if (info.season && info.episode && filmData.has_unwatched_before) {
+          if (filmData.current_episode_watched && filmData.next_unwatched_season && filmData.next_unwatched_episode) {
+            targetSeason = filmData.next_unwatched_season;
+            targetEpisode = filmData.next_unwatched_episode;
+            console.log('[STREAMING] Текущая серия просмотрена, показываем следующую:', targetSeason, targetEpisode);
+          }
+          
+          if (targetSeason && targetEpisode) {
+            const markCurrentBtn = document.createElement('button');
+            markCurrentBtn.textContent = `✅ Отметить серию ${targetSeason}×${targetEpisode}`;
+            markCurrentBtn.style.cssText = `
+              width: 100% !important;
+              padding: 12px 16px !important;
+              background: white !important;
+              color: #667eea !important;
+              border: none !important;
+              border-radius: 8px !important;
+              font-weight: 700 !important;
+              cursor: pointer !important;
+              font-size: 14px !important;
+              box-sizing: border-box !important;
+              text-align: center !important;
+              display: flex !important;
+              align-items: center !important;
+              justify-content: center !important;
+              min-height: 44px !important;
+              line-height: 1.2 !important;
+            `;
+            // Создаем копию info с целевыми сезоном/серией для обработчика
+            const targetInfo = { ...info, season: targetSeason, episode: targetEpisode };
+            markCurrentBtn.addEventListener('click', () => handleMarkEpisode(targetInfo, filmData, false));
+            container.appendChild(markCurrentBtn);
+          }
+          
+          // Показываем кнопку "Отметить все предыдущие" только если есть непросмотренные до целевой
+          const hasUnwatchedBefore = filmData.has_unwatched_before && 
+            (targetSeason > 1 || targetEpisode > 1);
+          
+          if (hasUnwatchedBefore && targetSeason && targetEpisode) {
             const markAllBtn = document.createElement('button');
             markAllBtn.textContent = '✅ Отметить все предыдущие';
             markAllBtn.style.cssText = `
@@ -1668,7 +1685,9 @@
               min-height: 40px !important;
               line-height: 1.2 !important;
             `;
-            markAllBtn.addEventListener('click', () => handleMarkEpisode(info, filmData, true));
+            // Создаем копию info с целевыми сезоном/серией для обработчика
+            const targetInfo = { ...info, season: targetSeason, episode: targetEpisode };
+            markAllBtn.addEventListener('click', () => handleMarkEpisode(targetInfo, filmData, true));
             container.appendChild(markAllBtn);
           }
         }
@@ -1709,9 +1728,19 @@
           noAccessMsg.innerHTML = '🔒 Для отметки серий нужна подписка "Уведомления" или "Пакетная"<br><small style="opacity: 0.8;">Доступно только добавление в базу</small>';
           container.appendChild(noAccessMsg);
         } else {
-          if (!filmData.current_episode_watched) {
+          // Определяем целевую серию: если текущая просмотрена, показываем следующую непросмотренную
+          let targetSeason = info.season;
+          let targetEpisode = info.episode;
+          
+          if (filmData.current_episode_watched && filmData.next_unwatched_season && filmData.next_unwatched_episode) {
+            targetSeason = filmData.next_unwatched_season;
+            targetEpisode = filmData.next_unwatched_episode;
+            console.log('[STREAMING] Текущая серия просмотрена, показываем следующую:', targetSeason, targetEpisode);
+          }
+          
+          if (targetSeason && targetEpisode) {
             const markCurrentBtn = document.createElement('button');
-            markCurrentBtn.textContent = `✅ Отметить серию ${info.season || '?'}×${info.episode || '?'}`;
+            markCurrentBtn.textContent = `✅ Отметить серию ${targetSeason}×${targetEpisode}`;
             markCurrentBtn.style.cssText = `
               width: 100% !important;
               padding: 12px 16px !important;
@@ -1730,11 +1759,17 @@
               min-height: 44px !important;
               line-height: 1.2 !important;
             `;
-            markCurrentBtn.addEventListener('click', () => handleMarkEpisode(info, filmData, false));
+            // Создаем копию info с целевыми сезоном/серией для обработчика
+            const targetInfo = { ...info, season: targetSeason, episode: targetEpisode };
+            markCurrentBtn.addEventListener('click', () => handleMarkEpisode(targetInfo, filmData, false));
             container.appendChild(markCurrentBtn);
           }
-          // Показываем кнопку "Отметить все предыдущие" только если есть непросмотренные до текущей
-          if (info.season && info.episode && filmData.has_unwatched_before) {
+          
+          // Показываем кнопку "Отметить все предыдущие" только если есть непросмотренные до целевой
+          const hasUnwatchedBefore = filmData.has_unwatched_before && 
+            (targetSeason > 1 || targetEpisode > 1);
+          
+          if (hasUnwatchedBefore && targetSeason && targetEpisode) {
             const markAllBtn = document.createElement('button');
             markAllBtn.textContent = '✅ Отметить все предыдущие';
             markAllBtn.style.cssText = `
@@ -1755,7 +1790,9 @@
               min-height: 40px !important;
               line-height: 1.2 !important;
             `;
-            markAllBtn.addEventListener('click', () => handleMarkEpisode(info, filmData, true));
+            // Создаем копию info с целевыми сезоном/серией для обработчика
+            const targetInfo = { ...info, season: targetSeason, episode: targetEpisode };
+            markAllBtn.addEventListener('click', () => handleMarkEpisode(targetInfo, filmData, true));
             container.appendChild(markAllBtn);
           }
         }
