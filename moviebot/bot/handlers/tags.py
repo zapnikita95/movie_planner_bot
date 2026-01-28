@@ -28,6 +28,49 @@ def strip_html_tags(text):
     # Декодируем HTML-сущности (базовые)
     text = text.replace('&lt;', '<').replace('&gt;', '>').replace('&amp;', '&').replace('&quot;', '"').replace('&#39;', "'")
     return text.strip()
+
+
+def sanitize_tag_name_for_html(raw_name: str) -> str:
+    """
+    Делает имя тега безопасным для подстановки в сообщение с parse_mode='HTML'.
+    Разрешает одну ссылку <a href="...">...</a>; в URL заменяет & на &amp;.
+    Остальные <, >, & экранирует, чтобы не ломать парсер Telegram.
+    """
+    if not raw_name or not isinstance(raw_name, str):
+        return ""
+    
+    # Ищем одну ссылку: <a href="URL">TEXT</a>
+    # Используем более гибкий паттерн, который может найти ссылку в любом месте строки
+    link_pattern = r'<a\s+href=["\']([^"\']*)["\'][^>]*>([^<]*)</a>'
+    match = re.search(link_pattern, raw_name, re.IGNORECASE | re.DOTALL)
+    
+    if match:
+        url, text = match.group(1), match.group(2)
+        # Экранируем & в URL (но не трогаем уже экранированные &amp;)
+        # Сначала заменяем &amp; на временный маркер
+        url = url.replace("&amp;", "___AMP___")
+        # Теперь заменяем все оставшиеся & на &amp;
+        url = url.replace("&", "&amp;")
+        # Возвращаем &amp; обратно
+        url = url.replace("___AMP___", "&amp;")
+        
+        # Экранируем спецсимволы в тексте ссылки
+        text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        # Заменяем ссылку в исходной строке на безопасную версию
+        safe_link = f'<a href="{url}">{text}</a>'
+        # Экранируем всё остальное в строке (до и после ссылки)
+        before_link = raw_name[:match.start()]
+        after_link = raw_name[match.end():]
+        before_safe = before_link.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        after_safe = after_link.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        return before_safe + safe_link + after_safe
+    
+    # Без ссылок - экранируем только спецсимволы
+    return (
+        raw_name.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
 logger.info("=" * 80)
 logger.info("[TAGS] Модуль tags.py импортирован - декораторы будут зарегистрированы")
 logger.info("=" * 80)
@@ -264,7 +307,7 @@ def handle_add_tag_reply(message):
                     pass
             
             if new_films_count == 0:
-                bot.reply_to(message, f"ℹ️ Все указанные фильмы/сериалы уже есть в подборке <b>\"{tag_name}\"</b>.", parse_mode='HTML')
+                bot.reply_to(message, f"ℹ️ Все указанные фильмы/сериалы уже есть в подборке <b>\"{sanitize_tag_name_for_html(tag_name)}\"</b>.", parse_mode='HTML')
                 if user_id in user_add_tag_state:
                     del user_add_tag_state[user_id]
                 return
@@ -276,7 +319,7 @@ def handle_add_tag_reply(message):
             
             bot.reply_to(
                 message,
-                f"📦 Подборка с названием <b>\"{tag_name}\"</b> уже существует.\n\n"
+                f"📦 Подборка с названием <b>\"{sanitize_tag_name_for_html(tag_name)}\"</b> уже существует.\n\n"
                 f"Будет добавлено <b>{new_films_count}</b> новых фильмов/сериалов (дубли будут пропущены).\n\n"
                 f"Добавить фильмы к существующей подборке?",
                 parse_mode='HTML',
@@ -456,7 +499,7 @@ def handle_add_tag_reply(message):
         else:
             result_text = f"✅ <b>Подборка создана!</b>\n\n"
         
-        result_text += f"📌 <b>Название:</b> {tag_name}\n"
+        result_text += f"📌 <b>Название:</b> {sanitize_tag_name_for_html(tag_name)}\n"
         result_text += f"🎬 <b>Добавлено новых:</b> {added_count}\n"
         
         if already_in_tag > 0:
@@ -638,7 +681,7 @@ def handle_tag_deep_link(bot, message, short_code):
     films_count = len([m for m in tag_movies if not m[1]])
     series_count = len([m for m in tag_movies if m[1]])
     
-    text = f"📦 <b>Подборка: {tag_info['name']}</b>\n\n"
+    text = f"📦 <b>Подборка: {sanitize_tag_name_for_html(tag_info['name'])}</b>\n\n"
     text += f"🎬 Фильмов: {films_count}\n"
     text += f"📺 Сериалов: {series_count}\n\n"
     
@@ -794,7 +837,7 @@ def handle_tag_add_to_existing(call):
                 errors.append(f"{kp_id}: {str(e)[:50]}")
         
         # Формируем итоговое сообщение
-        result_text = f"✅ <b>Фильмы добавлены в подборку '{tag_name}'!</b>\n\n"
+        result_text = f"✅ <b>Фильмы добавлены в подборку '{sanitize_tag_name_for_html(tag_name)}'!</b>\n\n"
         
         if added_count > 0:
             result_text += f"✅ Добавлено новых: <b>{added_count}</b>\n"
@@ -1067,7 +1110,7 @@ def handle_tag_confirm(call):
                 pass
         
         # Формируем итоговое сообщение
-        result_text = f"✅ <b>Подборка '{tag_info['name']}' добавлена!</b>\n\n"
+        result_text = f"✅ <b>Подборка '{sanitize_tag_name_for_html(tag_info['name'])}' добавлена!</b>\n\n"
         
         if added_films or added_series:
             result_text += f"🎬 <b>Добавлено фильмов:</b> {len(added_films)}\n"
@@ -1399,7 +1442,7 @@ def show_tag_films_page(bot, chat_id, user_id, tag_id, page=1, message_id=None):
             rows = cursor_local.fetchall()
         
         if not rows:
-            text = f"📦 <b>{tag_name}</b>\n\nВ этой подборке пока нет фильмов в вашей базе."
+            text = f"📦 <b>{sanitize_tag_name_for_html(tag_name)}</b>\n\nВ этой подборке пока нет фильмов в вашей базе."
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton("◀️ Назад к подборкам", callback_data="tags_list"))
             if message_id:
@@ -1428,7 +1471,7 @@ def show_tag_films_page(bot, chat_id, user_id, tag_id, page=1, message_id=None):
         page_movies = all_films[start_idx:end_idx]
         
         # Формируем текст страницы
-        text = f"📦 <b>{tag_name}</b>\n\n"
+        text = f"📦 <b>{sanitize_tag_name_for_html(tag_name)}</b>\n\n"
         text += f"Просмотрено: {watched_count}/{total_count}\n\n"
         if total_pages > 1:
             text += f"Страница {page}/{total_pages}:\n\n"
@@ -2189,7 +2232,7 @@ def handle_tag_select_group(call):
         bot_username = bot.get_me().username
         deep_link = f"https://t.me/{bot_username}?start=tag_{tag_info['short_code']}"
         
-        group_text = f"📦 <b>Подборка: {tag_info['name']}</b>\n\n"
+        group_text = f"📦 <b>Подборка: {sanitize_tag_name_for_html(tag_info['name'])}</b>\n\n"
         group_text += f"🎬 Фильмов/сериалов в подборке: {len(tag_movies)}\n\n"
         group_text += f"🔗 Добавить подборку в базу:\n"
         group_text += f"<code>{deep_link}</code>"
@@ -2197,7 +2240,7 @@ def handle_tag_select_group(call):
         try:
             bot.send_message(target_group_id, group_text, parse_mode='HTML')
             bot.edit_message_text(
-                f"✅ Подборка <b>\"{tag_info['name']}\"</b> отправлена в группу!",
+                f"✅ Подборка <b>\"{sanitize_tag_name_for_html(tag_info['name'])}\"</b> отправлена в группу!",
                 chat_id, call.message.message_id, parse_mode='HTML'
             )
         except Exception as e:
