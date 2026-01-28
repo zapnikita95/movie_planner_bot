@@ -522,6 +522,9 @@ def handle_settings_callback(call):
                     'Europe/Samara': "Самара (+1 МСК)",
                     'Asia/Yekaterinburg': "Екатеринбург (+2 МСК)",
                     'Asia/Novosibirsk': "Новосибирск (+4 МСК)",
+                    'Asia/Yakutsk': "Якутск (+6 МСК)",
+                    'Asia/Vladivostok': "Владивосток (+7 МСК)",
+                    'Asia/Magadan': "Магадан (+8 МСК)",
                 }
                 current_tz_name = tz_display_map.get(tz_zone, tz_zone)
             
@@ -531,6 +534,9 @@ def handle_settings_callback(call):
             markup.add(InlineKeyboardButton("🇷🇺 Самара (+1 МСК)", callback_data="timezone:Samara"))
             markup.add(InlineKeyboardButton("🇷🇺 Екатеринбург (+2 МСК)", callback_data="timezone:Yekaterinburg"))
             markup.add(InlineKeyboardButton("🇷🇺 Новосибирск (+4 МСК)", callback_data="timezone:Novosibirsk"))
+            markup.add(InlineKeyboardButton("🇷🇺 Якутск (+6 МСК)", callback_data="timezone:Yakutsk"))
+            markup.add(InlineKeyboardButton("🇷🇺 Владивосток (+7 МСК)", callback_data="timezone:Vladivostok"))
+            markup.add(InlineKeyboardButton("🇷🇺 Магадан (+8 МСК)", callback_data="timezone:Magadan"))
             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="settings:back"))
             
             bot.edit_message_text(
@@ -1180,6 +1186,9 @@ def handle_timezone_callback(call):
             "Samara": ("Самара (+1 МСК)", "Europe/Samara"),
             "Yekaterinburg": ("Екатеринбург (+2 МСК)", "Asia/Yekaterinburg"),
             "Novosibirsk": ("Новосибирск (+4 МСК)", "Asia/Novosibirsk"),
+            "Yakutsk": ("Якутск (+6 МСК)", "Asia/Yakutsk"),
+            "Vladivostok": ("Владивосток (+7 МСК)", "Asia/Vladivostok"),
+            "Magadan": ("Магадан (+8 МСК)", "Asia/Magadan"),
         }
 
         if timezone_name not in tz_info:

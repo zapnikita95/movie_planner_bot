@@ -293,6 +293,9 @@ def show_timezone_selection(chat_id, user_id, prompt_text="Выберите ча
             'Europe/Samara': "Самара (+1 МСК)",
             'Asia/Yekaterinburg': "Екатеринбург (+2 МСК)",
             'Asia/Novosibirsk': "Новосибирск (+4 МСК)",
+            'Asia/Yakutsk': "Якутск (+6 МСК)",
+            'Asia/Vladivostok': "Владивосток (+7 МСК)",
+            'Asia/Magadan': "Магадан (+8 МСК)",
         }
         current_tz_display = tz_display_map.get(tz_zone, tz_zone)
 
@@ -307,6 +310,9 @@ def show_timezone_selection(chat_id, user_id, prompt_text="Выберите ча
         ("🇷🇺 Самара (+1 МСК)", "Europe/Samara", "timezone:Samara"),
         ("🇷🇺 Екатеринбург (+2 МСК)", "Asia/Yekaterinburg", "timezone:Yekaterinburg"),
         ("🇷🇺 Новосибирск (+4 МСК)", "Asia/Novosibirsk", "timezone:Novosibirsk"),
+        ("🇷🇺 Якутск (+6 МСК)", "Asia/Yakutsk", "timezone:Yakutsk"),
+        ("🇷🇺 Владивосток (+7 МСК)", "Asia/Vladivostok", "timezone:Vladivostok"),
+        ("🇷🇺 Магадан (+8 МСК)", "Asia/Magadan", "timezone:Magadan"),
     ]
 
     markup = InlineKeyboardMarkup(row_width=1)

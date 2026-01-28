@@ -187,6 +187,9 @@ def get_user_timezone(user_id):
                 'Samara': 'Europe/Samara',                # +1 МСК
                 'Yekaterinburg': 'Asia/Yekaterinburg',    # +2 МСК
                 'Novosibirsk': 'Asia/Novosibirsk',        # +4 МСК
+                'Yakutsk': 'Asia/Yakutsk',                # +6 МСК
+                'Vladivostok': 'Asia/Vladivostok',        # +7 МСК
+                'Magadan': 'Asia/Magadan',                # +8 МСК
             }
 
             if tz_name in tz_map:
@@ -225,7 +228,7 @@ def get_user_timezone_or_default(user_id):
 
 
 def set_user_timezone(user_id, timezone_name):
-    """Устанавливает часовой пояс пользователя. timezone_name: 'Moscow', 'Serbia', 'Samara', 'Yekaterinburg', 'Novosibirsk'"""
+    """Устанавливает часовой пояс пользователя. timezone_name: 'Moscow', 'Serbia', 'Samara', 'Yekaterinburg', 'Novosibirsk', 'Yakutsk', 'Vladivostok', 'Magadan'"""
 
     try:
 
