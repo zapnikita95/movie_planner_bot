@@ -14,6 +14,20 @@ from moviebot.bot.handlers.series import ensure_movie_in_database
 from moviebot.states import user_plan_state, user_view_film_state, user_mark_watched_state
 
 logger = logging.getLogger(__name__)
+
+
+def strip_html_tags(text):
+    """Удаляет HTML-теги из текста, оставляя только текст (для кнопок)"""
+    if not text:
+        return text
+    # Удаляем все HTML-теги, включая содержимое ссылок (оставляем только текст внутри <a>)
+    # Сначала заменяем <a href="...">текст</a> на просто "текст"
+    text = re.sub(r'<a\s+[^>]*href=["\']([^"\']*)["\'][^>]*>(.*?)</a>', r'\2', text, flags=re.IGNORECASE | re.DOTALL)
+    # Затем удаляем все остальные HTML-теги
+    text = re.sub(r'<[^>]+>', '', text)
+    # Декодируем HTML-сущности (базовые)
+    text = text.replace('&lt;', '<').replace('&gt;', '>').replace('&amp;', '&').replace('&quot;', '"').replace('&#39;', "'")
+    return text.strip()
 logger.info("=" * 80)
 logger.info("[TAGS] Модуль tags.py импортирован - декораторы будут зарегистрированы")
 logger.info("=" * 80)
@@ -40,6 +54,8 @@ def add_tags_command(message):
         "В ответном сообщении пришлите:\n"
         "• Название подборки в кавычках (например: \"watch с Викулей\")\n"
         "• Ссылки на фильмы/сериалы с Кинопоиска\n\n"
+        "💡 <b>Ссылки в названии:</b> Можно использовать HTML-ссылки в названии:\n"
+        "<code>\"Подборка от <a href=\"https://t.me/channel\">канала</a>\"</code>\n\n"
         "Пример:\n"
         "<code>\"watch с Викулей\"\n"
         "https://www.kinopoisk.ru/film/123/\n"
@@ -1319,7 +1335,9 @@ def tags_command(message):
     # Сначала показываем непросмотренные
     for tag_info in unwatched_tags:
         count_text = f"{tag_info['user_films_count']}" if tag_info['user_films_count'] > 0 else f"0/{tag_info['total_films_count']}"
-        button_text = f"📦 {tag_info['name']} ({count_text})"
+        # В кнопках убираем HTML-теги (ссылки не работают в кнопках)
+        tag_name_for_button = strip_html_tags(tag_info['name'])
+        button_text = f"📦 {tag_name_for_button} ({count_text})"
         if len(button_text) > 60:
             button_text = button_text[:57] + "..."
         markup.add(InlineKeyboardButton(button_text, callback_data=f"tag_view:{tag_info['id']}"))
@@ -1628,7 +1646,9 @@ def handle_watched_tags_list(call):
             tag_name = tag_row[1] if isinstance(tag_row, tuple) else tag_row.get('name')
             user_films_count = tag_row[2] if isinstance(tag_row, tuple) else tag_row.get('user_films_count', 0)
             
-            button_text = f"✅ {tag_name} ({user_films_count})"
+            # В кнопках убираем HTML-теги (ссылки не работают в кнопках)
+            tag_name_for_button = strip_html_tags(tag_name)
+            button_text = f"✅ {tag_name_for_button} ({user_films_count})"
             if len(button_text) > 60:
                 button_text = button_text[:57] + "..."
             markup.add(InlineKeyboardButton(button_text, callback_data=f"tag_view:{tag_id}"))
@@ -1734,7 +1754,9 @@ def handle_tags_list(call):
         # Сначала показываем непросмотренные
         for tag_info in unwatched_tags:
             count_text = f"{tag_info['user_films_count']}" if tag_info['user_films_count'] > 0 else f"0/{tag_info['total_films_count']}"
-            button_text = f"📦 {tag_info['name']} ({count_text})"
+            # В кнопках убираем HTML-теги (ссылки не работают в кнопках)
+            tag_name_for_button = strip_html_tags(tag_info['name'])
+            button_text = f"📦 {tag_name_for_button} ({count_text})"
             if len(button_text) > 60:
                 button_text = button_text[:57] + "..."
             markup.add(InlineKeyboardButton(button_text, callback_data=f"tag_view:{tag_info['id']}"))
