@@ -2998,7 +2998,7 @@ def create_web_app(bot):
         cur = get_db_cursor()
         with db_lock:
             cur.execute("""
-                SELECT id, kp_id, title, year, is_series FROM movies
+                SELECT id, kp_id, title, year, is_series, description, rating FROM movies
                 WHERE chat_id = %s AND watched = 0
                 ORDER BY id DESC
                 LIMIT 200
@@ -3012,6 +3012,8 @@ def create_web_app(bot):
                 "title": r.get('title') if isinstance(r, dict) else r[2],
                 "year": r.get('year') if isinstance(r, dict) else r[3],
                 "is_series": bool(r.get('is_series') if isinstance(r, dict) else (r[4] if len(r) > 4 else 0)),
+                "description": r.get('description') if isinstance(r, dict) else (r[5] if len(r) > 5 else None),
+                "rating_kp": float(r['rating']) if isinstance(r, dict) and r.get('rating') is not None else (float(r[6]) if len(r) > 6 and r[6] is not None else None),
             })
         return jsonify({"success": True, "items": items})
 
@@ -3132,7 +3134,7 @@ def create_web_app(bot):
         cur = get_db_cursor()
         with db_lock:
             cur.execute("""
-                SELECT r.rating, r.kp_id, m.title, m.year, m.id as film_id
+                SELECT r.rating, r.kp_id, m.title, m.year, m.id as film_id, m.description, m.rating as rating_kp
                 FROM ratings r
                 JOIN movies m ON r.film_id = m.id AND r.chat_id = m.chat_id
                 WHERE r.chat_id = %s
@@ -3148,6 +3150,8 @@ def create_web_app(bot):
                 "title": r.get('title') if isinstance(r, dict) else r[2],
                 "year": r.get('year') if isinstance(r, dict) else r[3],
                 "film_id": r.get('film_id') if isinstance(r, dict) else r[4],
+                "description": r.get('description') if isinstance(r, dict) else (r[5] if len(r) > 5 else None),
+                "rating_kp": float(r.get('rating_kp')) if isinstance(r, dict) and r.get('rating_kp') is not None else (float(r[6]) if len(r) > 6 and r[6] is not None else None),
             })
         return jsonify({"success": True, "items": items})
 
