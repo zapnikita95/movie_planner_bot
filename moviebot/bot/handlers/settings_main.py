@@ -116,25 +116,27 @@ def handle_settings_callback(call):
         logger.info(f"[SETTINGS CALLBACK] Получен callback от {user_id}, action={action}, chat_id={chat_id}, is_private={is_private}, callback_data={call.data}")
         
         # Вызываем answer_callback_query в самом начале (как в рабочей версии)
-        # Но сначала обрабатываем заблокированные кнопки
+        # Но сначала обрабатываем заблокированные кнопки: при наличии PRO — открываем раздел, иначе paywall
         if action == "notifications_locked":
-            # Заблокированная кнопка настроек напоминаний
-            try:
-                bot.answer_callback_query(
-                    call.id,
-                    "⏰ Настройки напоминаний доступны с подпиской 💎 Movie Planner PRO. Подключите через /payment",
-                    show_alert=True
-                )
-            except Exception as e:
-                logger.error(f"[SETTINGS] Ошибка при ответе на callback для notifications_locked: {e}")
-            return
+            if has_pro_access(chat_id, user_id):
+                action = "notifications"
+            else:
+                try:
+                    bot.answer_callback_query(
+                        call.id,
+                        "⏰ Настройки напоминаний доступны с подпиской 💎 Movie Planner PRO. Подключите через /payment",
+                        show_alert=True
+                    )
+                except Exception as e:
+                    logger.error(f"[SETTINGS] Ошибка при ответе на callback для notifications_locked: {e}")
+                return
         
         if action == "import_locked":
-            # Заблокированная кнопка импорта базы (💎 Movie Planner PRO)
             has_access = has_pro_access(chat_id, user_id)
             logger.info(f"[SETTINGS] import_locked: user_id={user_id}, chat_id={chat_id}, has_access={has_access}")
-            if not has_access:
-                # Дополнительная диагностика для групповых чатов
+            if has_access:
+                action = "import"
+            else:
                 if chat_id < 0:
                     from moviebot.database.db_operations import get_active_group_subscription_by_chat_id, get_subscription_members
                     group_sub = get_active_group_subscription_by_chat_id(chat_id)
@@ -150,15 +152,15 @@ def handle_settings_callback(call):
                                 logger.warning(f"[SETTINGS] import_locked: участники подписки {subscription_id}: {members}, user_id={user_id} в списке: {user_id in members if members else False}")
                             except Exception as e:
                                 logger.error(f"[SETTINGS] import_locked: ошибка получения участников: {e}", exc_info=True)
-            try:
-                bot.answer_callback_query(
-                    call.id,
-                    "📥 Импорт базы из Кинопоиска доступен с подпиской 💎 Movie Planner PRO. Подключите через /payment",
-                    show_alert=True
-                )
-            except Exception as e:
-                logger.error(f"[SETTINGS] Ошибка при ответе на callback для import_locked: {e}")
-            return
+                try:
+                    bot.answer_callback_query(
+                        call.id,
+                        "📥 Импорт базы из Кинопоиска доступен с подпиской 💎 Movie Planner PRO. Подключите через /payment",
+                        show_alert=True
+                    )
+                except Exception as e:
+                    logger.error(f"[SETTINGS] Ошибка при ответе на callback для import_locked: {e}")
+                return
         
         if action == "random_events_locked":
             # Показываем сообщение о том, что раздел доступен только в групповых чатах
