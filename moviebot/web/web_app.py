@@ -1501,6 +1501,8 @@ def create_web_app(bot):
     SITE_ALLOWED_ORIGINS = {
         'https://movie-planner.ru',
         'https://www.movie-planner.ru',
+        'http://movie-planner.ru',
+        'http://www.movie-planner.ru',
         'http://localhost',
         'http://127.0.0.1',
     }
@@ -1509,15 +1511,18 @@ def create_web_app(bot):
     def after_request(response):
         """Автоматически добавляет CORS заголовки ко всем ответам от extension/site API"""
         if request.path.startswith('/api/extension/') or request.path.startswith('/api/site/'):
-            origin = request.headers.get('Origin') or request.headers.get('Referer', '')[:50]
+            origin = request.headers.get('Origin') or (request.headers.get('Referer') or '')[:80]
             # Для site API разрешаем только известные origins (иначе preflight падает с credentials)
             if request.path.startswith('/api/site/'):
                 allow_origin = None
                 if origin:
+                    origin_clean = origin.split('?')[0].rstrip('/')
                     for allowed in SITE_ALLOWED_ORIGINS:
-                        if origin.rstrip('/').startswith(allowed.rstrip('/')):
-                            allow_origin = origin.split('?')[0].rstrip('/')
+                        if origin_clean.startswith(allowed.rstrip('/')):
+                            allow_origin = origin_clean
                             break
+                    if not allow_origin and 'movie-planner' in origin_clean:
+                        allow_origin = origin_clean
                 if not allow_origin:
                     allow_origin = 'https://movie-planner.ru'
                 response.headers['Access-Control-Allow-Origin'] = allow_origin
@@ -2997,24 +3002,53 @@ def create_web_app(bot):
         conn = get_db_connection()
         cur = get_db_cursor()
         with db_lock:
-            cur.execute("""
-                SELECT id, kp_id, title, year, is_series, description, rating FROM movies
-                WHERE chat_id = %s AND watched = 0
-                ORDER BY id DESC
-                LIMIT 200
-            """, (chat_id,))
-            rows = cur.fetchall()
+            try:
+                cur.execute("""
+                    SELECT id, kp_id, title, year, is_series, description, rating FROM movies
+                    WHERE chat_id = %s AND watched = 0
+                    ORDER BY id DESC
+                    LIMIT 200
+                """, (chat_id,))
+                rows = cur.fetchall()
+                has_extra = True
+            except Exception as e:
+                if 'column' in str(e).lower() or 'does not exist' in str(e).lower():
+                    cur.execute("""
+                        SELECT id, kp_id, title, year, is_series FROM movies
+                        WHERE chat_id = %s AND watched = 0
+                        ORDER BY id DESC
+                        LIMIT 200
+                    """, (chat_id,))
+                    rows = cur.fetchall()
+                    has_extra = False
+                else:
+                    raise
         items = []
         for r in rows:
-            items.append({
+            rec = {
                 "film_id": r.get('id') if isinstance(r, dict) else r[0],
                 "kp_id": str(r.get('kp_id') if isinstance(r, dict) else r[1]),
                 "title": r.get('title') if isinstance(r, dict) else r[2],
                 "year": r.get('year') if isinstance(r, dict) else r[3],
                 "is_series": bool(r.get('is_series') if isinstance(r, dict) else (r[4] if len(r) > 4 else 0)),
-                "description": r.get('description') if isinstance(r, dict) else (r[5] if len(r) > 5 else None),
-                "rating_kp": float(r['rating']) if isinstance(r, dict) and r.get('rating') is not None else (float(r[6]) if len(r) > 6 and r[6] is not None else None),
-            })
+            }
+            if has_extra and len(r) > 5:
+                rec["description"] = r.get('description') if isinstance(r, dict) else (r[5] if len(r) > 5 else None)
+                rec["rating_kp"] = None
+                if isinstance(r, dict) and r.get('rating') is not None:
+                    try:
+                        rec["rating_kp"] = float(r['rating'])
+                    except (TypeError, ValueError):
+                        pass
+                elif len(r) > 6 and r[6] is not None:
+                    try:
+                        rec["rating_kp"] = float(r[6])
+                    except (TypeError, ValueError):
+                        pass
+            else:
+                rec["description"] = None
+                rec["rating_kp"] = None
+            items.append(rec)
         return jsonify({"success": True, "items": items})
 
     @app.route('/api/site/series', methods=['GET', 'OPTIONS'])
