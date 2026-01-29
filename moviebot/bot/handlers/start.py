@@ -107,7 +107,7 @@ def start_menu_callback(call):
         # Импортируем нужные функции один раз здесь
         from moviebot.bot.handlers.plan import show_schedule
         from moviebot.bot.handlers.payment import payment_command
-        from moviebot.bot.handlers.series import handle_search, random_start, premieres_command, ticket_command, help_command
+        from moviebot.bot.handlers.series import handle_search, random_start, premieres_command, ticket_command, help_command, HELP_INTRO_TEXT
         from moviebot.bot.handlers.seasons import show_seasons_list
 
         # Обычный импорт settings_main
@@ -243,9 +243,23 @@ def start_menu_callback(call):
             settings_command(msg)
 
         elif action == 'help':
-            msg = call.message
-            msg.text = '/help'
-            help_command(msg)
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("🎬 Помощь по использованию бота", callback_data="help:bot_usage"))
+            markup.add(InlineKeyboardButton("📖 Сценарии взаимодействия с сервисом", callback_data="help:scenarios"))
+            markup.add(InlineKeyboardButton("💻 Работа с расширением", callback_data="help:extension"))
+            markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+            try:
+                bot.edit_message_text(
+                    text=HELP_INTRO_TEXT,
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    reply_markup=markup,
+                    parse_mode='HTML'
+                )
+            except Exception as e:
+                logger.warning(f"[START MENU] edit help intro: {e}")
+                bot.send_message(chat_id, HELP_INTRO_TEXT, reply_markup=markup, parse_mode='HTML')
+            return
         
         elif action == 'database':
             # Показываем меню базы
@@ -705,7 +719,7 @@ def register_start_handlers(bot):
             # Импортируем нужные функции один раз здесь
             from moviebot.bot.handlers.plan import show_schedule
             from moviebot.bot.handlers.payment import payment_command
-            from moviebot.bot.handlers.series import handle_search, random_start, premieres_command, ticket_command, help_command
+            from moviebot.bot.handlers.series import handle_search, random_start, premieres_command, ticket_command, help_command, HELP_INTRO_TEXT
             from moviebot.bot.handlers.seasons import show_seasons_list
 
             # Обычный импорт settings_main
@@ -813,9 +827,23 @@ def register_start_handlers(bot):
                 settings_command(msg)
 
             elif action == 'help':
-                msg = call.message
-                msg.text = '/help'
-                help_command(msg)
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("🎬 Помощь по использованию бота", callback_data="help:bot_usage"))
+                markup.add(InlineKeyboardButton("📖 Сценарии взаимодействия с сервисом", callback_data="help:scenarios"))
+                markup.add(InlineKeyboardButton("💻 Работа с расширением", callback_data="help:extension"))
+                markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+                try:
+                    bot.edit_message_text(
+                        text=HELP_INTRO_TEXT,
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        reply_markup=markup,
+                        parse_mode='HTML'
+                    )
+                except Exception as e:
+                    logger.warning(f"[START MENU] edit help intro: {e}")
+                    bot.send_message(chat_id, HELP_INTRO_TEXT, reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
+                return
 
             # Удаляем старое меню для всех действий
             try:

@@ -2470,49 +2470,126 @@ def ticket_command(message):
             logger.error(f"[TICKET COMMAND] ❌ Не удалось отправить сообщение об ошибке: {send_error}", exc_info=True)
 
 
+# Текст приветствия автора (кнопка ❓ в главном меню)
+HELP_INTRO_TEXT = """Привет!
+
+Меня зовут Никита, и я создал этот сервис. Это частный проект от человека, который любит кино, и хочет, чтобы другие люди тоже могли комфортно смотреть фильмы и сериалы, ходить в кинотеатры, объединяться вместе и делиться своими увлечениями. Вы можете связаться со мной, если у вас есть вопросы или пожелания:
+@zapnikita95
+
+Мой официальный сайт: <a href="https://movie-planner.ru">movie-planner.ru</a>
+<a href="https://chromewebstore.google.com/detail/movie-planner-bot/fldeclcfcngcjphhklommcebkpfipdol?">Официальное расширение в Chrome</a>
+<a href="https://vc.ru/telegram/2707791-movie-planner-bot-telegram-servis-dlya-planirovaniya-filmov-i-serialov">Статья на vc</a>
+<a href="https://pikabu.ru/series/movie_planner_55060">Посты-история на Пикабу</a>
+
+Буду рад любой обратной связи!"""
+
+HELP_BOT_USAGE_TEXT = """🎬 <b>Помощь по использованию бота</b>
+
+Чтобы открыть главное меню, отправьте команду /start или нажмите кнопку "◀️ Назад в меню" ниже.
+
+Разделы меню:
+
+📺 Сериалы — ваши сериалы и отметки просмотренных серий
+
+📅 Премьеры — премьеры по дате выхода или по жанру
+
+🔍 Поиск — поиск фильмов, сериалов и людей через Kinopoisk API
+
+🗄️ База — управление базой фильмов и сериалов: подборки, статистика
+
+🤔 Что посмотреть? — рандом по базе, по кинопоиску, по оценкам; Шазам. Часть режимов — с подпиской 💎 Movie Planner PRO
+
+🗓️ Расписание — запланированные просмотры
+
+🎫 Билеты — билеты и напоминания (в личке — для всех; в группах — с подпиской 💎 Movie Planner PRO)
+
+💰 — подписки и оплата
+
+💻 — браузерное расширение
+
+⚙️ — настройки
+
+❓ — эта справка
+
+Подробнее: <a href="https://t.me/movie_planner_channel?hashtag=guide">#guide@movie_planner_channel</a>"""
+
+
 def help_command(message):
-    """Команда /help - помощь"""
+    """Команда /help - помощь (показывает справку по использованию бота)"""
     logger.info(f"[HANDLER] /help вызван от {message.from_user.id}")
     username = message.from_user.username or f"user_{message.from_user.id}"
     log_request(message.from_user.id, username, '/help', message.chat.id)
     logger.info(f"Команда /help от пользователя {message.from_user.id}")
 
-    text = """🎬 <b>Помощь по использованию бота</b>
-
-Чтобы открыть главное меню, отправьте команду <code>/start</code> или нажмите кнопку "◀️ Назад в меню" ниже.
-
-<b>Разделы меню:</b>
-
-<b>📺 Сериалы</b> — ваши сериалы и отметки просмотренных серий
-
-<b>📅 Премьеры</b> — премьеры по дате выхода или по жанру
-
-<b>🔍 Поиск</b> — поиск фильмов, сериалов и людей через Kinopoisk API
-
-<b>🗄️ База</b> — управление базой фильмов и сериалов: подборки, статистика
-
-<b>🤔 Что посмотреть?</b> — рандом по базе, по кинопоиску, по оценкам; Шазам. Часть режимов — с подпиской 💎 Movie Planner PRO
-
-<b>🗓️ Расписание</b> — запланированные просмотры
-
-<b>🎫 Билеты</b> — билеты и напоминания (в личке — для всех; в группах — с подпиской 💎 Movie Planner PRO)
-
-<b>💰</b> — подписки и оплата
-
-<b>💻</b> — браузерное расширение
-
-<b>⚙️</b> — настройки
-
-<b>❓</b> — эта справка
-
-Подробнее: <a href="https://t.me/movie_planner_channel?hashtag=guide">#guide@movie_planner_channel</a>"""
-
     markup = InlineKeyboardMarkup(row_width=1)
     markup.add(InlineKeyboardButton("📖 Сценарии взаимодействия с сервисом", callback_data="help:scenarios"))
     markup.add(InlineKeyboardButton("💻 Работа с расширением", callback_data="help:extension"))
+    markup.add(InlineKeyboardButton("◀️ Назад", callback_data="help:intro"))
     markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
     
-    bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
+    bot.reply_to(message, HELP_BOT_USAGE_TEXT, reply_markup=markup, parse_mode='HTML')
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "help:intro")
+def help_intro_callback(call):
+    """Показ приветствия автора (корень раздела помощи из меню ❓)"""
+    try:
+        bot.answer_callback_query(call.id)
+        chat_id = call.message.chat.id
+        message_id = call.message.message_id
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("🎬 Помощь по использованию бота", callback_data="help:bot_usage"))
+        markup.add(InlineKeyboardButton("📖 Сценарии взаимодействия с сервисом", callback_data="help:scenarios"))
+        markup.add(InlineKeyboardButton("💻 Работа с расширением", callback_data="help:extension"))
+        markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+        try:
+            bot.edit_message_text(
+                text=HELP_INTRO_TEXT,
+                chat_id=chat_id,
+                message_id=message_id,
+                reply_markup=markup,
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            logger.warning(f"[HELP INTRO] Не удалось отредактировать: {e}")
+            bot.send_message(chat_id, HELP_INTRO_TEXT, reply_markup=markup, parse_mode='HTML')
+    except Exception as e:
+        logger.error(f"[HELP INTRO] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+        except:
+            pass
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "help:bot_usage")
+def help_bot_usage_callback(call):
+    """Показ справки по использованию бота (меню разделов)"""
+    try:
+        bot.answer_callback_query(call.id)
+        chat_id = call.message.chat.id
+        message_id = call.message.message_id
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("📖 Сценарии взаимодействия с сервисом", callback_data="help:scenarios"))
+        markup.add(InlineKeyboardButton("💻 Работа с расширением", callback_data="help:extension"))
+        markup.add(InlineKeyboardButton("◀️ Назад", callback_data="help:intro"))
+        markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+        try:
+            bot.edit_message_text(
+                text=HELP_BOT_USAGE_TEXT,
+                chat_id=chat_id,
+                message_id=message_id,
+                reply_markup=markup,
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            logger.warning(f"[HELP BOT USAGE] Не удалось отредактировать: {e}")
+            bot.send_message(chat_id, HELP_BOT_USAGE_TEXT, reply_markup=markup, parse_mode='HTML')
+    except Exception as e:
+        logger.error(f"[HELP BOT USAGE] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+        except:
+            pass
 
 
 @bot.callback_query_handler(func=lambda call: call.data == "help:scenarios")
@@ -2549,7 +2626,7 @@ def help_scenarios_callback(call):
 Подробнее: <a href="https://t.me/movie_planner_channel?hashtag=guide">#guide@movie_planner_channel</a>"""
         
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("◀️ Назад", callback_data="help:back"))
+        markup.add(InlineKeyboardButton("◀️ Назад", callback_data="help:intro"))
         
         try:
             bot.edit_message_text(
@@ -2606,7 +2683,7 @@ def help_extension_callback(call):
 Подробнее: <a href="https://t.me/movie_planner_channel?hashtag=guide">#guide@movie_planner_channel</a>"""
         
         markup = InlineKeyboardMarkup()
-        markup.add(InlineKeyboardButton("◀️ Назад", callback_data="help:back"))
+        markup.add(InlineKeyboardButton("◀️ Назад", callback_data="help:intro"))
         
         try:
             bot.edit_message_text(
@@ -2636,65 +2713,10 @@ def help_extension_callback(call):
 
 @bot.callback_query_handler(func=lambda call: call.data == "help:back")
 def help_back_callback(call):
-    """Обработчик кнопки 'Назад' в разделах помощи"""
+    """Обработчик кнопки 'Назад' — возврат к приветствию автора (help:intro)"""
     try:
-        bot.answer_callback_query(call.id)
-        chat_id = call.message.chat.id
-        message_id = call.message.message_id
-        user_id = call.from_user.id
-        
-        # Используем тот же текст, что и в help_command
-        text = """🎬 <b>Помощь по использованию бота</b>
-
-Чтобы открыть главное меню, отправьте команду <code>/start</code> или нажмите кнопку "◀️ Назад в меню" ниже.
-
-<b>Разделы меню:</b>
-
-<b>📺 Сериалы</b> — ваши сериалы и отметки просмотренных серий
-
-<b>📅 Премьеры</b> — премьеры по дате выхода или по жанру
-
-<b>🔍 Поиск</b> — поиск фильмов, сериалов и людей через Kinopoisk API
-
-<b>🗄️ База</b> — управление базой фильмов и сериалов: подборки, статистика
-
-<b>🗓️ Расписание</b> — запланированные просмотры
-
-<b>🤔 Что посмотреть?</b> — рандом по базе, по кинопоиску, по оценкам; Шазам. Часть режимов — с подпиской 💎 Movie Planner PRO
-
-<b>🎫 Билеты</b> — билеты и напоминания (в личке — для всех; в группах — с подпиской 💎 Movie Planner PRO)
-
-<b>💰</b> — подписки и оплата
-
-<b>💻</b> — браузерное расширение
-
-<b>⚙️</b> — настройки
-
-<b>❓</b> — эта справка
-
-Подробнее: <a href="https://t.me/movie_planner_channel?hashtag=guide">#guide@movie_planner_channel</a>"""
-        
-        markup = InlineKeyboardMarkup(row_width=1)
-        markup.add(InlineKeyboardButton("📖 Сценарии взаимодействия с сервисом", callback_data="help:scenarios"))
-        markup.add(InlineKeyboardButton("💻 Работа с расширением", callback_data="help:extension"))
-        markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-        
-        try:
-            bot.edit_message_text(
-                text=text,
-                chat_id=chat_id,
-                message_id=message_id,
-                reply_markup=markup,
-                parse_mode='HTML'
-            )
-        except Exception as e:
-            logger.warning(f"[HELP BACK] Не удалось отредактировать сообщение: {e}")
-            bot.send_message(
-                chat_id=chat_id,
-                text=text,
-                reply_markup=markup,
-                parse_mode='HTML'
-            )
+        call.data = "help:intro"
+        help_intro_callback(call)
     except Exception as e:
         logger.error(f"[HELP BACK] Ошибка: {e}", exc_info=True)
         try:
