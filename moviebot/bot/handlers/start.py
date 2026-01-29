@@ -520,6 +520,60 @@ def register_start_handlers(bot):
                 start_param = parts[1].strip()
                 logger.info(f"[START] Обнаружен start_parameter: {start_param}")
         
+        # Deep link: ?start=code — сразу отправить код (как /code), без главного меню
+        if start_param and start_param.strip().lower() == 'code':
+            logger.info(f"[START CODE] Отправка кода по deep link для user_id={user_id}, chat_id={chat_id}")
+            try:
+                handle_code_command(message)
+            except Exception as e:
+                logger.error(f"[START CODE] Ошибка: {e}", exc_info=True)
+                try:
+                    bot.reply_to(message, "❌ Не удалось сгенерировать код. Напиши /code в чат.")
+                except Exception:
+                    pass
+            return
+        
+        # Deep link: ?start=view_film_{kp_id} или view_series_{kp_id} — открыть карточку фильма
+        if start_param and (start_param.startswith('view_film_') or start_param.startswith('view_series_')):
+            try:
+                kp_id_str = start_param.replace('view_film_', '').replace('view_series_', '').strip()
+                if kp_id_str.isdigit():
+                    from moviebot.bot.handlers.series import show_film_info_with_buttons
+                    from moviebot.api.kinopoisk_api import extract_movie_info
+                    from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+                    kp_id_int = int(kp_id_str)
+                    is_series = start_param.startswith('view_series_')
+                    link = f"https://www.kinopoisk.ru/series/{kp_id_int}/" if is_series else f"https://www.kinopoisk.ru/film/{kp_id_int}/"
+                    info = extract_movie_info(link)
+                    if info:
+                        info['is_series'] = is_series
+                        conn = get_db_connection()
+                        cur = get_db_cursor()
+                        existing = None
+                        with db_lock:
+                            cur.execute(
+                                "SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s",
+                                (chat_id, kp_id_str)
+                            )
+                            row = cur.fetchone()
+                        if row:
+                            fid = row.get('id') if isinstance(row, dict) else row[0]
+                            title_db = row.get('title') if isinstance(row, dict) else row[1]
+                            watched = bool(row.get('watched') if isinstance(row, dict) else row[2])
+                            existing = (fid, title_db, watched)
+                        show_film_info_with_buttons(chat_id, user_id, info, link, kp_id_int, existing=existing, message_id=None, message_thread_id=None)
+                    else:
+                        bot.reply_to(message, "❌ Не удалось загрузить описание фильма.")
+                else:
+                    bot.reply_to(message, "Неверная ссылка на фильм.")
+            except Exception as e:
+                logger.error(f"[START VIEW FILM] Ошибка: {e}", exc_info=True)
+                try:
+                    bot.reply_to(message, "❌ Ошибка при открытии фильма.")
+                except Exception:
+                    pass
+            return
+        
         # Обработка deep link для тегов
         if start_param and start_param.startswith('tag_'):
             short_code = start_param.replace('tag_', '')

@@ -1489,14 +1489,32 @@ def create_web_app(bot):
     
     # Добавляем after_request hook для автоматического добавления CORS заголовков
     # ВАЖНО: Регистрируем ПЕРЕД определением всех роутов extension API
+    # Разрешённые origins для сайта (CORS). Для site API — явно разрешаем production и localhost.
+    SITE_ALLOWED_ORIGINS = {
+        'https://movie-planner.ru',
+        'https://www.movie-planner.ru',
+        'http://localhost',
+        'http://127.0.0.1',
+    }
+
     @app.after_request
     def after_request(response):
-        """Автоматически добавляет CORS заголовки ко всем ответам от extension API"""
-        # Добавляем CORS заголовки для всех запросов к extension API
-        if request.path.startswith('/api/extension/'):
-            # Используем set вместо add, чтобы избежать дублирования
-            # Если заголовок уже есть, он будет заменен, а не добавлен повторно
-            response.headers['Access-Control-Allow-Origin'] = '*'
+        """Автоматически добавляет CORS заголовки ко всем ответам от extension/site API"""
+        if request.path.startswith('/api/extension/') or request.path.startswith('/api/site/'):
+            origin = request.headers.get('Origin') or request.headers.get('Referer', '')[:50]
+            # Для site API разрешаем только известные origins (иначе preflight падает с credentials)
+            if request.path.startswith('/api/site/'):
+                allow_origin = None
+                if origin:
+                    for allowed in SITE_ALLOWED_ORIGINS:
+                        if origin.rstrip('/').startswith(allowed.rstrip('/')):
+                            allow_origin = origin.split('?')[0].rstrip('/')
+                            break
+                if not allow_origin:
+                    allow_origin = 'https://movie-planner.ru'
+                response.headers['Access-Control-Allow-Origin'] = allow_origin
+            else:
+                response.headers['Access-Control-Allow-Origin'] = '*'
             response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
             response.headers['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'
             response.headers['Access-Control-Allow-Credentials'] = 'true'
@@ -2780,6 +2798,265 @@ def create_web_app(bot):
         except Exception as e:
             logger.error(f"[EXTENSION API] Ошибка оценки фильма: {e}", exc_info=True)
             return jsonify({"success": False, "error": "server error"}), 500
+
+    # ========== API для сайта (личный кабинет) ==========
+    import secrets
+    from datetime import datetime, timedelta
+    import pytz
+
+    def _site_token_to_chat_id():
+        """Из заголовка Authorization: Bearer <token> возвращает chat_id или None."""
+        auth = request.headers.get('Authorization')
+        if not auth or not auth.startswith('Bearer '):
+            return None
+        token = auth[7:].strip()
+        if not token:
+            return None
+        from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+        conn = get_db_connection()
+        cur = get_db_cursor()
+        try:
+            with db_lock:
+                cur.execute(
+                    "SELECT chat_id FROM site_sessions WHERE token = %s AND expires_at > %s",
+                    (token, datetime.now(pytz.UTC))
+                )
+                row = cur.fetchone()
+            if row:
+                return row.get('chat_id') if isinstance(row, dict) else row[0]
+        except Exception as e:
+            logger.error(f"[SITE API] Ошибка проверки токена: {e}", exc_info=True)
+        return None
+
+    @app.route('/api/site/validate', methods=['POST', 'OPTIONS'])
+    def site_validate():
+        """Валидация кода с бота, создание сессии сайта. Код не помечается used — можно использовать и в расширении."""
+        if request.method == 'OPTIONS':
+            return jsonify({'status': 'ok'})
+        try:
+            data = request.get_json() or {}
+            code = (data.get('code') or '').strip().upper()
+            if not code:
+                return jsonify({"success": False, "error": "Код не указан"}), 400
+            from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+            conn = get_db_connection()
+            cur = get_db_cursor()
+            with db_lock:
+                cur.execute(
+                    "SELECT chat_id, user_id, expires_at, used FROM extension_links WHERE code = %s",
+                    (code,)
+                )
+                row = cur.fetchone()
+            if not row:
+                return jsonify({"success": False, "error": "Неверный код"}), 400
+            chat_id = row.get('chat_id') if isinstance(row, dict) else row[0]
+            user_id = row.get('user_id') if isinstance(row, dict) else row[1]
+            expires_at = row.get('expires_at') if isinstance(row, dict) else row[2]
+            if isinstance(expires_at, str):
+                from dateutil import parser
+                expires_at = parser.parse(expires_at.replace('Z', '+00:00'))
+            if expires_at.tzinfo is None:
+                expires_at = pytz.UTC.localize(expires_at)
+            if expires_at <= datetime.now(pytz.UTC):
+                return jsonify({"success": False, "error": "Код истёк"}), 400
+            name = "Профиль"
+            try:
+                tg_chat = bot.get_chat(chat_id)
+                if tg_chat.type in ('group', 'supergroup') and getattr(tg_chat, 'title', None):
+                    name = tg_chat.title
+                elif getattr(tg_chat, 'first_name', None):
+                    name = tg_chat.first_name or name
+                elif getattr(tg_chat, 'username', None):
+                    name = "@" + tg_chat.username
+            except Exception as e:
+                logger.warning(f"[SITE API] Не удалось получить имя чата: {e}")
+            with db_lock:
+                cur.execute("SELECT COUNT(*) FROM movies WHERE chat_id = %s", (chat_id,))
+                cnt = cur.fetchone()
+                movies_count = (cnt.get('count') if isinstance(cnt, dict) else cnt[0]) or 0
+            has_data = movies_count > 0
+            token = secrets.token_urlsafe(32)
+            session_expires = datetime.now(pytz.UTC) + timedelta(days=30)
+            with db_lock:
+                cur.execute(
+                    "INSERT INTO site_sessions (token, chat_id, user_id, name, expires_at) VALUES (%s, %s, %s, %s, %s)",
+                    (token, chat_id, user_id, name, session_expires)
+                )
+                conn.commit()
+            return jsonify({
+                "success": True,
+                "token": token,
+                "chat_id": chat_id,
+                "name": name,
+                "has_data": has_data,
+            })
+        except Exception as e:
+            logger.error(f"[SITE API] validate: {e}", exc_info=True)
+            return jsonify({"success": False, "error": "Ошибка сервера"}), 500
+
+    @app.route('/api/site/me', methods=['GET', 'OPTIONS'])
+    def site_me():
+        if request.method == 'OPTIONS':
+            return jsonify({'status': 'ok'})
+        chat_id = _site_token_to_chat_id()
+        if chat_id is None:
+            return jsonify({"success": False, "error": "Не авторизован"}), 401
+        from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+        conn = get_db_connection()
+        cur = get_db_cursor()
+        with db_lock:
+            cur.execute(
+                "SELECT name FROM site_sessions WHERE chat_id = %s AND expires_at > %s ORDER BY created_at DESC LIMIT 1",
+                (chat_id, datetime.now(pytz.UTC))
+            )
+            row = cur.fetchone()
+            cur.execute("SELECT COUNT(*) FROM movies WHERE chat_id = %s", (chat_id,))
+            cnt = cur.fetchone()
+        name = (row.get('name') if isinstance(row, dict) else row[0]) if row else "Профиль"
+        movies_count = (cnt.get('count') if isinstance(cnt, dict) else cnt[0]) or 0
+        return jsonify({"success": True, "name": name, "has_data": movies_count > 0})
+
+    @app.route('/api/site/plans', methods=['GET', 'OPTIONS'])
+    def site_plans():
+        if request.method == 'OPTIONS':
+            return jsonify({'status': 'ok'})
+        chat_id = _site_token_to_chat_id()
+        if chat_id is None:
+            return jsonify({"success": False, "error": "Не авторизован"}), 401
+        from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+        conn = get_db_connection()
+        cur = get_db_cursor()
+        now_utc = datetime.now(pytz.UTC)
+        with db_lock:
+            cur.execute("""
+                SELECT p.id, p.plan_type, p.plan_datetime, p.film_id, COALESCE(m.title, 'Без названия') as title, m.kp_id, m.is_series
+                FROM plans p
+                LEFT JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                WHERE p.chat_id = %s AND p.plan_datetime >= %s
+                ORDER BY p.plan_datetime
+                LIMIT 100
+            """, (chat_id, now_utc))
+            rows = cur.fetchall()
+        home_plans = []
+        cinema_plans = []
+        for r in rows:
+            rec = {
+                "id": r.get('id') if isinstance(r, dict) else r[0],
+                "plan_type": r.get('plan_type') if isinstance(r, dict) else r[1],
+                "plan_datetime": (r.get('plan_datetime') or r[2]).isoformat() if r.get('plan_datetime') or (len(r) > 2 and r[2]) else None,
+                "film_id": r.get('film_id') if isinstance(r, dict) else r[3],
+                "title": r.get('title') if isinstance(r, dict) else r[4],
+                "kp_id": r.get('kp_id') if isinstance(r, dict) else r[5],
+                "is_series": bool(r.get('is_series') if isinstance(r, dict) else (r[6] if len(r) > 6 else 0)),
+            }
+            if rec["plan_type"] == "home":
+                home_plans.append(rec)
+            else:
+                cinema_plans.append(rec)
+        return jsonify({"success": True, "home": home_plans, "cinema": cinema_plans})
+
+    @app.route('/api/site/unwatched', methods=['GET', 'OPTIONS'])
+    def site_unwatched():
+        if request.method == 'OPTIONS':
+            return jsonify({'status': 'ok'})
+        chat_id = _site_token_to_chat_id()
+        if chat_id is None:
+            return jsonify({"success": False, "error": "Не авторизован"}), 401
+        from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+        conn = get_db_connection()
+        cur = get_db_cursor()
+        with db_lock:
+            cur.execute("""
+                SELECT id, kp_id, title, year, is_series FROM movies
+                WHERE chat_id = %s AND watched = 0
+                ORDER BY id DESC
+                LIMIT 200
+            """, (chat_id,))
+            rows = cur.fetchall()
+        items = []
+        for r in rows:
+            items.append({
+                "film_id": r.get('id') if isinstance(r, dict) else r[0],
+                "kp_id": str(r.get('kp_id') if isinstance(r, dict) else r[1]),
+                "title": r.get('title') if isinstance(r, dict) else r[2],
+                "year": r.get('year') if isinstance(r, dict) else r[3],
+                "is_series": bool(r.get('is_series') if isinstance(r, dict) else (r[4] if len(r) > 4 else 0)),
+            })
+        return jsonify({"success": True, "items": items})
+
+    @app.route('/api/site/series', methods=['GET', 'OPTIONS'])
+    def site_series():
+        if request.method == 'OPTIONS':
+            return jsonify({'status': 'ok'})
+        chat_id = _site_token_to_chat_id()
+        if chat_id is None:
+            return jsonify({"success": False, "error": "Не авторизован"}), 401
+        from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+        conn = get_db_connection()
+        cur = get_db_cursor()
+        with db_lock:
+            cur.execute("""
+                SELECT m.id, m.kp_id, m.title FROM movies m
+                WHERE m.chat_id = %s AND m.is_series = 1
+                ORDER BY m.title
+                LIMIT 100
+            """, (chat_id,))
+            rows = cur.fetchall()
+        series_list = []
+        for r in rows:
+            film_id = r.get('id') if isinstance(r, dict) else r[0]
+            kp_id = str(r.get('kp_id') if isinstance(r, dict) else r[1])
+            title = r.get('title') if isinstance(r, dict) else r[2]
+            with db_lock:
+                cur.execute("""
+                    SELECT season_number, episode_number FROM series_tracking
+                    WHERE chat_id = %s AND film_id = %s AND watched = TRUE
+                    ORDER BY season_number DESC, episode_number DESC LIMIT 1
+                """, (chat_id, film_id))
+                last = cur.fetchone()
+            progress = None
+            if last:
+                s = last.get('season_number') if isinstance(last, dict) else last[0]
+                e = last.get('episode_number') if isinstance(last, dict) else last[1]
+                progress = f"S{s} • E{e}"
+            series_list.append({
+                "film_id": film_id,
+                "kp_id": kp_id,
+                "title": title,
+                "progress": progress,
+            })
+        return jsonify({"success": True, "items": series_list})
+
+    @app.route('/api/site/ratings', methods=['GET', 'OPTIONS'])
+    def site_ratings():
+        if request.method == 'OPTIONS':
+            return jsonify({'status': 'ok'})
+        chat_id = _site_token_to_chat_id()
+        if chat_id is None:
+            return jsonify({"success": False, "error": "Не авторизован"}), 401
+        from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+        conn = get_db_connection()
+        cur = get_db_cursor()
+        with db_lock:
+            cur.execute("""
+                SELECT r.rating, r.kp_id, m.title, m.year, m.id as film_id
+                FROM ratings r
+                JOIN movies m ON r.film_id = m.id AND r.chat_id = m.chat_id
+                WHERE r.chat_id = %s
+                ORDER BY r.id DESC
+                LIMIT 50
+            """, (chat_id,))
+            rows = cur.fetchall()
+        items = []
+        for r in rows:
+            items.append({
+                "rating": r.get('rating') if isinstance(r, dict) else r[0],
+                "kp_id": str(r.get('kp_id') or '') if isinstance(r, dict) else str(r[1] or ''),
+                "title": r.get('title') if isinstance(r, dict) else r[2],
+                "year": r.get('year') if isinstance(r, dict) else r[3],
+                "film_id": r.get('film_id') if isinstance(r, dict) else r[4],
+            })
+        return jsonify({"success": True, "items": items})
 
     logger.info(f"[WEB APP] ===== FLASK ПРИЛОЖЕНИЕ СОЗДАНО =====")
     logger.info(f"[WEB APP] Зарегистрированные роуты: {[str(rule) for rule in app.url_map.iter_rules()]}")
