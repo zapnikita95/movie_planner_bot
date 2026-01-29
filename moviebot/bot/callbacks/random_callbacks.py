@@ -513,23 +513,17 @@ def register_random_callbacks(bot):
                 user_random_state[user_id]['directors'] = []
                 user_random_state[user_id]['actors'] = []
             
-            # Показываем выбор режима (используем код из random_start)
+            # Показываем выбор режима — 1) база, 2) по оценкам в базе (всегда), далее режимы PRO
             from moviebot.utils.helpers import has_recommendations_access
             markup = InlineKeyboardMarkup(row_width=1)
             markup.add(InlineKeyboardButton("🎲 Рандом по своей базе", callback_data="rand_mode:database"))
-            
+            markup.add(InlineKeyboardButton("⭐ По оценкам в базе", callback_data="rand_mode:group_votes"))
             has_rec_access = has_recommendations_access(chat_id, user_id)
-            
             if has_rec_access:
                 markup.add(InlineKeyboardButton("🎬 Рандом по кинопоиску", callback_data="rand_mode:kinopoisk"))
-                markup.add(InlineKeyboardButton("⭐ По оценкам в базе", callback_data="rand_mode:group_votes"))
-            else:
-                markup.add(InlineKeyboardButton("🔒 Рандом по кинопоиску", callback_data="rand_mode_locked:kinopoisk"))
-                markup.add(InlineKeyboardButton("🔒 По оценкам в базе", callback_data="rand_mode_locked:group_votes"))
-            
-            if has_rec_access:
                 markup.add(InlineKeyboardButton("⭐ По моим оценкам (9-10)", callback_data="rand_mode:my_votes"))
             else:
+                markup.add(InlineKeyboardButton("🔒 Рандом по кинопоиску", callback_data="rand_mode_locked:kinopoisk"))
                 markup.add(InlineKeyboardButton("🔒 По моим оценкам (9-10)", callback_data="rand_mode_locked:my_votes"))
             
             markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))

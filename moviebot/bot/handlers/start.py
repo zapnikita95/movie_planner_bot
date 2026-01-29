@@ -161,18 +161,17 @@ def start_menu_callback(call):
             premieres_command(msg)
 
         elif action == 'what_to_watch':
-            # Подменю «Что посмотреть?»: рандом по базе, по кинопоиску, по оценкам, Шазам
+            # Подменю «Что посмотреть?»: 1) база, 2) по оценкам в базе (всегда), далее режимы PRO
             has_rec = has_recommendations_access(chat_id, user_id)
             markup = InlineKeyboardMarkup(row_width=1)
             markup.add(InlineKeyboardButton("🎲 Рандом по своей базе", callback_data="rand_mode:database"))
+            markup.add(InlineKeyboardButton("⭐ По оценкам в базе", callback_data="rand_mode:group_votes"))
             if has_rec:
                 markup.add(InlineKeyboardButton("🎬 Рандом по кинопоиску", callback_data="rand_mode:kinopoisk"))
-                markup.add(InlineKeyboardButton("⭐ По оценкам в базе", callback_data="rand_mode:group_votes"))
                 markup.add(InlineKeyboardButton("⭐ По моим оценкам (9-10)", callback_data="rand_mode:my_votes"))
                 markup.add(InlineKeyboardButton("🔮 Шазам", callback_data="shazam:start"))
             else:
                 markup.add(InlineKeyboardButton("🔒 Рандом по кинопоиску", callback_data="rand_mode_locked:kinopoisk"))
-                markup.add(InlineKeyboardButton("🔒 По оценкам в базе", callback_data="rand_mode_locked:group_votes"))
                 markup.add(InlineKeyboardButton("🔒 По моим оценкам (9-10)", callback_data="rand_mode_locked:my_votes"))
                 markup.add(InlineKeyboardButton("🔒 Шазам", callback_data="rand_mode_locked:shazam"))
             markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))

@@ -2356,25 +2356,16 @@ def random_start(message):
                 'actors': []
             }
             
-            # Шаг 0: Выбор режима
+            # Шаг 0: Выбор режима — 1) база, 2) по оценкам в базе (всегда), далее режимы PRO
             markup = InlineKeyboardMarkup(row_width=1)
             markup.add(InlineKeyboardButton("🎲 Рандом по своей базе", callback_data="rand_mode:database"))
-            
-            # Проверяем доступ к рекомендациям
+            markup.add(InlineKeyboardButton("⭐ По оценкам в базе", callback_data="rand_mode:group_votes"))
             has_rec_access = has_recommendations_access(chat_id, user_id)
-            
             if has_rec_access:
                 markup.add(InlineKeyboardButton("🎬 Рандом по кинопоиску", callback_data="rand_mode:kinopoisk"))
-                markup.add(InlineKeyboardButton("⭐ По оценкам в базе", callback_data="rand_mode:group_votes"))
-            else:
-                markup.add(InlineKeyboardButton("🔒 Рандом по кинопоиску", callback_data="rand_mode_locked:kinopoisk"))
-                markup.add(InlineKeyboardButton("🔒 По оценкам в базе", callback_data="rand_mode_locked:group_votes"))
-            
-            # Для режима "По моим оценкам" - если есть подписка, показываем без замочка
-            # Проверка импортированных оценок будет при нажатии
-            if has_rec_access:
                 markup.add(InlineKeyboardButton("⭐ По моим оценкам (9-10)", callback_data="rand_mode:my_votes"))
             else:
+                markup.add(InlineKeyboardButton("🔒 Рандом по кинопоиску", callback_data="rand_mode_locked:kinopoisk"))
                 markup.add(InlineKeyboardButton("🔒 По моим оценкам (9-10)", callback_data="rand_mode_locked:my_votes"))
             
             markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
@@ -5560,25 +5551,17 @@ def handle_rand_mode(call):
             logger.info(f"[RANDOM CALLBACK] Back to mode selection")
             bot.answer_callback_query(call.id)
             
-            # Показываем выбор режима
+            # Показываем выбор режима — 1) база, 2) по оценкам в базе (всегда), далее режимы PRO
             markup = InlineKeyboardMarkup(row_width=1)
             markup.add(InlineKeyboardButton("🎲 Рандом по своей базе", callback_data="rand_mode:database"))
-            
-            # Проверяем доступ к рекомендациям
+            markup.add(InlineKeyboardButton("⭐ По оценкам в базе", callback_data="rand_mode:group_votes"))
             has_rec_access = has_recommendations_access(chat_id, user_id)
-            
             if has_rec_access:
                 markup.add(InlineKeyboardButton("🎬 Рандом по кинопоиску", callback_data="rand_mode:kinopoisk"))
-                markup.add(InlineKeyboardButton("⭐ По оценкам в базе", callback_data="rand_mode:group_votes"))
-            else:
-                markup.add(InlineKeyboardButton("🔒 Рандом по кинопоиску", callback_data="rand_mode_locked:kinopoisk"))
-                markup.add(InlineKeyboardButton("🔒 По оценкам в базе", callback_data="rand_mode_locked:group_votes"))
-            
-            if has_rec_access:
                 markup.add(InlineKeyboardButton("⭐ По моим оценкам (9-10)", callback_data="rand_mode:my_votes"))
             else:
+                markup.add(InlineKeyboardButton("🔒 Рандом по кинопоиску", callback_data="rand_mode_locked:kinopoisk"))
                 markup.add(InlineKeyboardButton("🔒 По моим оценкам (9-10)", callback_data="rand_mode_locked:my_votes"))
-            
             markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
             
             bot.edit_message_text(
@@ -5618,14 +5601,14 @@ def handle_rand_mode(call):
         
         logger.info(f"[RANDOM CALLBACK] Mode: {mode}, user_id={user_id}, chat_id={chat_id}")
         
-        # Проверяем доступ к рекомендациям для режимов, требующих подписку
-        if mode in ['kinopoisk', 'my_votes', 'group_votes']:
+        # Проверяем доступ к рекомендациям только для режимов PRO (по оценкам в базе — всегда доступен)
+        if mode in ['kinopoisk', 'my_votes']:
             has_rec_access = has_recommendations_access(chat_id, user_id)
             logger.info(f"[RANDOM CALLBACK] Mode {mode} requires recommendations access: {has_rec_access}")
             if not has_rec_access:
                 bot.answer_callback_query(
                     call.id, 
-                    "❌ Этот режим доступен только с подпиской на рекомендации. Используйте /payment для оформления подписки.", 
+                    "❌ Этот режим доступен с подпиской 💎 Movie Planner PRO. Используйте /payment.", 
                     show_alert=True
                 )
                 logger.warning(f"[RANDOM CALLBACK] Access denied for mode {mode}, user_id={user_id}")
@@ -5733,23 +5716,22 @@ def handle_rand_mode_locked(call):
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         
-        # ВАЖНО: Проверяем доступ ПЕРЕД показом сообщения о блокировке
-        # Если доступ появился (например, после оплаты), обрабатываем как обычный режим
-        if mode in ['kinopoisk', 'my_votes', 'group_votes']:
+        # По оценкам в базе — всегда доступен; при нажатии на старую кнопку с замком открываем режим
+        if mode == "group_votes":
+            call.data = "rand_mode:group_votes"
+            handle_rand_mode(call)
+            return
+        # Проверяем доступ для остальных заблокированных режимов
+        if mode in ['kinopoisk', 'my_votes']:
             has_rec_access = has_recommendations_access(chat_id, user_id)
             logger.info(f"[RANDOM CALLBACK] Locked mode {mode} - проверка доступа: {has_rec_access}")
-            
             if has_rec_access:
-                # Доступ появился - обрабатываем как обычный режим через handle_rand_mode
-                logger.info(f"[RANDOM CALLBACK] Доступ появился для режима {mode}, вызываем handle_rand_mode")
                 call.data = f"rand_mode:{mode}"
                 handle_rand_mode(call)
                 return
         
         if mode == "kinopoisk":
             message_text = "🎬 Рандом по Кинопоиску доступен с подпиской 💎 Movie Planner PRO. Подключите через /payment"
-        elif mode == "group_votes":
-            message_text = "⭐ Режим «По оценкам в базе» доступен с подпиской 💎 Movie Planner PRO. Подключите через /payment"
         elif mode == "shazam":
             message_text = "🔮 Шазам доступен с подпиской 💎 Movie Planner PRO. Подключите через /payment"
         elif mode == "my_votes":
