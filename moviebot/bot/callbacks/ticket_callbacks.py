@@ -2,7 +2,7 @@
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from moviebot.states import user_ticket_state
-from moviebot.utils.helpers import has_tickets_access
+from moviebot.utils.helpers import has_tickets_access, has_pro_access
 from moviebot.bot.bot_init import bot
 import logging
 
@@ -44,7 +44,7 @@ def add_ticket_from_plan_callback(call):
             try:
                 bot.answer_callback_query(
                     call.id,
-                    "🎫 Загрузка билетов доступна только с подпиской «Билеты» или «Все режимы».\nПодключите через /payment",
+                    "🎫 В групповых чатах загрузка билетов доступна с подпиской 💎 Movie Planner PRO. Подключите через /payment",
                     show_alert=True
                 )
             except:
@@ -98,7 +98,7 @@ def add_ticket_from_plan_callback(call):
             pass
 
 
-# 2. Кнопка "Добавить ещё билет"
+# 2. Кнопка "Добавить ещё билет" (требуется 💎 Movie Planner PRO)
 @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("add_more_tickets:"))
 def add_more_tickets_from_plan(call):
     logger.info(f"[TICKET CALLBACK] add_more_tickets сработал: data='{call.data}'")
@@ -113,6 +113,17 @@ def add_more_tickets_from_plan(call):
 
     user_id = call.from_user.id
     chat_id = call.message.chat.id
+
+    if not has_pro_access(chat_id, user_id):
+        try:
+            bot.answer_callback_query(
+                call.id,
+                "➕ Добавление билетов доступно с подпиской 💎 Movie Planner PRO. Подключите через /payment",
+                show_alert=True
+            )
+        except:
+            pass
+        return
 
     user_ticket_state[user_id] = {
         'step': 'add_more_tickets',
@@ -187,7 +198,7 @@ def ticket_new_callback(call):
             try:
                 bot.edit_message_text(
                     "🎫 <b>Билеты в кино</b>\n\n"
-                    "Вы можете загружать билеты и получать их в боте прямо перед событием с подпиской <b>\"Билеты\"</b>.\n\n"
+                    "В групповых чатах загрузка билетов доступна с подпиской <b>💎 Movie Planner PRO</b>.\n\n"
                     "Используйте /payment для оформления подписки.",
                     chat_id,
                     call.message.message_id,
@@ -229,7 +240,7 @@ def ticket_new_callback(call):
 def handle_ticket_locked(call):
     bot.answer_callback_query(
         call.id,
-        "🎫 Загрузка билетов доступна только с подпиской «Билеты» или «Все режимы».\nПодключите через /payment",
+        "🎫 В групповых чатах загрузка билетов доступна с подпиской 💎 Movie Planner PRO. Подключите через /payment",
         show_alert=True
     )
 

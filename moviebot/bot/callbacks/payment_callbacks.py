@@ -601,7 +601,7 @@ def register_payment_callbacks(bot_instance):
                             'notifications': 'Уведомления о сериалах',
                             'recommendations': 'Рекомендации',
                             'tickets': 'Билеты',
-                            'all': 'Все режимы'
+                            'all': '💎 Movie Planner PRO'
                         }
                         period_names = {
                             'month': 'месяц',
@@ -788,7 +788,7 @@ def register_payment_callbacks(bot_instance):
                             'notifications': 'Уведомления о сериалах',
                             'recommendations': 'Рекомендации',
                             'tickets': 'Билеты',
-                            'all': 'Все режимы'
+                            'all': '💎 Movie Planner PRO'
                         }
                         
                         # Формируем список названий подписок
@@ -930,7 +930,7 @@ def register_payment_callbacks(bot_instance):
                         'notifications': 'Уведомления о сериалах',
                         'recommendations': 'Рекомендации',
                         'tickets': 'Билеты',
-                        'all': 'Все режимы'
+                        'all': '💎 Movie Planner PRO'
                     }
                     plan_name = plan_names.get(plan_type, plan_type)
                     
@@ -2216,7 +2216,7 @@ def register_payment_callbacks(bot_instance):
                         'notifications': 'Уведомления о сериалах',
                         'recommendations': 'Рекомендации',
                         'tickets': 'Билеты',
-                        'all': 'Все режимы'
+                        'all': '💎 Movie Planner PRO'
                     }
                     plan_name = plan_names.get(plan_type, plan_type)
                     
@@ -2574,29 +2574,25 @@ def register_payment_callbacks(bot_instance):
                         text += f"• {plan_name}\n"
                     text += "\n"
             
-                text += "Выберите тариф:"
+                text += "Выберите период подписки 💎 Movie Planner PRO:"
+                pro_desc = (
+                    "\n\n<b>С Movie Planner PRO вы получаете:</b>\n"
+                    "🎯 Умные рекомендации — на основе вашей базы и оценок\n"
+                    "📺 Полноценный трекер сериалов — серии, сезоны, прогресс\n"
+                    "🎟 Билеты и напоминания — ничего не забыть перед сеансом\n"
+                    "🧠 Расширенное планирование — кино дома и в кинотеатре\n"
+                    "👥 Совместный опыт — удобнее выбирать фильмы вместе"
+                )
+                text += pro_desc
             
                 markup = InlineKeyboardMarkup(row_width=1)
-            
-                # Если есть пакетная подписка, не показываем другие тарифы
                 if has_all:
-                    text += "\n\n⚠️ <b>У вас уже есть подписка \"Все режимы\".</b>\n"
-                    text += "Вы не можете добавить дополнительные подписки к пакетной."
+                    text += "\n\n⚠️ <b>У вас уже есть подписка 💎 Movie Planner PRO.</b>"
                 else:
-                    # Показываем только те тарифы, которых у пользователя НЕТ
-                    if 'notifications' not in existing_plan_types:
-                        markup.add(InlineKeyboardButton("🔔 Уведомления (100₽/мес)", callback_data="payment:subscribe:personal:notifications:month"))
-                    if 'recommendations' not in existing_plan_types:
-                        markup.add(InlineKeyboardButton("🎯 Рекомендации (100₽/мес)", callback_data="payment:subscribe:personal:recommendations:month"))
-                    if 'tickets' not in existing_plan_types:
-                        markup.add(InlineKeyboardButton("🎫 Билеты (150₽/мес)", callback_data="payment:subscribe:personal:tickets:month"))
-                    # "Все режимы" всегда показываем, так как это замена текущих подписок
-                    markup.add(InlineKeyboardButton("📦 Все режимы - месяц (249₽/мес)", callback_data="payment:subscribe:personal:all:month"))
-                    markup.add(InlineKeyboardButton("📦 Все режимы - 3 месяца (599₽)", callback_data="payment:subscribe:personal:all:3months"))
-                    markup.add(InlineKeyboardButton("📦 Все режимы - год (1799₽)", callback_data="payment:subscribe:personal:all:year"))
-                    markup.add(InlineKeyboardButton("📦 Все режимы - навсегда (2299₽)", callback_data="payment:subscribe:personal:all:lifetime"))
-                    
-                    # Тестовый тариф только для владельца бота
+                    markup.add(InlineKeyboardButton("💎 Movie Planner PRO — месяц (249₽/мес)", callback_data="payment:subscribe:personal:all:month"))
+                    markup.add(InlineKeyboardButton("💎 Movie Planner PRO — 3 месяца (599₽)", callback_data="payment:subscribe:personal:all:3months"))
+                    markup.add(InlineKeyboardButton("💎 Movie Planner PRO — год (1799₽)", callback_data="payment:subscribe:personal:all:year"))
+                    markup.add(InlineKeyboardButton("💎 Movie Planner PRO — навсегда (2299₽)", callback_data="payment:subscribe:personal:all:lifetime"))
                     from moviebot.bot.handlers.promo import get_bot_owner_id
                     owner_id = get_bot_owner_id()
                     if owner_id and user_id == owner_id:
@@ -2761,17 +2757,10 @@ def register_payment_callbacks(bot_instance):
                     
                         markup = InlineKeyboardMarkup(row_width=1)
                         # Показываем только те тарифы, которых у группы НЕТ
-                        if 'notifications' not in existing_group_plan_types:
-                            markup.add(InlineKeyboardButton(f"🔔 Уведомления ({prices['notifications']['month']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:notifications:month:{chat_id}"))
-                        if 'recommendations' not in existing_group_plan_types:
-                            markup.add(InlineKeyboardButton(f"🎯 Рекомендации ({prices['recommendations']['month']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:recommendations:month:{chat_id}"))
-                        if 'tickets' not in existing_group_plan_types:
-                            markup.add(InlineKeyboardButton(f"🎫 Билеты ({prices['tickets']['month']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:tickets:month:{chat_id}"))
-                        # "Все режимы" всегда показываем, так как это замена текущих подписок
-                        markup.add(InlineKeyboardButton(f"📦 Все режимы - месяц ({prices['all']['month']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:all:month:{chat_id}"))
-                        markup.add(InlineKeyboardButton(f"📦 Все режимы - 3 месяца ({prices['all']['3months']}₽/3 мес)", callback_data=f"payment:subscribe:group:{group_size}:all:3months:{chat_id}"))
-                        markup.add(InlineKeyboardButton(f"📦 Все режимы - год ({prices['all']['year']}₽/год)", callback_data=f"payment:subscribe:group:{group_size}:all:year:{chat_id}"))
-                        markup.add(InlineKeyboardButton(f"📦 Все режимы - навсегда ({prices['all']['lifetime']}₽)", callback_data=f"payment:subscribe:group:{group_size}:all:lifetime:{chat_id}"))
+                        markup.add(InlineKeyboardButton(f"💎 Movie Planner PRO — месяц ({prices['all']['month']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:all:month:{chat_id}"))
+                        markup.add(InlineKeyboardButton(f"💎 Movie Planner PRO — 3 месяца ({prices['all']['3months']}₽)", callback_data=f"payment:subscribe:group:{group_size}:all:3months:{chat_id}"))
+                        markup.add(InlineKeyboardButton(f"💎 Movie Planner PRO — год ({prices['all']['year']}₽)", callback_data=f"payment:subscribe:group:{group_size}:all:year:{chat_id}"))
+                        markup.add(InlineKeyboardButton(f"💎 Movie Planner PRO — навсегда ({prices['all']['lifetime']}₽)", callback_data=f"payment:subscribe:group:{group_size}:all:lifetime:{chat_id}"))
                         # Проверяем, откуда пришли в тарифы (из действующей подписки или из главного меню)
                         back_callback = "payment:active:group:current" if user_payment_state.get(user_id, {}).get('from_active') else "payment:tariffs:group"
                         markup.add(InlineKeyboardButton("◀️ Назад", callback_data=back_callback))
@@ -2928,13 +2917,10 @@ def register_payment_callbacks(bot_instance):
                 text += "Выберите тариф:"
             
                 markup = InlineKeyboardMarkup(row_width=1)
-                markup.add(InlineKeyboardButton(f"🔔 Уведомления ({prices['notifications']['month']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:notifications:month"))
-                markup.add(InlineKeyboardButton(f"🎯 Рекомендации ({prices['recommendations']['month']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:recommendations:month"))
-                markup.add(InlineKeyboardButton(f"🎫 Билеты ({prices['tickets']['month']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:tickets:month"))
-                markup.add(InlineKeyboardButton(f"📦 Все режимы - месяц ({prices['all']['month']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:all:month"))
-                markup.add(InlineKeyboardButton(f"📦 Все режимы - 3 месяца ({prices['all']['3months']}₽/3 мес)", callback_data=f"payment:subscribe:group:{group_size}:all:3months"))
-                markup.add(InlineKeyboardButton(f"📦 Все режимы - год ({prices['all']['year']}₽/год)", callback_data=f"payment:subscribe:group:{group_size}:all:year"))
-                markup.add(InlineKeyboardButton(f"📦 Все режимы - навсегда ({prices['all']['lifetime']}₽)", callback_data=f"payment:subscribe:group:{group_size}:all:lifetime"))
+                markup.add(InlineKeyboardButton(f"💎 Movie Planner PRO — месяц ({prices['all']['month']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:all:month"))
+                markup.add(InlineKeyboardButton(f"💎 Movie Planner PRO — 3 месяца ({prices['all']['3months']}₽)", callback_data=f"payment:subscribe:group:{group_size}:all:3months"))
+                markup.add(InlineKeyboardButton(f"💎 Movie Planner PRO — год ({prices['all']['year']}₽)", callback_data=f"payment:subscribe:group:{group_size}:all:year"))
+                markup.add(InlineKeyboardButton(f"💎 Movie Planner PRO — навсегда ({prices['all']['lifetime']}₽)", callback_data=f"payment:subscribe:group:{group_size}:all:lifetime"))
                 # Проверяем, откуда пришли в тарифы (из действующей подписки или из главного меню)
                 back_callback = "payment:active:group:current" if user_payment_state.get(user_id, {}).get('from_active') else f"payment:group_size:{group_size}"
                 markup.add(InlineKeyboardButton("◀️ Назад", callback_data=back_callback))
@@ -3632,7 +3618,7 @@ def register_payment_callbacks(bot_instance):
                         'notifications': 'Уведомления о сериалах',
                         'recommendations': 'Рекомендации',
                         'tickets': 'Билеты',
-                        'all': 'Все режимы'
+                        'all': '💎 Movie Planner PRO'
                     }
                     
                     text = "✏️ <b>Изменить подписку</b>\n\n"
@@ -3792,7 +3778,7 @@ def register_payment_callbacks(bot_instance):
                         'notifications': 'Уведомления о сериалах',
                         'recommendations': 'Рекомендации',
                         'tickets': 'Билеты',
-                        'all': 'Все режимы'
+                        'all': '💎 Movie Planner PRO'
                     }
                     
                     # Определяем названия периодов
@@ -5122,7 +5108,7 @@ def register_payment_callbacks(bot_instance):
                         'notifications': 'Уведомления о сериалах',
                         'recommendations': 'Рекомендации',
                         'tickets': 'Билеты',
-                        'all': 'Все режимы'
+                        'all': '💎 Movie Planner PRO'
                     }
                     
                     text += f"\n\n⚠️ <b>У вас уже есть активные подписки:</b>\n"

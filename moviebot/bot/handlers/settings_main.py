@@ -16,7 +16,7 @@ from moviebot.database.db_operations import (
 import re
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
 
-from moviebot.utils.helpers import has_recommendations_access, has_notifications_access
+from moviebot.utils.helpers import has_recommendations_access, has_notifications_access, has_pro_access
 
 from moviebot.config import PLANS_TZ
 
@@ -56,14 +56,14 @@ def settings_command(message):
         markup = InlineKeyboardMarkup(row_width=1)
         markup.add(InlineKeyboardButton("🕐 Выбрать часовой пояс", callback_data="settings:timezone"))
         
-        # Проверяем доступ к настройкам напоминаний (требуется подписка на уведомления)
-        if has_notifications_access(chat_id, user_id):
+        # Проверяем доступ к настройкам напоминаний (требуется 💎 Movie Planner PRO)
+        if has_pro_access(chat_id, user_id):
             markup.add(InlineKeyboardButton("⏰ Настройки напоминаний", callback_data="settings:notifications"))
         else:
             markup.add(InlineKeyboardButton("🔒 Настройки напоминаний", callback_data="settings:notifications_locked"))
         
-        # Проверяем доступ к импорту базы (требуется подписка на рекомендации)
-        if has_recommendations_access(chat_id, user_id):
+        # Проверяем доступ к импорту базы (требуется 💎 Movie Planner PRO)
+        if has_pro_access(chat_id, user_id):
             markup.add(InlineKeyboardButton("📥 Импорт базы из Кинопоиска", callback_data="settings:import"))
         else:
             markup.add(InlineKeyboardButton("🔒 Импорт базы из Кинопоиска", callback_data="settings:import_locked"))
@@ -122,7 +122,7 @@ def handle_settings_callback(call):
             try:
                 bot.answer_callback_query(
                     call.id,
-                    "⏰ Настройки напоминаний доступны с подпиской 🔔 Уведомления или 📦 Все режимы. Подключите подписку через /payment",
+                    "⏰ Настройки напоминаний доступны с подпиской 💎 Movie Planner PRO. Подключите через /payment",
                     show_alert=True
                 )
             except Exception as e:
@@ -130,9 +130,8 @@ def handle_settings_callback(call):
             return
         
         if action == "import_locked":
-            # Заблокированная кнопка импорта базы
-            # Проверяем доступ еще раз для логирования
-            has_access = has_recommendations_access(chat_id, user_id)
+            # Заблокированная кнопка импорта базы (💎 Movie Planner PRO)
+            has_access = has_pro_access(chat_id, user_id)
             logger.info(f"[SETTINGS] import_locked: user_id={user_id}, chat_id={chat_id}, has_access={has_access}")
             if not has_access:
                 # Дополнительная диагностика для групповых чатов
@@ -154,7 +153,7 @@ def handle_settings_callback(call):
             try:
                 bot.answer_callback_query(
                     call.id,
-                    "📥 Импорт базы из Кинопоиска доступен с подпиской 🎯 Рекомендации или 📦 Все режимы. Подключите подписку через /payment",
+                    "📥 Импорт базы из Кинопоиска доступен с подпиской 💎 Movie Planner PRO. Подключите через /payment",
                     show_alert=True
                 )
             except Exception as e:
@@ -358,8 +357,8 @@ def handle_settings_callback(call):
         bot.answer_callback_query(call.id)
         
         if action == "notifications":
-            # Проверяем доступ к настройкам напоминаний
-            if not has_notifications_access(chat_id, user_id):
+            # Проверяем доступ к настройкам напоминаний (💎 Movie Planner PRO)
+            if not has_pro_access(chat_id, user_id):
                 bot.answer_callback_query(
                     call.id,
                     "🔒 Функционал можно подключить через /payment",
@@ -422,11 +421,11 @@ def handle_settings_callback(call):
             return
         
         if action == "import":
-            # Проверяем доступ к импорту базы из Кинопоиска
-            if not has_recommendations_access(chat_id, user_id):
+            # Проверяем доступ к импорту базы из Кинопоиска (💎 Movie Planner PRO)
+            if not has_pro_access(chat_id, user_id):
                 bot.answer_callback_query(
                     call.id,
-                    "📥 Импорт базы из Кинопоиска доступен с подпиской 🎯 Рекомендации или 📦 Все режимы. Подключите подписку через /payment",
+                    "📥 Импорт базы из Кинопоиска доступен с подпиской 💎 Movie Planner PRO. Подключите через /payment",
                     show_alert=True
                 )
                 return
@@ -755,14 +754,13 @@ def handle_settings_callback(call):
             markup = InlineKeyboardMarkup(row_width=1)
             markup.add(InlineKeyboardButton("🕐 Выбрать часовой пояс", callback_data="settings:timezone"))
             
-            # Проверяем доступ к настройкам напоминаний
-            if has_notifications_access(chat_id, user_id):
+            # Проверяем доступ к настройкам напоминаний и импорту (💎 Movie Planner PRO)
+            if has_pro_access(chat_id, user_id):
                 markup.add(InlineKeyboardButton("⏰ Настройки напоминаний", callback_data="settings:notifications"))
             else:
                 markup.add(InlineKeyboardButton("🔒 Настройки напоминаний", callback_data="settings:notifications_locked"))
             
-            # Проверяем доступ к импорту базы
-            if has_recommendations_access(chat_id, user_id):
+            if has_pro_access(chat_id, user_id):
                 markup.add(InlineKeyboardButton("📥 Импорт базы из Кинопоиска", callback_data="settings:import"))
             else:
                 markup.add(InlineKeyboardButton("🔒 Импорт базы из Кинопоиска", callback_data="settings:import_locked"))

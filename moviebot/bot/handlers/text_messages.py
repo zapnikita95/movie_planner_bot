@@ -33,6 +33,7 @@ from moviebot.states import (
     user_expected_text, user_mark_watched_state
 )
 from moviebot.utils.parsing import parse_session_time, extract_kp_id_from_text
+from moviebot.utils.helpers import has_pro_access
 from moviebot.bot.handlers.list import handle_view_film_reply_internal
 
 # Импорты обработчиков, которые регистрируют себя через декораторы
@@ -2274,7 +2275,8 @@ def main_file_handler(message):
 
             if was_first:
                 markup = InlineKeyboardMarkup(row_width=1)
-                markup.add(InlineKeyboardButton("➕ Добавить ещё билет", callback_data=f"add_more_tickets:{plan_id}"))
+                add_btn = "🔒 Добавить ещё билет" if not has_pro_access(message.chat.id, message.from_user.id) else "➕ Добавить ещё билет"
+                markup.add(InlineKeyboardButton(add_btn, callback_data=f"add_more_tickets:{plan_id}"))
                 markup.add(InlineKeyboardButton("⬅️ К списку мероприятий", callback_data="ticket_new"))
 
                 # В группах используем reply, в личке - следующее сообщение

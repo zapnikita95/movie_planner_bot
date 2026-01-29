@@ -113,11 +113,11 @@ def start_menu_callback(call):
         # Обычный импорт settings_main
         from moviebot.bot.handlers.settings_main import settings_command
 
-        # Обработка locked билетов
+        # Обработка locked билетов (только в группах; в личке билеты открыты для всех)
         if action == 'tickets_locked':
-            text = "🎫 <b>Билеты в кино</b>\n\nВы можете загружать билеты и получать их в боте прямо перед сеансом с подпиской <b>\"Билеты\"</b>.\n\nИспользуйте /payment для оформления подписки."
+            text = "🎫 <b>Билеты в кино</b>\n\nВ групповых чатах загрузка билетов доступна с подпиской <b>💎 Movie Planner PRO</b>.\n\nИспользуйте /payment для оформления подписки."
             markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton("🎫 К подписке Билеты", callback_data="payment:tariffs:personal"))
+            markup.add(InlineKeyboardButton("💎 Movie Planner PRO", callback_data="payment:tariffs:personal"))
             markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
             try:
                 bot.edit_message_text(
@@ -160,10 +160,36 @@ def start_menu_callback(call):
             msg.text = '/premieres'
             premieres_command(msg)
 
+        elif action == 'what_to_watch':
+            # Подменю «Что посмотреть?»: рандом по базе, по кинопоиску, по оценкам, Шазам
+            has_rec = has_recommendations_access(chat_id, user_id)
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("🎲 Рандом по своей базе", callback_data="rand_mode:database"))
+            if has_rec:
+                markup.add(InlineKeyboardButton("🎬 Рандом по кинопоиску", callback_data="rand_mode:kinopoisk"))
+                markup.add(InlineKeyboardButton("⭐ По оценкам в базе", callback_data="rand_mode:group_votes"))
+                markup.add(InlineKeyboardButton("⭐ По моим оценкам (9-10)", callback_data="rand_mode:my_votes"))
+                markup.add(InlineKeyboardButton("🔮 Шазам", callback_data="shazam:start"))
+            else:
+                markup.add(InlineKeyboardButton("🔒 Рандом по кинопоиску", callback_data="rand_mode_locked:kinopoisk"))
+                markup.add(InlineKeyboardButton("🔒 По оценкам в базе", callback_data="rand_mode_locked:group_votes"))
+                markup.add(InlineKeyboardButton("🔒 По моим оценкам (9-10)", callback_data="rand_mode_locked:my_votes"))
+                markup.add(InlineKeyboardButton("🔒 Шазам", callback_data="rand_mode_locked:shazam"))
+            markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+            try:
+                bot.edit_message_text(
+                    "🤔 <b>Что посмотреть?</b>\n\nВыберите режим:",
+                    chat_id, message_id, reply_markup=markup, parse_mode='HTML'
+                )
+            except Exception as e:
+                logger.warning(f"[START MENU] edit what_to_watch: {e}")
+                bot.send_message(chat_id, "🤔 <b>Что посмотреть?</b>\n\nВыберите режим:", reply_markup=markup, parse_mode='HTML', message_thread_id=message_thread_id)
+            return
+
         elif action == 'random':
-            # Исправляем user_id в сообщении - используем call.from_user вместо call.message.from_user
+            # Оставлено для обратной совместимости; основной вход — через «Что посмотреть?»
             msg = call.message
-            msg.from_user = call.from_user  # Используем правильный user_id из callback
+            msg.from_user = call.from_user
             msg.text = '/random'
             random_start(msg)
 
@@ -179,9 +205,9 @@ def start_menu_callback(call):
 
         elif action == 'tickets':
             if not has_tickets_access(chat_id, user_id):
-                text = "🎫 <b>Билеты в кино</b>\n\nВы можете загружать билеты и получать их в боте прямо перед сеансом с подпиской <b>\"Билеты\"</b>.\n\nИспользуйте /payment для оформления подписки."
+                text = "🎫 <b>Билеты в кино</b>\n\nВ групповых чатах загрузка билетов доступна с подпиской <b>💎 Movie Planner PRO</b>.\n\nИспользуйте /payment для оформления подписки."
                 markup = InlineKeyboardMarkup()
-                markup.add(InlineKeyboardButton("🎫 К подписке Билеты", callback_data="payment:tariffs:personal"))
+                markup.add(InlineKeyboardButton("💎 Movie Planner PRO", callback_data="payment:tariffs:personal"))
                 markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
                 try:
                     bot.edit_message_text(
@@ -367,33 +393,21 @@ def back_to_start_menu_callback(call):
                 sub = get_active_subscription(chat_id, user_id, 'personal')
                 if sub:
                     plan_type = sub.get('plan_type', 'all')
-                    plan_names = {
-                        'notifications': 'Уведомления о сериалах',
-                        'recommendations': 'Рекомендации',
-                        'tickets': 'Билеты',
-                        'all': 'Все режимы'
-                    }
-                    plan_name = plan_names.get(plan_type, plan_type)
-                    subscription_info = f"\n\n💎 <b>Ваша подписка:</b> {plan_name}\n"
+                    plan_name = "💎 Movie Planner PRO" if plan_type == 'all' else plan_type
+                    subscription_info = f"\n\n<b>Ваша подписка:</b> {plan_name}\n"
                 else:
-                    subscription_info = "\n\n📦 <b>Базовая версия бота</b>\n"
+                    subscription_info = "\n\n<b>Базовая версия бота</b>\n"
             else:
                 group_sub = get_active_group_subscription_by_chat_id(chat_id)
                 if group_sub:
                     plan_type = group_sub.get('plan_type', 'all')
-                    plan_names = {
-                        'notifications': 'Уведомления о сериалах',
-                        'recommendations': 'Рекомендации',
-                        'tickets': 'Билеты',
-                        'all': 'Все режимы'
-                    }
-                    plan_name = plan_names.get(plan_type, plan_type)
-                    subscription_info = f"\n\n💎 <b>Подписка группы:</b> {plan_name}\n"
+                    plan_name = "💎 Movie Planner PRO" if plan_type == 'all' else plan_type
+                    subscription_info = f"\n\n<b>Подписка группы:</b> {plan_name}\n"
                 else:
-                    subscription_info = "\n\n📦 <b>Базовая версия бота</b>\n"
+                    subscription_info = "\n\n<b>Базовая версия бота</b>\n"
         except Exception as sub_error:
             logger.error(f"[BACK TO MENU] Ошибка получения информации о подписке: {sub_error}", exc_info=True)
-            subscription_info = "\n\n📦 <b>Базовая версия бота</b>\n"
+            subscription_info = "\n\n<b>Базовая версия бота</b>\n"
 
         welcome_text = f"""
 🎬 <b>Главное меню</b>{subscription_info}
@@ -406,12 +420,6 @@ def back_to_start_menu_callback(call):
         markup = InlineKeyboardMarkup()
 
         try:
-            has_shazam_access = has_recommendations_access(chat_id, user_id)
-        except Exception as rec_error:
-            logger.error(f"[BACK TO MENU] Ошибка проверки доступа к рекомендациям: {rec_error}", exc_info=True)
-            has_shazam_access = False
-        
-        try:
             has_tickets = has_tickets_access(chat_id, user_id)
         except Exception as tickets_error:
             logger.error(f"[BACK TO MENU] Ошибка проверки доступа к билетам: {tickets_error}", exc_info=True)
@@ -422,29 +430,21 @@ def back_to_start_menu_callback(call):
             InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"),
             InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres")
         )
-
-        # Строка 2: Поиск / База
+        # Строка 2: только Поиск
+        markup.row(InlineKeyboardButton("🔍 Поиск", callback_data="start_menu:search"))
+        # Строка 3: База (слева) / Расписание (справа)
         markup.row(
-            InlineKeyboardButton("🔍 Поиск", callback_data="start_menu:search"),
-            InlineKeyboardButton("🗄️ База", callback_data="start_menu:database")
+            InlineKeyboardButton("🗄️ База", callback_data="start_menu:database"),
+            InlineKeyboardButton("🗓️ Расписание", callback_data="start_menu:schedule")
         )
-
-        # Строка 3: Рандом / Шазам
-        elias_text = "🔮 Шазам" if has_shazam_access else "🔒 Шазам"
-        markup.row(
-            InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random"),
-            InlineKeyboardButton(elias_text, callback_data="shazam:start")
-        )
-        
-        # Строка 4: Расписание / Билеты
+        # Строка 4: Что посмотреть? (слева) / Билеты (справа); в личке билеты для всех
         tickets_text = "🎫 Билеты" if has_tickets else "🔒 Билеты"
         tickets_callback = "start_menu:tickets" if has_tickets else "start_menu:tickets_locked"
         markup.row(
-            InlineKeyboardButton("🗓️ Расписание", callback_data="start_menu:schedule"),
+            InlineKeyboardButton("🤔 Что посмотреть?", callback_data="start_menu:what_to_watch"),
             InlineKeyboardButton(tickets_text, callback_data=tickets_callback)
         )
-
-        # Строка 5: Оплата / Расширение / Настройки / Помощь (только эмодзи)
+        # Строка 5: Оплата / Расширение / Настройки / Помощь
         markup.row(
             InlineKeyboardButton("💰", callback_data="start_menu:payment"),
             InlineKeyboardButton("💻", callback_data="start_menu:extension"),
@@ -538,33 +538,21 @@ def register_start_handlers(bot):
                 sub = get_active_subscription(chat_id, user_id, 'personal')
                 if sub:
                     plan_type = sub.get('plan_type', 'all')
-                    plan_names = {
-                        'notifications': 'Уведомления о сериалах',
-                        'recommendations': 'Рекомендации',
-                        'tickets': 'Билеты',
-                        'all': 'Все режимы'
-                    }
-                    plan_name = plan_names.get(plan_type, plan_type)
-                    subscription_info = f"\n\n💎 <b>Ваша подписка:</b> {plan_name}\n"
+                    plan_name = "💎 Movie Planner PRO" if plan_type == 'all' else plan_type
+                    subscription_info = f"\n\n<b>Ваша подписка:</b> {plan_name}\n"
                 else:
-                    subscription_info = "\n\n📦 <b>Базовая версия бота</b>\n"
+                    subscription_info = "\n\n<b>Базовая версия бота</b>\n"
             else:
                 group_sub = get_active_group_subscription_by_chat_id(chat_id)
                 if group_sub:
                     plan_type = group_sub.get('plan_type', 'all')
-                    plan_names = {
-                        'notifications': 'Уведомления о сериалах',
-                        'recommendations': 'Рекомендации',
-                        'tickets': 'Билеты',
-                        'all': 'Все режимы'
-                    }
-                    plan_name = plan_names.get(plan_type, plan_type)
-                    subscription_info = f"\n\n💎 <b>Подписка группы:</b> {plan_name}\n"
+                    plan_name = "💎 Movie Planner PRO" if plan_type == 'all' else plan_type
+                    subscription_info = f"\n\n<b>Подписка группы:</b> {plan_name}\n"
                 else:
-                    subscription_info = "\n\n📦 <b>Базовая версия бота</b>\n"
+                    subscription_info = "\n\n<b>Базовая версия бота</b>\n"
         except Exception as sub_error:
             logger.error(f"[START] Ошибка получения информации о подписке: {sub_error}", exc_info=True)
-            subscription_info = "\n\n📦 <b>Базовая версия бота</b>\n"
+            subscription_info = "\n\n<b>Базовая версия бота</b>\n"
 
         welcome_text = f"""
 🎬 <b>Главное меню</b>{subscription_info}
@@ -578,12 +566,6 @@ def register_start_handlers(bot):
             markup = InlineKeyboardMarkup()
 
             try:
-                has_shazam_access = has_recommendations_access(chat_id, user_id)
-            except Exception as rec_error:
-                logger.error(f"[BACK TO MENU] Ошибка проверки доступа к рекомендациям: {rec_error}", exc_info=True)
-                has_shazam_access = False
-            
-            try:
                 has_tickets = has_tickets_access(chat_id, user_id)
             except Exception as tickets_error:
                 logger.error(f"[BACK TO MENU] Ошибка проверки доступа к билетам: {tickets_error}", exc_info=True)
@@ -594,29 +576,17 @@ def register_start_handlers(bot):
                 InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"),
                 InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres")
             )
-
-            # Строка 2: Поиск / База
+            markup.row(InlineKeyboardButton("🔍 Поиск", callback_data="start_menu:search"))
             markup.row(
-                InlineKeyboardButton("🔍 Поиск", callback_data="start_menu:search"),
-                InlineKeyboardButton("🗄️ База", callback_data="start_menu:database")
+                InlineKeyboardButton("🗄️ База", callback_data="start_menu:database"),
+                InlineKeyboardButton("🗓️ Расписание", callback_data="start_menu:schedule")
             )
-
-            # Строка 3: Рандом / Шазам
-            elias_text = "🔮 Шазам" if has_shazam_access else "🔒 Шазам"
-            markup.row(
-                InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random"),
-                InlineKeyboardButton(elias_text, callback_data="shazam:start")
-            )
-
-            # Строка 4: Расписание / Билеты
             tickets_text = "🎫 Билеты" if has_tickets else "🔒 Билеты"
             tickets_callback = "start_menu:tickets" if has_tickets else "start_menu:tickets_locked"
             markup.row(
-                InlineKeyboardButton("🗓️ Расписание", callback_data="start_menu:schedule"),
+                InlineKeyboardButton("🤔 Что посмотреть?", callback_data="start_menu:what_to_watch"),
                 InlineKeyboardButton(tickets_text, callback_data=tickets_callback)
             )
-
-            # Строка 5: Оплата / Расширение / Настройки / Помощь (только эмодзи)
             markup.row(
                 InlineKeyboardButton("💰", callback_data="start_menu:payment"),
                 InlineKeyboardButton("💻", callback_data="start_menu:extension"),
@@ -741,11 +711,11 @@ def register_start_handlers(bot):
             # Обычный импорт settings_main
             from moviebot.bot.handlers.settings_main import settings_command
 
-            # Обработка locked билетов
+            # Обработка locked билетов (только в группах)
             if action == 'tickets_locked':
-                text = "🎫 <b>Билеты в кино</b>\n\nВы можете загружать билеты и получать их в боте прямо перед сеансом с подпиской <b>\"Билеты\"</b>.\n\nИспользуйте /payment для оформления подписки."
+                text = "🎫 <b>Билеты в кино</b>\n\nВ групповых чатах загрузка билетов доступна с подпиской <b>💎 Movie Planner PRO</b>.\n\nИспользуйте /payment для оформления подписки."
                 markup = InlineKeyboardMarkup()
-                markup.add(InlineKeyboardButton("🎫 К подписке Билеты", callback_data="payment:tariffs:personal"))
+                markup.add(InlineKeyboardButton("💎 Movie Planner PRO", callback_data="payment:tariffs:personal"))
                 markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
                 try:
                     bot.edit_message_text(
@@ -766,7 +736,6 @@ def register_start_handlers(bot):
                     )
                 return
             
-            # Обработка билетов - показываем список событий
             if action == 'tickets':
                 from moviebot.bot.handlers.series import show_cinema_sessions
                 show_cinema_sessions(chat_id, user_id, None)
@@ -807,9 +776,9 @@ def register_start_handlers(bot):
 
             elif action == 'tickets':
                 if not has_tickets_access(chat_id, user_id):
-                    text = "🎫 <b>Билеты в кино</b>\n\nВы можете загружать билеты и получать их в боте прямо перед сеансом с подпиской <b>\"Билеты\"</b>.\n\nИспользуйте /payment для оформления подписки."
+                    text = "🎫 <b>Билеты в кино</b>\n\nВ групповых чатах загрузка билетов доступна с подпиской <b>💎 Movie Planner PRO</b>.\n\nИспользуйте /payment для оформления подписки."
                     markup = InlineKeyboardMarkup()
-                    markup.add(InlineKeyboardButton("🎫 К подписке Билеты", callback_data="payment:tariffs:personal"))
+                    markup.add(InlineKeyboardButton("💎 Movie Planner PRO", callback_data="payment:tariffs:personal"))
                     markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
                     try:
                         bot.edit_message_text(
@@ -828,11 +797,9 @@ def register_start_handlers(bot):
                             message_thread_id=message_thread_id
                         )
                     return
-                else:
-                    # Показываем список событий
-                    from moviebot.bot.handlers.series import show_cinema_sessions
-                    show_cinema_sessions(chat_id, user_id, None)
-                    return
+                from moviebot.bot.handlers.series import show_cinema_sessions
+                show_cinema_sessions(chat_id, user_id, None)
+                return
 
             elif action == 'payment':
                 msg = call.message
@@ -880,33 +847,21 @@ def register_start_handlers(bot):
                     sub = get_active_subscription(chat_id, user_id, 'personal')
                     if sub:
                         plan_type = sub.get('plan_type', 'all')
-                        plan_names = {
-                            'notifications': 'Уведомления о сериалах',
-                            'recommendations': 'Рекомендации',
-                            'tickets': 'Билеты',
-                            'all': 'Все режимы'
-                        }
-                        plan_name = plan_names.get(plan_type, plan_type)
-                        subscription_info = f"\n\n💎 <b>Ваша подписка:</b> {plan_name}\n"
+                        plan_name = "💎 Movie Planner PRO" if plan_type == 'all' else plan_type
+                        subscription_info = f"\n\n<b>Ваша подписка:</b> {plan_name}\n"
                     else:
-                        subscription_info = "\n\n📦 <b>Базовая версия бота</b>\n"
+                        subscription_info = "\n\n<b>Базовая версия бота</b>\n"
                 else:
                     group_sub = get_active_group_subscription_by_chat_id(chat_id)
                     if group_sub:
                         plan_type = group_sub.get('plan_type', 'all')
-                        plan_names = {
-                            'notifications': 'Уведомления о сериалах',
-                            'recommendations': 'Рекомендации',
-                            'tickets': 'Билеты',
-                            'all': 'Все режимы'
-                        }
-                        plan_name = plan_names.get(plan_type, plan_type)
-                        subscription_info = f"\n\n💎 <b>Подписка группы:</b> {plan_name}\n"
+                        plan_name = "💎 Movie Planner PRO" if plan_type == 'all' else plan_type
+                        subscription_info = f"\n\n<b>Подписка группы:</b> {plan_name}\n"
                     else:
-                        subscription_info = "\n\n📦 <b>Базовая версия бота</b>\n"
+                        subscription_info = "\n\n<b>Базовая версия бота</b>\n"
             except Exception as sub_error:
                 logger.error(f"[BACK TO MENU] Ошибка получения информации о подписке: {sub_error}", exc_info=True)
-                subscription_info = "\n\n📦 <b>Базовая версия бота</b>\n"
+                subscription_info = "\n\n<b>Базовая версия бота</b>\n"
 
             welcome_text = f"""
 🎬 <b>Главное меню</b>{subscription_info}
@@ -919,45 +874,26 @@ def register_start_handlers(bot):
             markup = InlineKeyboardMarkup()
 
             try:
-                has_shazam_access = has_recommendations_access(chat_id, user_id)
-            except Exception as rec_error:
-                logger.error(f"[BACK TO MENU] Ошибка проверки доступа к рекомендациям: {rec_error}", exc_info=True)
-                has_shazam_access = False
-            
-            try:
                 has_tickets = has_tickets_access(chat_id, user_id)
             except Exception as tickets_error:
                 logger.error(f"[BACK TO MENU] Ошибка проверки доступа к билетам: {tickets_error}", exc_info=True)
                 has_tickets = False
 
-            # Строка 1: Сериалы / Премьеры
             markup.row(
                 InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"),
                 InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres")
             )
-
-            # Строка 2: Поиск / База
+            markup.row(InlineKeyboardButton("🔍 Поиск", callback_data="start_menu:search"))
             markup.row(
-                InlineKeyboardButton("🔍 Поиск", callback_data="start_menu:search"),
-                InlineKeyboardButton("🗄️ База", callback_data="start_menu:database")
+                InlineKeyboardButton("🗄️ База", callback_data="start_menu:database"),
+                InlineKeyboardButton("🗓️ Расписание", callback_data="start_menu:schedule")
             )
-
-            # Строка 3: Рандом / Шазам
-            elias_text = "🔮 Шазам" if has_shazam_access else "🔒 Шазам"
-            markup.row(
-                InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random"),
-                InlineKeyboardButton(elias_text, callback_data="shazam:start")
-            )
-            
-            # Строка 4: Расписание / Билеты
             tickets_text = "🎫 Билеты" if has_tickets else "🔒 Билеты"
             tickets_callback = "start_menu:tickets" if has_tickets else "start_menu:tickets_locked"
             markup.row(
-                InlineKeyboardButton("🗓️ Расписание", callback_data="start_menu:schedule"),
+                InlineKeyboardButton("🤔 Что посмотреть?", callback_data="start_menu:what_to_watch"),
                 InlineKeyboardButton(tickets_text, callback_data=tickets_callback)
             )
-
-            # Строка 5: Оплата / Расширение / Настройки / Помощь (только эмодзи)
             markup.row(
                 InlineKeyboardButton("💰", callback_data="start_menu:payment"),
                 InlineKeyboardButton("💻", callback_data="start_menu:extension"),

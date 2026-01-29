@@ -834,30 +834,18 @@ def show_schedule(message):
                 sub = get_active_subscription(chat_id, user_id, 'personal')
                 if sub:
                     plan_type = sub.get('plan_type', 'all')
-                    plan_names = {
-                        'notifications': 'Уведомления о сериалах',
-                        'recommendations': 'Рекомендации',
-                        'tickets': 'Билеты',
-                        'all': 'Все режимы'
-                    }
-                    plan_name = plan_names.get(plan_type, plan_type)
-                    subscription_info = f"\n\n💎 <b>Ваша подписка:</b> {plan_name}\n"
+                    plan_name = "💎 Movie Planner PRO" if plan_type == 'all' else plan_type
+                    subscription_info = f"\n\n<b>Ваша подписка:</b> {plan_name}\n"
                 else:
-                    subscription_info = "\n\n📦 <b>Базовая версия бота</b>\n"
+                    subscription_info = "\n\n<b>Базовая версия бота</b>\n"
             else:
                 group_sub = get_active_group_subscription_by_chat_id(chat_id)
                 if group_sub:
                     plan_type = group_sub.get('plan_type', 'all')
-                    plan_names = {
-                        'notifications': 'Уведомления о сериалах',
-                        'recommendations': 'Рекомендации',
-                        'tickets': 'Билеты',
-                        'all': 'Все режимы'
-                    }
-                    plan_name = plan_names.get(plan_type, plan_type)
-                    subscription_info = f"\n\n💎 <b>Подписка группы:</b> {plan_name}\n"
+                    plan_name = "💎 Movie Planner PRO" if plan_type == 'all' else plan_type
+                    subscription_info = f"\n\n<b>Подписка группы:</b> {plan_name}\n"
                 else:
-                    subscription_info = "\n\n📦 <b>Базовая версия бота</b>\n"
+                    subscription_info = "\n\n<b>Базовая версия бота</b>\n"
             
             welcome_text = f"""
 🎬 <b>Главное меню</b>{subscription_info}
@@ -869,37 +857,23 @@ def show_schedule(message):
             
             markup = InlineKeyboardMarkup()
             
-            has_shazam_access = has_recommendations_access(chat_id, user_id)
             has_tickets = has_tickets_access(chat_id, user_id)
             
-            # Строка 1: Сериалы / Премьеры
             markup.row(
                 InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"),
                 InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres")
             )
-            
-            # Строка 2: Поиск / База
+            markup.row(InlineKeyboardButton("🔍 Поиск", callback_data="start_menu:search"))
             markup.row(
-                InlineKeyboardButton("🔍 Поиск", callback_data="start_menu:search"),
-                InlineKeyboardButton("🗄️ База", callback_data="start_menu:database")
+                InlineKeyboardButton("🗄️ База", callback_data="start_menu:database"),
+                InlineKeyboardButton("🗓️ Расписание", callback_data="start_menu:schedule")
             )
-            
-            # Строка 3: Рандом / Шазам
-            elias_text = "🔮 Шазам" if has_shazam_access else "🔒 Шазам"
-            markup.row(
-                InlineKeyboardButton("🎲 Рандом", callback_data="start_menu:random"),
-                InlineKeyboardButton(elias_text, callback_data="shazam:start")
-            )
-            
-            # Строка 4: Расписание / Билеты
             tickets_text = "🎫 Билеты" if has_tickets else "🔒 Билеты"
             tickets_callback = "start_menu:tickets" if has_tickets else "start_menu:tickets_locked"
             markup.row(
-                InlineKeyboardButton("🗓️ Расписание", callback_data="start_menu:schedule"),
+                InlineKeyboardButton("🤔 Что посмотреть?", callback_data="start_menu:what_to_watch"),
                 InlineKeyboardButton(tickets_text, callback_data=tickets_callback)
             )
-            
-            # Строка 5: Оплата / Расширение / Настройки / Помощь (только эмодзи)
             markup.row(
                 InlineKeyboardButton("💰", callback_data="start_menu:payment"),
                 InlineKeyboardButton("💻", callback_data="start_menu:extension"),
