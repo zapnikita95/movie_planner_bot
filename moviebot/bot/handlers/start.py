@@ -240,6 +240,7 @@ def start_menu_callback(call):
         elif action == 'settings':
             msg = call.message
             msg.text = '/settings'
+            msg.from_user = call.from_user  # пользователь, нажавший кнопку (сообщение от бота — from_user был бы бот)
             settings_command(msg)
 
         elif action == 'help':
@@ -809,6 +810,7 @@ def register_start_handlers(bot):
             elif action == 'settings':
                 msg = call.message
                 msg.text = '/settings'
+                msg.from_user = call.from_user  # пользователь, нажавший кнопку (сообщение от бота — from_user был бы бот)
                 settings_command(msg)
 
             elif action == 'help':
