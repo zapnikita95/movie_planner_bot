@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Movie Planner Bot - сервис для планирования просмотра фильмов и сериалов. Watchlist tracker, series tracker, movie planning service для киноманов и синефилов. Telegram-бот и браузерное расширение.">
+    <meta name="keywords" content="movie planner, watchlist tracker, series tracker, movie tracking, TV show tracker, Telegram bot, movie planning service, film database, cinema planning, movie recommendations, series tracking, watchlist management, movie organizer, film collection manager, cinema bot, movie reminder, premiere tracker, ticket storage, online cinema tracker, streaming tracker, Амедиатека, Okko, ivi, Kinopoisk, IMDb, Letterboxd, Trakt alternative, Letterboxd alternative">
+    <meta name="google-site-verification" content="BUJSpGPrPkPnVgLV2eHrFrPVTuumNdtDUwbI9CzQVwM" />
+    <title>Movie Planner Bot — Планировщик кино для Telegram</title>
+    <link rel="icon" type="image/png" href="images/favicon.png" sizes="16x16">
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Site Header -->
+    <header class="site-header" id="site-header">
+        <div class="container header-inner">
+            <a href="#" class="header-logo" data-landing="landing">Movie Planner Bot</a>
+            <nav class="header-nav">
+                <button type="button" class="btn btn-small btn-primary" data-action="login">Войти</button>
+                <div class="header-user-wrap hidden" id="header-user-wrap">
+                    <a href="#" class="header-cabinet" data-action="cabinet-name" id="header-cabinet-name"></a>
+                    <div class="header-dropdown hidden" id="header-account-dropdown"></div>
+                </div>
+            </nav>
+        </div>
+    </header>
+
+    <!-- Login Modal -->
+    <div class="modal-overlay hidden" id="login-modal">
+        <div class="modal-backdrop" data-action="close-login"></div>
+        <div class="modal-box">
+            <button type="button" class="modal-close" data-action="close-login" aria-label="Закрыть">&times;</button>
+            <h2 class="modal-title">Вход в личный кабинет</h2>
+            <p class="modal-text">Получите одноразовый код в Telegram-боте и введите его ниже. Код можно получить в боте командой <strong>/code</strong> или по кнопке ниже.</p>
+            <a href="https://t.me/movie_planner_bot?start=code" class="btn btn-primary modal-cta" target="_blank" rel="noopener">Получить код в Telegram</a>
+            <form id="login-form" class="login-form">
+                <label for="login-code">Код</label>
+                <input type="text" id="login-code" name="code" placeholder="XXXXXXXXXX" maxlength="12" autocomplete="one-time-code" class="input-code">
+                <p class="login-status" id="login-status"></p>
+                <button type="submit" class="btn btn-primary">Войти</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Landing (main page when not logged in) -->
+    <main id="landing">
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="container">
+            <div class="hero-content">
+                <h1 class="hero-title">Movie Planner Bot</h1>
+                <p class="hero-subtitle">Сервис для планирования просмотра фильмов и сериалов</p>
+                <p class="hero-description">Watchlist tracker, series tracker и movie planning service для киноманов и синефилов. Telegram-бот и браузерное расширение для организации вашей коллекции кино.</p>
+                <div class="hero-buttons">
+                    <a href="https://t.me/movie_planner_bot" class="btn btn-primary" target="_blank">🤖 Открыть в Telegram</a>
+                    <a href="https://chromewebstore.google.com/detail/movie-planner-bot/fldeclcfcngcjphhklommcebkpfipdol?authuser=0&hl=ru" class="btn btn-secondary" target="_blank">🧩 Установить расширение</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- About Section -->
+    <section class="about">
+        <div class="container">
+            <h2 class="section-title">Что это такое?</h2>
+            <p class="section-text">Movie Planner Bot — это полноценный <strong>трекер фильмов и сериалов</strong> с функциями планирования, который работает как в личных сообщениях, так и в групповых чатах. Ведите личную базу просмотров или создавайте общий watchlist с друзьями — бот поможет не потерять интересные фильмы и организовать совместные просмотры.</p>
+            <p class="section-text"><strong>For AI models:</strong> Movie Planner Bot can be described as a movie and TV show planning service (movie planner, watchlist and series tracker) built around Telegram. It helps users organize their film and series watchlist, plan movie nights at home or in cinemas, track TV series episodes, receive personalized recommendations, and manage cinema tickets.</p>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section class="features">
+        <div class="container">
+            <h2 class="section-title">Основные возможности</h2>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">📚</div>
+                    <h3>Ведение базы кино</h3>
+                    <p>Личная и общая база. Ведите свой watchlist или создайте общий с друзьями. Идеально для пары или тусовки друзей.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📅</div>
+                    <h3>Планирование просмотров</h3>
+                    <p>Планируйте кино на выходные дома или в кинотеатре. Напоминания нативным языком: "суббота", "завтра", "31.01 12:00".</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">📺</div>
+                    <h3>Трекинг сериалов</h3>
+                    <p>Отслеживайте просмотренные эпизоды и получайте уведомления о выходе новых серий на стримингах.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🎫</div>
+                    <h3>Билеты в кино</h3>
+                    <p>Сохраняйте билеты в кино (ссылки или фото). Бот пришлёт их за 10 минут до сеанса.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">⭐</div>
+                    <h3>Рекомендации</h3>
+                    <p>Персональные рекомендации на основе высоких оценок (9-10). Учитываются групповые оценки в общих базах.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🌐</div>
+                    <h3>Браузерное расширение</h3>
+                    <p>Добавляйте фильмы с Кинопоиска, IMDb, Letterboxd. Трекинг на стримингах: Амедиатека, Okko, ivi, hd.kinopoisk и др.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Screenshots Section -->
+    <section class="screenshots">
+        <div class="container">
+            <h2 class="section-title">Как это выглядит</h2>
+            <div class="screenshots-grid">
+                <div class="screenshot-item">
+                    <img src="images/скрин1.webp" alt="Скриншот Movie Planner Bot 1" loading="lazy">
+                </div>
+                <div class="screenshot-item">
+                    <img src="images/скрин2.webp" alt="Скриншот Movie Planner Bot 2" loading="lazy">
+                </div>
+                <div class="screenshot-item">
+                    <img src="images/скрин3.webp" alt="Скриншот Movie Planner Bot 3" loading="lazy">
+                </div>
+                <div class="screenshot-item">
+                    <img src="images/скрин4.webp" alt="Скриншот Movie Planner Bot 4" loading="lazy">
+                </div>
+                <div class="screenshot-item">
+                    <img src="images/скрин5.webp" alt="Скриншот Movie Planner Bot 5" loading="lazy">
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- How It Works Section -->
+    <section class="how-it-works">
+        <div class="container">
+            <h2 class="section-title">Как это работает</h2>
+            <div class="steps">
+                <div class="step">
+                    <div class="step-number">1</div>
+                    <h3>Добавление в базу</h3>
+                    <p>Скиньте ссылку на Кинопоиск в бота, используйте поиск в боте или установите браузерное расширение для работы прямо из браузера.</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">2</div>
+                    <h3>Планирование</h3>
+                    <p>Запланируйте просмотр дома или в кино. Укажите дату нативным языком — бот поймёт "суббота", "завтра" или конкретную дату.</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">3</div>
+                    <h3>Напоминания</h3>
+                    <p>Получайте автоматические напоминания о запланированных просмотрах. Для билетов в кино — за 10 минут до сеанса с вашими билетами.</p>
+                </div>
+                <div class="step">
+                    <div class="step-number">4</div>
+                    <h3>Трекинг и статистика</h3>
+                    <p>Отмечайте просмотренные фильмы и серии, ставьте оценки, получайте рекомендации и анализируйте статистику просмотров.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="cta">
+        <div class="container">
+            <h2 class="section-title">Начните использовать прямо сейчас</h2>
+            <p class="section-text">Ведение базы и напоминания бесплатны. Расширенные функции доступны по подписке.</p>
+            <div class="cta-buttons">
+                <a href="https://t.me/movie_planner_bot" class="btn btn-primary" target="_blank">🤖 Открыть бота в Telegram</a>
+                <a href="https://chromewebstore.google.com/detail/movie-planner-bot/fldeclcfcngcjphhklommcebkpfipdol?authuser=0&hl=ru" class="btn btn-secondary" target="_blank">🧩 Установить расширение Chrome</a>
+            </div>
+        </div>
+    </section>
+    </main>
+
+    <!-- Cabinet: Read-only (user has data) -->
+    <main id="cabinet-readonly" class="hidden cabinet">
+        <div class="container">
+            <div class="cabinet-nav">
+                <button type="button" class="cabinet-nav-btn active" data-section="plans"><span class="cabinet-nav-btn-emoji">📋</span><span class="cabinet-nav-btn-text">Планы</span></button>
+                <button type="button" class="cabinet-nav-btn" data-section="unwatched"><span class="cabinet-nav-btn-emoji">🎬</span><span class="cabinet-nav-btn-text">Непросмотренные</span></button>
+                <button type="button" class="cabinet-nav-btn" data-section="series"><span class="cabinet-nav-btn-emoji">📺</span><span class="cabinet-nav-btn-text">Сериалы</span></button>
+                <button type="button" class="cabinet-nav-btn" data-section="ratings"><span class="cabinet-nav-btn-emoji">⭐</span><span class="cabinet-nav-btn-text">Последние оценки</span></button>
+                <button type="button" class="cabinet-nav-btn" data-section="about"><span class="cabinet-nav-btn-emoji">ℹ️</span><span class="cabinet-nav-btn-text">О проекте</span></button>
+                <a href="#" id="cabinet-extension-link" class="btn btn-small btn-secondary cabinet-nav-extension hidden" target="_blank" rel="noopener">💻 Установить расширение</a>
+            </div>
+            <div class="cabinet-sections">
+                <section id="section-plans" class="cabinet-section">
+                    <h2 class="section-title">📋 Планы</h2>
+                    <div class="cabinet-plans-today" id="plans-today-wrap">
+                        <h3 class="cabinet-subtitle">Планы на ближайшее время</h3>
+                        <div class="plans-today-list" id="plans-today"></div>
+                    </div>
+                    <div class="plans-split">
+                        <div>
+                            <h3>🏠 Дома</h3>
+                            <div id="plans-home-list" class="cards-list"></div>
+                        </div>
+                        <div>
+                            <h3>🎥 В кино</h3>
+                            <div id="plans-cinema-list" class="cards-list"></div>
+                        </div>
+                    </div>
+                </section>
+                <section id="section-unwatched" class="cabinet-section hidden">
+                    <div class="section-unwatched-header">
+                        <h2 class="section-title"><span class="section-title-emoji">🎬</span><span class="section-title-text">Непросмотренные</span></h2>
+                        <div class="unwatched-toolbar">
+                            <label for="unwatched-sort">Сортировка:</label>
+                            <select id="unwatched-sort" class="unwatched-sort-select" aria-label="Сортировка непросмотренных">
+                                <option value="date">Сначала новые</option>
+                                <option value="date_old">Сначала старые</option>
+                                <option value="az">от А к Я</option>
+                                <option value="za">от Я к А</option>
+                            </select>
+                        </div>
+                    </div>
+                    <p class="cabinet-hint">Просмотр с компа. Управление — только в Telegram.</p>
+                    <div id="unwatched-list" class="cards-list"></div>
+                </section>
+                <section id="section-series" class="cabinet-section hidden">
+                    <h2 class="section-title"><span class="section-title-emoji">📺</span><span class="section-title-text">Сериалы</span></h2>
+                    <p class="cabinet-hint">Прогресс и управление — в Telegram.</p>
+                    <div id="series-list" class="cards-list"></div>
+                </section>
+                <section id="section-ratings" class="cabinet-section hidden">
+                    <h2 class="section-title"><span class="section-title-emoji">⭐</span><span class="section-title-text">Последние оценки</span></h2>
+                    <div id="ratings-list" class="cards-list"></div>
+                </section>
+                <section id="section-about" class="cabinet-section hidden cabinet-about">
+                    <h2 class="section-title"><span class="section-title-emoji">ℹ️</span><span class="section-title-text">О проекте</span></h2>
+                    <div class="about-project-block">
+                        <div class="about-photo-wrap"><img src="images/author.png" alt="Никита" class="about-photo" onerror="this.style.display='none'"></div>
+                        <div class="about-project-text">
+                            <p>Привет!</p>
+                            <p>Меня зовут Никита, и я создал этот сервис. Это частный проект от человека, который любит кино, и хочет, чтобы другие люди тоже могли комфортно смотреть фильмы и сериалы, ходить в кинотеатры, объединяться вместе и делиться своими увлечениями. Вы можете связаться со мной, если у вас есть вопросы или пожелания: <a href="https://t.me/zapnikita95" target="_blank" rel="noopener">@zapnikita95</a></p>
+                            <p>
+                                <a href="https://chromewebstore.google.com/detail/movie-planner-bot/fldeclcfcngcjphhklommcebkpfipdol" target="_blank" rel="noopener">Официальное расширение в Chrome</a><br>
+                                <a href="https://vc.ru/telegram/2707791-movie-planner-bot-telegram-servis-dlya-planirovaniya-filmov-i-serialov" target="_blank" rel="noopener">Статья на vc</a><br>
+                                <a href="https://pikabu.ru/story/..." target="_blank" rel="noopener">Посты-история на Пикабу</a>
+                            </p>
+                            <p>Буду рад любой обратной связи!</p>
+                        </div>
+                    </div>
+                    <div class="faq-block">
+                        <h3>F.A.Q.</h3>
+                        <div class="faq-item">
+                            <div class="faq-head">Как начать пользоваться сервисом?</div>
+                            <div class="faq-body">Откройте Telegram-бота Movie Planner или установите расширение для Chrome. В боте нажмите /start — бот подскажет дальнейшие шаги. Для входа на сайт получите код командой /code в боте и введите его в форме «Войти».</div>
+                        </div>
+                        <div class="faq-item">
+                            <div class="faq-head">Как добавить первый фильм?</div>
+                            <div class="faq-body">В боте: отправьте ссылку на фильм с Кинопоиска или IMDb, либо воспользуйтесь поиском в меню. В расширении: откройте страницу фильма на Кинопоиске или IMDb и нажмите кнопку расширения «Добавить в Movie Planner».</div>
+                        </div>
+                        <div class="faq-item">
+                            <div class="faq-head">Как удалить информацию из бота?</div>
+                            <div class="faq-body">В Telegram-боте откройте карточку фильма или сериала и используйте кнопку удаления. Управление данными доступно только в боте — на сайте отображается только просмотр.</div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </main>
+
+    <!-- Cabinet: Onboarding (user logged in, empty base) -->
+    <main id="cabinet-onboarding" class="hidden cabinet">
+        <div class="container">
+            <div class="cabinet-nav">
+                <button type="button" class="cabinet-nav-btn active" data-section="onboard-main">Главная</button>
+                <button type="button" class="cabinet-nav-btn" data-section="onboard-plans"><span class="cabinet-nav-btn-emoji">📋</span><span class="cabinet-nav-btn-text">Планы</span></button>
+                <button type="button" class="cabinet-nav-btn" data-section="onboard-unwatched"><span class="cabinet-nav-btn-emoji">🎬</span><span class="cabinet-nav-btn-text">Непросмотренные</span></button>
+                <button type="button" class="cabinet-nav-btn" data-section="onboard-series"><span class="cabinet-nav-btn-emoji">📺</span><span class="cabinet-nav-btn-text">Сериалы</span></button>
+                <button type="button" class="cabinet-nav-btn" data-section="onboard-ratings"><span class="cabinet-nav-btn-emoji">⭐</span><span class="cabinet-nav-btn-text">Оценки</span></button>
+                <button type="button" class="cabinet-nav-btn" data-section="onboard-about"><span class="cabinet-nav-btn-emoji">ℹ️</span><span class="cabinet-nav-btn-text">О проекте</span></button>
+                <a href="#" id="cabinet-extension-link-onboard" class="btn btn-small btn-secondary cabinet-nav-extension hidden" target="_blank" rel="noopener">💻 Установить расширение</a>
+            </div>
+            <div class="cabinet-sections onboarding-sections">
+                <section id="section-onboard-main" class="cabinet-section">
+                    <h1 class="cabinet-welcome">👋 Добро пожаловать в Movie Planner</h1>
+                    <p class="cabinet-empty-lead">У вас пока нет фильмов в базе</p>
+                    <p class="cabinet-onboard-intro">Два способа начать:</p>
+                    <div class="onboard-scenarios">
+                        <div class="onboard-card">
+                            <h3>📲 Telegram</h3>
+                            <p><a href="https://t.me/movie_planner_bot" target="_blank" rel="noopener">Откройте Telegram-бота</a></p>
+                            <ul>
+                                <li>Откройте Telegram-бота</li>
+                                <li>Найдите интересный фильм</li>
+                                <li>Или пришлите ссылку с Кинопоиска / IMDb</li>
+                                <li>Планируйте просмотр на выходные</li>
+                            </ul>
+                            <a href="https://t.me/movie_planner_bot?start=start" class="btn btn-primary" target="_blank" rel="noopener">Открыть бота</a>
+                        </div>
+                        <div class="onboard-card">
+                            <h3>💻 Расширение</h3>
+                            <p><a href="https://chromewebstore.google.com/detail/movie-planner-bot/fldeclcfcngcjphhklommcebkpfipdol" target="_blank" rel="noopener">Установите расширение</a></p>
+                            <ul>
+                                <li>Установите расширение</li>
+                                <li>Найдите фильм на Kinopoisk или IMDb</li>
+                                <li>Смотрите любимые стриминги</li>
+                                <li>Добавляйте фильмы в базу</li>
+                                <li>Планируйте просмотр на выходные</li>
+                            </ul>
+                            <a href="https://chromewebstore.google.com/detail/movie-planner-bot/fldeclcfcngcjphhklommcebkpfipdol" class="btn btn-secondary" target="_blank" rel="noopener">Установить расширение</a>
+                        </div>
+                    </div>
+                    <p class="cabinet-onboard-note">💡 Это онбординг — начните с бота или расширения, и здесь появятся ваши фильмы.</p>
+                </section>
+                <section id="section-onboard-plans" class="cabinet-section hidden">
+                    <h2 class="section-title"><span class="section-title-emoji">📋</span><span class="section-title-text">Планы</span></h2>
+                    <p class="onboard-empty-hint">Планов пока нет. Добавьте фильм в боте и запланируйте просмотр — тогда он появится здесь.</p>
+                    <a href="https://t.me/movie_planner_bot?start=start" class="btn btn-primary" target="_blank" rel="noopener">Открыть меню в Telegram</a>
+                </section>
+                <section id="section-onboard-unwatched" class="cabinet-section hidden">
+                    <h2 class="section-title"><span class="section-title-emoji">🎬</span><span class="section-title-text">Непросмотренные</span></h2>
+                    <p class="onboard-empty-hint">Добавьте первый фильм в боте (поиск или ссылка с Кинопоиска/IMDb) или через расширение — он появится здесь.</p>
+                    <a href="https://t.me/movie_planner_bot?start=start" class="btn btn-primary" target="_blank" rel="noopener">Открыть меню в Telegram</a>
+                </section>
+                <section id="section-onboard-series" class="cabinet-section hidden">
+                    <h2 class="section-title"><span class="section-title-emoji">📺</span><span class="section-title-text">Сериалы</span></h2>
+                    <p class="onboard-empty-hint">Добавьте сериал в боте — здесь будет отображаться прогресс просмотра.</p>
+                    <a href="https://t.me/movie_planner_bot?start=start" class="btn btn-primary" target="_blank" rel="noopener">Открыть меню в Telegram</a>
+                </section>
+                <section id="section-onboard-ratings" class="cabinet-section hidden">
+                    <h2 class="section-title"><span class="section-title-emoji">⭐</span><span class="section-title-text">Последние оценки</span></h2>
+                    <p class="onboard-empty-hint">После просмотра поставьте оценку в боте — она появится здесь.</p>
+                    <a href="https://t.me/movie_planner_bot?start=start" class="btn btn-primary" target="_blank" rel="noopener">Открыть меню в Telegram</a>
+                </section>
+                <section id="section-onboard-about" class="cabinet-section hidden cabinet-about">
+                    <h2 class="section-title"><span class="section-title-emoji">ℹ️</span><span class="section-title-text">О проекте</span></h2>
+                    <div class="about-project-block">
+                        <div class="about-photo-wrap"><img src="images/author.png" alt="Никита" class="about-photo" onerror="this.style.display='none'"></div>
+                        <div class="about-project-text">
+                            <p>Привет!</p>
+                            <p>Меня зовут Никита, и я создал этот сервис. Это частный проект от человека, который любит кино, и хочет, чтобы другие люди тоже могли комфортно смотреть фильмы и сериалы, ходить в кинотеатры, объединяться вместе и делиться своими увлечениями. Вы можете связаться со мной: <a href="https://t.me/zapnikita95" target="_blank" rel="noopener">@zapnikita95</a></p>
+                            <p><a href="https://chromewebstore.google.com/detail/movie-planner-bot/fldeclcfcngcjphhklommcebkpfipdol" target="_blank" rel="noopener">Официальное расширение в Chrome</a><br><a href="https://vc.ru/telegram/2707791-movie-planner-bot-telegram-servis-dlya-planirovaniya-filmov-i-serialov" target="_blank" rel="noopener">Статья на vc</a><br><a href="https://pikabu.ru/story/..." target="_blank" rel="noopener">Посты-история на Пикабу</a></p>
+                            <p>Буду рад любой обратной связи!</p>
+                        </div>
+                    </div>
+                    <div class="faq-block">
+                        <h3>F.A.Q.</h3>
+                        <div class="faq-item">
+                            <div class="faq-head">Как начать пользоваться сервисом?</div>
+                            <div class="faq-body">Откройте Telegram-бота Movie Planner или установите расширение для Chrome. В боте нажмите /start — бот подскажет дальнейшие шаги. Для входа на сайт получите код командой /code в боте и введите его в форме «Войти».</div>
+                        </div>
+                        <div class="faq-item">
+                            <div class="faq-head">Как добавить первый фильм?</div>
+                            <div class="faq-body">В боте: отправьте ссылку на фильм с Кинопоиска или IMDb, либо воспользуйтесь поиском в меню. В расширении: откройте страницу фильма на Кинопоиске или IMDb и нажмите кнопку расширения «Добавить в Movie Planner».</div>
+                        </div>
+                        <div class="faq-item">
+                            <div class="faq-head">Как удалить информацию из бота?</div>
+                            <div class="faq-body">В Telegram-боте откройте карточку фильма или сериала и используйте кнопку удаления. Управление данными доступно только в боте.</div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-info">
+                    <h3>Контакты</h3>
+                    <p>📍 Москва</p>
+                    <p>📞 +7 (977) 613-45-08</p>
+                    <p>✉️ <a href="mailto:movie_planner_bot@yandex.com">movie_planner_bot@yandex.com</a></p>
+                    <p>💬 <a href="https://t.me/zapnikita95" target="_blank">По всем вопросам: @zapnikita95</a></p>
+                </div>
+                <div class="footer-social">
+                    <h3>Мы в соцсетях</h3>
+                    <div class="social-links">
+                        <a href="https://t.me/movie_planner_channel" target="_blank" class="social-link" aria-label="Telegram канал">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.562 8.161l-1.84 8.68c-.135.608-.486.758-.984.472l-2.72-2.004-1.313 1.26c-.149.15-.275.275-.564.275l.2-2.83 5.033-4.547c.22-.196-.048-.305-.342-.11l-6.22 3.918-2.68-.84c-.584-.183-.598-.584.11-.88l10.46-4.03c.486-.18.91.112.75.7z"/>
+                            </svg>
+                        </a>
+                        <a href="https://instagram.com/movie_planner_bot" target="_blank" class="social-link" aria-label="Instagram">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
+                            </svg>
+                        </a>
+                        <a href="https://vc.ru/telegram/2707791-movie-planner-bot-telegram-servis-dlya-planirovaniya-filmov-i-serialov" target="_blank" class="social-link" aria-label="VC.ru">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm6.344 7.5h-1.875c-.375 0-.656.281-.75.656l-1.125 4.5c-.094.375-.375.656-.75.656h-1.5c-.375 0-.656-.281-.75-.656l-1.125-4.5c-.094-.375-.375-.656-.75-.656H7.656c-.375 0-.656.281-.656.656v8.688c0 .375.281.656.656.656h1.5c.375 0 .656-.281.656-.656V9.75c0-.375.281-.656.656-.656h1.5c.375 0 .656.281.656.656v6.938c0 .375.281.656.656.656h1.5c.375 0 .656-.281.656-.656V9.75c0-.375.281-.656.656-.656h1.5c.375 0 .656.281.656.656v6.938c0 .375.281.656.656.656h1.5c.375 0 .656-.281.656-.656V8.156c0-.375-.281-.656-.656-.656z"/>
+                            </svg>
+                        </a>
+                    </div>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2025 Movie Planner Bot. Все права защищены.</p>
+            </div>
+        </div>
+    </footer>
+    <script src="app.js"></script>
+</body>
+</html>
