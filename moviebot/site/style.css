@@ -739,11 +739,17 @@ section {
   inset: 0;
   width: 100%;
   height: 100%;
+  max-width: 70px;
+  max-height: 95px;
   object-fit: cover;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 24px;
+}
+.plan-card .card-poster-wrap img {
+  min-width: 0;
+  min-height: 0;
 }
 .plan-card .plan-info {
   display: flex;
@@ -795,6 +801,10 @@ section {
     height: 68px;
     min-width: 50px;
     max-width: 50px;
+  }
+  .plan-card .card-poster-wrap img {
+    max-width: 50px;
+    max-height: 68px;
   }
   .plan-card .btn-small {
     font-size: 12px;
@@ -900,12 +910,24 @@ section {
   flex-shrink: 0;
   width: 80px;
   height: 120px;
+  min-width: 80px;
+  max-width: 80px;
   border-radius: 8px;
   overflow: hidden;
   background: rgba(102, 126, 234, 0.15);
   display: flex;
   align-items: center;
   justify-content: center;
+  position: relative;
+}
+.card-poster-wrap img.card-poster {
+  width: 100%;
+  height: 100%;
+  max-width: 80px;
+  max-height: 120px;
+  object-fit: cover;
+  min-width: 0;
+  min-height: 0;
 }
 .card-poster {
   width: 100%;

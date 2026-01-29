@@ -3139,7 +3139,7 @@ def create_web_app(bot):
         cur = get_db_cursor()
         with db_lock:
             cur.execute("""
-                SELECT r.rating, r.kp_id, m.title, m.year, m.id as film_id
+                SELECT r.rating, COALESCE(r.kp_id, m.kp_id) as kp_id, m.title, m.year, m.id as film_id
                 FROM ratings r
                 JOIN movies m ON r.film_id = m.id AND r.chat_id = m.chat_id
                 WHERE r.chat_id = %s
