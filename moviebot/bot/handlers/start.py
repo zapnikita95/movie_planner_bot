@@ -574,6 +574,34 @@ def register_start_handlers(bot):
                     pass
             return
         
+        # Deep link: ?start=search — открыть поиск
+        if start_param and start_param.strip().lower() == 'search':
+            try:
+                from moviebot.bot.handlers.series import handle_search
+                setattr(message, 'text', '/search')
+                handle_search(message)
+            except Exception as e:
+                logger.error(f"[START SEARCH] Ошибка: {e}", exc_info=True)
+            return
+        # Deep link: ?start=premieres — открыть премьеры
+        if start_param and start_param.strip().lower() == 'premieres':
+            try:
+                from moviebot.bot.handlers.series import premieres_command
+                setattr(message, 'text', '/premieres')
+                premieres_command(message)
+            except Exception as e:
+                logger.error(f"[START PREMIERES] Ошибка: {e}", exc_info=True)
+            return
+        # Deep link: ?start=random — открыть «Случайный фильм из базы»
+        if start_param and start_param.strip().lower() == 'random':
+            try:
+                from moviebot.bot.handlers.series import random_start
+                setattr(message, 'text', '/random')
+                random_start(message)
+            except Exception as e:
+                logger.error(f"[START RANDOM] Ошибка: {e}", exc_info=True)
+            return
+        
         # Обработка deep link для тегов
         if start_param and start_param.startswith('tag_'):
             short_code = start_param.replace('tag_', '')

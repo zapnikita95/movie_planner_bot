@@ -6,8 +6,8 @@ Thank you for reviewing our extension. Below is important information about Movi
 
 WHAT THE EXTENSION DOES:
 Movie Planner is a browser extension that integrates with a Telegram bot service for movie and TV show planning, watchlist management, and viewing progress tracking. The extension allows users to:
-- Add movies from Kinopoisk, IMDb, and Letterboxd to their personal database in Telegram bot
-- Track viewing progress on streaming platforms (Ivi, Tvoe, Amediateka and other)
+- Add movies from movie info sites to their personal database in Telegram bot
+- The extension automatically detects a movie or series on the viewing page of many Russian streaming services
 - Mark watched episodes and films directly from streaming pages
 - Rate films after watching
 - Plan movie viewings and store cinema tickets
@@ -15,7 +15,7 @@ Movie Planner is a browser extension that integrates with a Telegram bot service
 
 PERMISSIONS EXPLANATION:
 
-1. Host Permissions (kinopoisk.ru, imdb.com, letterboxd.com, streaming platforms, etc.):
+1. Host Permissions (movie/series info sites, streaming platforms, cinema sites):
    - Used to extract movie/series information from pages (titles, IDs, years)
    - Used to detect content on streaming platforms and show tracking widgets
    - All requests are made only to extract publicly available information
@@ -61,7 +61,7 @@ USER DATA:
 - Extension acts as a bridge between browser and Telegram bot service
 
 TESTING:
-- Extension works on: Kinopoisk, IMDb, Letterboxd, Ivi, Tvoe, Amediateka and other streaming platforms
+- Extension works on movie/series info sites and on the viewing page of many Russian streaming services
 - All features require user to be authorized via Telegram bot first
 - Extension shows clear instructions if user is not authorized
 

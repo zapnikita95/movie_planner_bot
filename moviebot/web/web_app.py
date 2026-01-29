@@ -2836,6 +2836,20 @@ def create_web_app(bot):
             logger.error(f"[SITE API] Ошибка проверки токена: {e}", exc_info=True)
         return None
 
+    @app.route('/api/site/config', methods=['GET', 'OPTIONS'])
+    def site_config():
+        """Публичный конфиг: ссылки на расширения Chrome/Opera из env (для кнопки «Установить расширение»)."""
+        if request.method == 'OPTIONS':
+            return jsonify({'status': 'ok'})
+        default_ext = 'https://chromewebstore.google.com/detail/movie-planner-bot/fldeclcfcngcjphhklommcebkpfipdol'
+        chrome_url = os.environ.get('CHROME_EXTENSION_URL', default_ext) or default_ext
+        opera_url = os.environ.get('OPERA_EXTENSION_URL', default_ext) or default_ext
+        return jsonify({
+            "success": True,
+            "chromeExtensionUrl": chrome_url,
+            "operaExtensionUrl": opera_url,
+        })
+
     @app.route('/api/site/validate', methods=['POST', 'OPTIONS'])
     def site_validate():
         """Валидация кода с бота, создание сессии сайта. Код не помечается used — можно использовать и в расширении."""
@@ -2891,12 +2905,14 @@ def create_web_app(bot):
                     (token, chat_id, user_id, name, session_expires)
                 )
                 conn.commit()
+            is_personal = (chat_id or 0) > 0
             return jsonify({
                 "success": True,
                 "token": token,
                 "chat_id": chat_id,
                 "name": name,
                 "has_data": has_data,
+                "is_personal": is_personal,
             })
         except Exception as e:
             logger.error(f"[SITE API] validate: {e}", exc_info=True)
@@ -2922,7 +2938,14 @@ def create_web_app(bot):
             cnt = cur.fetchone()
         name = (row.get('name') if isinstance(row, dict) else row[0]) if row else "Профиль"
         movies_count = (cnt.get('count') if isinstance(cnt, dict) else cnt[0]) or 0
-        return jsonify({"success": True, "name": name, "has_data": movies_count > 0})
+        is_personal = (chat_id or 0) > 0
+        return jsonify({
+            "success": True,
+            "name": name,
+            "has_data": movies_count > 0,
+            "chat_id": chat_id,
+            "is_personal": is_personal,
+        })
 
     @app.route('/api/site/plans', methods=['GET', 'OPTIONS'])
     def site_plans():
@@ -3002,19 +3025,63 @@ def create_web_app(bot):
         from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
         conn = get_db_connection()
         cur = get_db_cursor()
+        user_id_for_series = chat_id
         with db_lock:
-            cur.execute("""
-                SELECT m.id, m.kp_id, m.title FROM movies m
-                WHERE m.chat_id = %s AND m.is_series = 1
-                ORDER BY m.title
-                LIMIT 100
-            """, (chat_id,))
-            rows = cur.fetchall()
+            try:
+                cur.execute("""
+                    SELECT 
+                        m.id AS film_id,
+                        m.kp_id,
+                        m.title,
+                        COALESCE(m.is_ongoing, FALSE) AS is_ongoing,
+                        COUNT(st.id) AS watched_episodes_count,
+                        BOOL_OR(ss.subscribed = TRUE) AS has_subscription
+                    FROM movies m
+                    LEFT JOIN series_tracking st 
+                        ON st.film_id = m.id AND st.chat_id = %s AND st.user_id = %s AND st.watched = TRUE
+                    LEFT JOIN series_subscriptions ss 
+                        ON ss.film_id = m.id AND ss.chat_id = %s AND ss.user_id = %s AND ss.subscribed = TRUE
+                    WHERE m.chat_id = %s AND m.is_series = 1
+                    GROUP BY m.id, m.kp_id, m.title, m.is_ongoing
+                    LIMIT 100
+                """, (chat_id, user_id_for_series, chat_id, user_id_for_series, chat_id))
+                rows = cur.fetchall()
+            except Exception as e:
+                if 'is_ongoing' in str(e).lower() or 'column' in str(e).lower():
+                    cur.execute("""
+                        SELECT m.id, m.kp_id, m.title FROM movies m
+                        WHERE m.chat_id = %s AND m.is_series = 1
+                        ORDER BY m.title LIMIT 100
+                    """, (chat_id,))
+                    rows = cur.fetchall()
+                    series_list = []
+                    for r in rows:
+                        film_id = r.get('id') if isinstance(r, dict) else r[0]
+                        kp_id = str(r.get('kp_id') if isinstance(r, dict) else r[1])
+                        title = r.get('title') if isinstance(r, dict) else r[2]
+                        with db_lock:
+                            cur.execute("""
+                                SELECT season_number, episode_number FROM series_tracking
+                                WHERE chat_id = %s AND film_id = %s AND watched = TRUE
+                                ORDER BY season_number DESC, episode_number DESC LIMIT 1
+                            """, (chat_id, film_id))
+                            last = cur.fetchone()
+                        progress = None
+                        if last:
+                            s = last.get('season_number') if isinstance(last, dict) else last[0]
+                            e = last.get('episode_number') if isinstance(last, dict) else last[1]
+                            progress = f"S{s} • E{e}"
+                        series_list.append({"film_id": film_id, "kp_id": kp_id, "title": title, "progress": progress})
+                    return jsonify({"success": True, "items": series_list})
+                raise
         series_list = []
         for r in rows:
-            film_id = r.get('id') if isinstance(r, dict) else r[0]
+            film_id = r.get('film_id') if isinstance(r, dict) else r[0]
             kp_id = str(r.get('kp_id') if isinstance(r, dict) else r[1])
             title = r.get('title') if isinstance(r, dict) else r[2]
+            is_ongoing = bool(r.get('is_ongoing') if isinstance(r, dict) else (r[3] if len(r) > 3 else False))
+            watched_count = r.get('watched_episodes_count') if isinstance(r, dict) else (r[4] if len(r) > 4 else 0)
+            has_subscription = bool(r.get('has_subscription') if isinstance(r, dict) else (r[5] if len(r) > 5 else False))
             with db_lock:
                 cur.execute("""
                     SELECT season_number, episode_number FROM series_tracking
@@ -3032,7 +3099,25 @@ def create_web_app(bot):
                 "kp_id": kp_id,
                 "title": title,
                 "progress": progress,
+                "is_ongoing": is_ongoing,
+                "watched_count": int(watched_count or 0),
+                "has_subscription": has_subscription,
             })
+        def get_sort_priority(item):
+            io = item.get('is_ongoing') or False
+            hs = item.get('has_subscription') or False
+            wc = item.get('watched_count') or 0
+            started = wc > 0
+            if started:
+                if io and hs: return 1
+                if io and not hs: return 2
+                if not io and hs: return 3
+                return 4
+            if io and hs: return 5
+            if io and not hs: return 6
+            if not io and hs: return 7
+            return 8
+        series_list.sort(key=get_sort_priority)
         return jsonify({"success": True, "items": series_list})
 
     @app.route('/api/site/ratings', methods=['GET', 'OPTIONS'])
