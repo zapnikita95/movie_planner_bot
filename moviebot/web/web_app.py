@@ -65,6 +65,14 @@ def create_web_app(bot):
 
     logger.info("[WEB APP] Flask app создан внутри create_web_app")
 
+    # Гарантируем наличие таблиц (в т.ч. site_sessions) при любом способе запуска (main.py или gunicorn)
+    try:
+        from moviebot.database.db_connection import init_database
+        init_database()
+        logger.info("[WEB APP] init_database() выполнен (таблицы site_sessions и др. проверены)")
+    except Exception as e:
+        logger.warning(f"[WEB APP] init_database при старте: {e}", exc_info=True)
+
     @app.route('/webhook', methods=['POST', 'GET'])
     def webhook():
         logger.info("=" * 80)

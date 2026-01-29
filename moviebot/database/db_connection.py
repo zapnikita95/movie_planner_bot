@@ -670,6 +670,28 @@ def init_database():
         logger.error(f"Ошибка при создании таблицы extension_links: {e}", exc_info=True)
         conn.rollback()
     
+    # Таблица сессий сайта (личный кабинет)
+    try:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS site_sessions (
+                id SERIAL PRIMARY KEY,
+                token TEXT UNIQUE NOT NULL,
+                chat_id BIGINT NOT NULL,
+                user_id BIGINT NOT NULL,
+                name TEXT NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+                expires_at TIMESTAMP WITH TIME ZONE NOT NULL
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_site_sessions_token ON site_sessions (token)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_site_sessions_chat_id ON site_sessions (chat_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_site_sessions_expires ON site_sessions (expires_at)')
+        conn.commit()
+        logger.info("Таблица site_sessions создана")
+    except Exception as e:
+        logger.error(f"Ошибка при создании таблицы site_sessions: {e}", exc_info=True)
+        conn.rollback()
+    
     # Таблицы для тегов/подборок фильмов
     try:
         # Таблица тегов (подборок)
