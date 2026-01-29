@@ -207,7 +207,7 @@ def create_subscription_payment(
         'notifications': 'Уведомления о сериалах',
         'recommendations': 'Персональные рекомендации',
         'tickets': 'Билеты в кино',
-        'all': 'Все режимы'
+        'all': '💎 Movie Planner PRO'
     }
     plan_name = plan_names.get(plan_type, plan_type)
     
@@ -326,7 +326,7 @@ def create_recurring_payment(
         'notifications': 'Уведомления о сериалах',
         'recommendations': 'Персональные рекомендации',
         'tickets': 'Билеты в кино',
-        'all': 'Все режимы'
+        'all': '💎 Movie Planner PRO'
     }
     plan_name = plan_names.get(plan_type, plan_type)
     

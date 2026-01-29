@@ -52,7 +52,7 @@ def _process_promo_success(message, state, promo_code, discounted_price, message
             'notifications': 'Уведомления о сериалах',
             'recommendations': 'Персональные рекомендации',
             'tickets': 'Билеты в кино',
-            'all': 'Все режимы'
+            'all': '💎 Movie Planner PRO'
         }
         plan_name = plan_names.get(plan_type, plan_type)
         

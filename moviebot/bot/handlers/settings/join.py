@@ -146,7 +146,7 @@ def join_command(message):
                                 'notifications': 'Уведомления о сериалах',
                                 'recommendations': 'Рекомендации',
                                 'tickets': 'Билеты',
-                                'all': 'Все режимы'
+                                'all': '💎 Movie Planner PRO'
                             }
                             plan_name = plan_names.get(plan_type, plan_type)
                             

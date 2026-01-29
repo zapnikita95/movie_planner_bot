@@ -1522,7 +1522,7 @@ def show_ticket_callback(call):
         if not has_tickets_access(chat_id, user_id):
             bot.answer_callback_query(
                 call.id,
-                "🎫 Билеты в кино доступны с подпиской 🎫 Билеты или 📦 Все режимы. Подключите подписку через /payment",
+                "🎫 Билеты доступны с подпиской 💎 Movie Planner PRO. Подключите через /payment",
                 show_alert=True
             )
             return
@@ -3505,7 +3505,7 @@ def handle_rand_content_type(call):
         try:
             bot.answer_callback_query(
                 call.id,
-                "🎫 Билеты в кино доступны с подпиской 🎫 Билеты или 📦 Все режимы. Подключите подписку через /payment",
+                "🎫 Билеты доступны с подпиской 💎 Movie Planner PRO. Подключите через /payment",
                 show_alert=True
             )
         except Exception as e:

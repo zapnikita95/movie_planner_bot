@@ -1001,7 +1001,7 @@ def register_payment_callbacks(bot_instance):
                             all_month_price = SUBSCRIPTION_PRICES['group'][group_size_str]['all'].get('month', 0)
                             upgrade_price = all_month_price - current_month_price
                             if upgrade_price > 0:
-                                markup.add(InlineKeyboardButton(f"📦 Все режимы (+{upgrade_price}₽/мес)", callback_data=f"payment:upgrade_plan:{subscription_id}:all"))
+                                markup.add(InlineKeyboardButton(f"💎 Movie Planner PRO (+{upgrade_price}₽/мес)", callback_data=f"payment:upgrade_plan:{subscription_id}:all"))
                         
                             # Предлагаем добавить отдельные функции (если их 1-2)
                             if len(missing_functions) <= 2:
@@ -2478,35 +2478,21 @@ def register_payment_callbacks(bot_instance):
                 # Тарифы для личных подписок
                 text = "👤 <b>Личные тарифы</b>\n\n"
             
-                # Описание бесплатных функций
-                text += "🆓 <b>Бесплатные функции:</b>\n"
+                # Бесплатный формат
+                text += "🆓 <b>Бесплатно:</b>\n"
                 text += "• Добавление фильмов в базу\n"
                 text += "• Отметка просмотренных фильмов\n"
                 text += "• Планирование просмотра\n"
                 text += "• Базовый рандомный выбор фильма\n"
                 text += "• Статистика\n\n"
             
-                # Описание платных функций
-                text += "💎 <b>Платные функции:</b>\n\n"
-                text += "🔔 <b>Уведомления о сериалах:</b> 100₽/мес\n"
-                text += "   • Уведомления о новых сериях\n"
-                text += "   • Настройка времени уведомлений\n"
-                text += "   • Отслеживание прогресса просмотра сезонов\n\n"
-                text += "🎯 <b>Персональные рекомендации:</b> 100₽/мес\n"
-                text += "Вы сможете не просто найти фильм из ранее отложенных к просмотру, но и получить рекомендацию, основываясь на ваших личных или групповых оценках. Вы сможете найти новый фильм, который вам точно подойдет!\n"
-                text += "   • Режим \"По оценкам в базе\" — рекомендации по оценкам фильмов, добавленных в базу чата или группы\n"
-                text += "   • Режим \"Рандом по Кинопоиску\" — случайный фильм из Кинопоиска по фильтрам\n"
-                text += "   • Режим рандомайзера \"По моим оценкам\" — рекомендации по оценкам из Кинопоиска\n"
-                text += "   • Импорт базы из Кинопоиска\n\n"
-                text += "🎫 <b>Билеты в кино:</b> 150₽/мес\n"
-                text += "Вы сможете добавлять билеты на сеансы и любые другие мероприятия в бот, и они всегда будут в доступе по одной кнопке. В день мероприятия вам придет уведомление, а за непосредственно перед мероприятием бот пришлет билеты, чтобы не пришлось их искать на входе. Мы не храним и не обрабатываем файлы.\n"
-                text += "   • Добавление билетов на сеансы и мероприятия\n"
-                text += "   • Настраиваемые уведомления с билетами перед мероприятием\n\n"
-                text += "📦 <b>Все режимы:</b>\n"
-                text += "• 249₽/мес\n"
-                text += "• 599₽ за 3 месяца\n"
-                text += "• 1799₽ за год\n"
-                text += "• 2299₽ навсегда\n\n"
+                # Одна подписка — 💎 Movie Planner PRO (тезисно: сериалы, билеты, рекомендации)
+                text += "💎 <b>Movie Planner PRO</b>\n"
+                text += "• 249₽/мес · 599₽ за 3 мес · 1799₽ за год · 2299₽ навсегда\n\n"
+                text += "Входит в подписку:\n"
+                text += "📺 Трекер сериалов — серии, сезоны, уведомления о новых сериях\n"
+                text += "🎟 Билеты и напоминания — добавление билетов, уведомления перед сеансом\n"
+                text += "🎯 Рекомендации — по базе, по Кинопоиску, импорт базы\n\n"
             
                 # Проверяем существующие подписки
                 from moviebot.database.db_operations import get_user_personal_subscriptions
@@ -2577,11 +2563,9 @@ def register_payment_callbacks(bot_instance):
                 text += "Выберите период подписки 💎 Movie Planner PRO:"
                 pro_desc = (
                     "\n\n<b>С Movie Planner PRO вы получаете:</b>\n"
-                    "🎯 Умные рекомендации — на основе вашей базы и оценок\n"
-                    "📺 Полноценный трекер сериалов — серии, сезоны, прогресс\n"
+                    "📺 Трекер сериалов — серии, сезоны, прогресс\n"
                     "🎟 Билеты и напоминания — ничего не забыть перед сеансом\n"
-                    "🧠 Расширенное планирование — кино дома и в кинотеатре\n"
-                    "👥 Совместный опыт — удобнее выбирать фильмы вместе"
+                    "🎯 Умные рекомендации — на основе базы и оценок"
                 )
                 text += pro_desc
             
@@ -2662,35 +2646,21 @@ def register_payment_callbacks(bot_instance):
             
                 text = f"👥 <b>Групповые тарифы на {group_size} участников</b>\n\n"
             
-                # Описание бесплатных функций
-                text += "🆓 <b>Бесплатные функции:</b>\n"
+                # Бесплатный формат
+                text += "🆓 <b>Бесплатно:</b>\n"
                 text += "• Добавление фильмов в базу\n"
                 text += "• Отметка просмотренных фильмов\n"
                 text += "• Планирование просмотра\n"
                 text += "• Базовый рандомный выбор фильма\n"
                 text += "• Статистика группы\n\n"
             
-                # Описание платных функций
-                text += "💎 <b>Платные функции:</b>\n\n"
-                text += f"🔔 <b>Уведомления о сериалах:</b> {prices['notifications']['month']}₽/мес\n"
-                text += "   • Уведомления о новых сериях\n"
-                text += "   • Настройка времени уведомлений\n"
-                text += "   • Отслеживание прогресса просмотра сезонов\n\n"
-                text += f"🎯 <b>Персональные рекомендации:</b> {prices['recommendations']['month']}₽/мес\n"
-                text += "Вы сможете не просто найти фильм из ранее отложенных к просмотру, но и получить рекомендацию, основываясь на ваших личных или групповых оценках. Вы сможете найти новый фильм, который вам точно подойдет!\n"
-                text += "   • Режим \"По оценкам в базе\" — рекомендации по оценкам фильмов, добавленных в базу чата или группы\n"
-                text += "   • Режим \"Рандом по Кинопоиску\" — случайный фильм из Кинопоиска по фильтрам\n"
-                text += "   • Режим рандомайзера \"По моим оценкам\" — рекомендации по оценкам из Кинопоиска\n"
-                text += "   • Импорт базы из Кинопоиска\n\n"
-                text += f"🎫 <b>Билеты в кино:</b> {prices['tickets']['month']}₽/мес\n"
-                text += "Вы сможете добавлять билеты на сеансы и любые другие мероприятия в бот, и они всегда будут в доступе по одной кнопке. В день мероприятия вам придет уведомление, а за непосредственно перед мероприятием бот пришлет билеты, чтобы не пришлось их искать на входе. Мы не храним и не обрабатываем файлы.\n"
-                text += "   • Добавление билетов на сеансы и мероприятия\n"
-                text += "   • Настраиваемые уведомления с билетами перед мероприятием\n\n"
-                text += f"📦 <b>Все режимы:</b>\n"
-                text += f"• {prices['all']['month']}₽/мес\n"
-                text += f"• {prices['all']['3months']}₽ за 3 месяца\n"
-                text += f"• {prices['all']['year']}₽ за год\n"
-                text += f"• {prices['all']['lifetime']}₽ навсегда\n\n"
+                # Одна подписка — 💎 Movie Planner PRO
+                text += "💎 <b>Movie Planner PRO</b>\n"
+                text += f"• {prices['all']['month']}₽/мес · {prices['all']['3months']}₽ за 3 мес · {prices['all']['year']}₽ за год · {prices['all']['lifetime']}₽ навсегда\n\n"
+                text += "Входит в подписку:\n"
+                text += "📺 Трекер сериалов — серии, сезоны, уведомления о новых сериях\n"
+                text += "🎟 Билеты и напоминания — добавление билетов, уведомления перед сеансом\n"
+                text += "🎯 Рекомендации — по базе, по Кинопоиску, импорт базы\n\n"
             
                 # Информация о скидках
                 from moviebot.database.db_operations import get_user_personal_subscriptions
@@ -2724,17 +2694,11 @@ def register_payment_callbacks(bot_instance):
                         if group_username:
                             text += f"@{group_username}\n"
                         text += "\n"
-                    
-                        # Добавляем информацию о тарифах
-                        text += "💎 <b>Платные функции:</b>\n\n"
-                        text += f"🔔 Уведомления о сериалах: {prices['notifications']['month']}₽/мес\n"
-                        text += f"🎯 Персональные рекомендации: {prices['recommendations']['month']}₽/мес\n"
-                        text += f"🎫 Билеты в кино: {prices['tickets']['month']}₽/мес\n\n"
-                        text += f"📦 Все режимы:\n"
-                        text += f"• {prices['all']['month']}₽/мес\n"
-                        text += f"• {prices['all']['3months']}₽ за 3 месяца\n"
-                        text += f"• {prices['all']['year']}₽ за год\n"
-                        text += f"• {prices['all']['lifetime']}₽ навсегда\n\n"
+                        text += "🆓 <b>Бесплатно:</b>\n"
+                        text += "• Добавление фильмов в базу, отметка просмотренных, планирование, базовый рандом, статистика группы\n\n"
+                        text += "💎 <b>Movie Planner PRO</b>\n"
+                        text += f"• {prices['all']['month']}₽/мес · {prices['all']['3months']}₽ за 3 мес · {prices['all']['year']}₽ за год · {prices['all']['lifetime']}₽ навсегда\n\n"
+                        text += "Входит: 📺 сериалы · 🎟 билеты · 🎯 рекомендации\n\n"
                     
                         # Информация о скидках
                         if personal_subs:
@@ -2893,28 +2857,22 @@ def register_payment_callbacks(bot_instance):
                 if group_username:
                     text += f"@{group_username}\n"
                 text += "\n"
-            
-                # Описание платных функций
-                text += "💎 <b>Платные функции:</b>\n\n"
-                text += f"🔔 <b>Уведомления о сериалах:</b> {prices['notifications']['month']}₽/мес\n"
-                text += f"🎯 <b>Персональные рекомендации:</b> {prices['recommendations']['month']}₽/мес\n"
-                text += f"🎫 <b>Билеты в кино:</b> {prices['tickets']['month']}₽/мес\n\n"
-                text += f"📦 <b>Все режимы:</b>\n"
-                text += f"• {prices['all']['month']}₽/мес\n"
-                text += f"• {prices['all']['3months']}₽ за 3 месяца\n"
-                text += f"• {prices['all']['year']}₽ за год\n"
-                text += f"• {prices['all']['lifetime']}₽ навсегда\n\n"
+                text += "🆓 <b>Бесплатно:</b>\n"
+                text += "• Добавление фильмов в базу, отметка просмотренных, планирование, базовый рандом, статистика группы\n\n"
+                text += "💎 <b>Movie Planner PRO</b>\n"
+                text += f"• {prices['all']['month']}₽/мес · {prices['all']['3months']}₽ за 3 мес · {prices['all']['year']}₽ за год · {prices['all']['lifetime']}₽ навсегда\n\n"
+                text += "Входит: 📺 сериалы · 🎟 билеты · 🎯 рекомендации\n\n"
             
                 # Информация о скидках
                 from moviebot.database.db_operations import get_user_personal_subscriptions
                 personal_subs = get_user_personal_subscriptions(user_id)
                 if personal_subs:
                     if group_size == '2':
-                        text += "💡 <i>У вас есть личная подписка - скидка 20% на группу из 2 человек</i>\n\n"
+                        text += "💡 <i>У вас есть личная подписка — скидка 20% на группу из 2 человек</i>\n\n"
                     elif group_size in ['5', '10']:
-                        text += "💡 <i>У вас есть личная подписка - скидка 50% на группу</i>\n\n"
+                        text += "💡 <i>У вас есть личная подписка — скидка 50% на группу</i>\n\n"
             
-                text += "Выберите тариф:"
+                text += "Выберите период подписки 💎 Movie Planner PRO:"
             
                 markup = InlineKeyboardMarkup(row_width=1)
                 markup.add(InlineKeyboardButton(f"💎 Movie Planner PRO — месяц ({prices['all']['month']}₽/мес)", callback_data=f"payment:subscribe:group:{group_size}:all:month"))
@@ -3189,10 +3147,10 @@ def register_payment_callbacks(bot_instance):
                         new_period_name = period_names.get(period_type, period_type)
                         next_payment_str = next_payment_date.strftime('%d.%m.%Y') if isinstance(next_payment_date, datetime) else str(next_payment_date)
                         
-                        text = "✅ <b>Переход на подписку \"Все режимы\"</b>\n\n"
+                        text = "✅ <b>Переход на подписку 💎 Movie Planner PRO</b>\n\n"
                         text += f"<b>Текущая подписка:</b> {current_period_name} ({current_price}₽)\n"
                         text += f"Действует до: <b>{next_payment_str}</b>\n\n"
-                        text += f"<b>Новая подписка:</b> Все режимы ({new_period_name}) ({all_price}₽)\n"
+                        text += f"<b>Новая подписка:</b> 💎 Movie Planner PRO ({new_period_name}) ({all_price}₽)\n"
                         text += f"Действует с: <b>{next_payment_str}</b>\n\n"
                         text += f"💰 Следующее списание: <b>{all_price}₽</b>"
                         if period_type != 'month':
@@ -3633,12 +3591,12 @@ def register_payment_callbacks(bot_instance):
                     if 'tickets' not in existing_plan_types:
                         markup.add(InlineKeyboardButton("🎫 Билеты в кино", callback_data="payment:subscribe:personal:tickets:month"))
                     if 'all' not in existing_plan_types:
-                        markup.add(InlineKeyboardButton("📦 Все режимы", callback_data="payment:subscribe:personal:all:month"))
+                        markup.add(InlineKeyboardButton("💎 Movie Planner PRO", callback_data="payment:subscribe:personal:all:month"))
                     
                     if len(existing_plan_types) >= 3 or 'all' in existing_plan_types:
                         text = "✏️ <b>Изменить подписку</b>\n\n"
                         if 'all' in existing_plan_types:
-                            text += "У вас уже подключена подписка \"Все режимы\", которая включает все функции.\n\n"
+                            text += "У вас уже подключена подписка 💎 Movie Planner PRO, которая включает все функции.\n\n"
                         else:
                             text += "У вас уже подключены все доступные подписки.\n\n"
                         text += "Вы можете отменить одну из подписок, чтобы добавить другую."
@@ -3679,7 +3637,7 @@ def register_payment_callbacks(bot_instance):
                     # Если максимальная — ничего не предлагаем
                     if plan_type == 'all' and period_type == 'lifetime':
                         text = "✅ <b>У вас куплен весь функционал бота</b>\n\n"
-                        text += "📦 Пакетная подписка - Все режимы\n"
+                        text += "💎 Movie Planner PRO\n"
                         text += "⏰ Период: навсегда\n\n"
                         text += "Дополнительные опции недоступны."
                         
@@ -3715,7 +3673,7 @@ def register_payment_callbacks(bot_instance):
                         
                         current_period_name = period_names.get(period_type, period_type)
                         text = f"✏️ <b>Изменить период подписки</b>\n\n"
-                        text += f"Текущий тариф: <b>Все режимы</b>\n"
+                        text += f"Текущий тариф: <b>💎 Movie Planner PRO</b>\n"
                         text += f"Текущий период: <b>{current_period_name}</b>\n"
                         text += f"Текущая цена: <b>{current_price}₽</b>\n\n"
                         text += "Выберите новый период:\n\n"
@@ -3819,7 +3777,7 @@ def register_payment_callbacks(bot_instance):
                                 all_month_price = SUBSCRIPTION_PRICES['personal']['all'].get('month', 0)
                                 upgrade_price = all_month_price - current_month_price
                                 if upgrade_price > 0:
-                                    markup.add(InlineKeyboardButton(f"📦 Все режимы (+{upgrade_price}₽/мес)", callback_data=f"payment:upgrade_plan:{subscription_id}:all"))
+                                    markup.add(InlineKeyboardButton(f"💎 Movie Planner PRO (+{upgrade_price}₽/мес)", callback_data=f"payment:upgrade_plan:{subscription_id}:all"))
                                 
                                 # Предлагаем докупить отдельные функции (если их 1-2)
                                 if len(missing_functions) <= 2:
@@ -3852,7 +3810,7 @@ def register_payment_callbacks(bot_instance):
                                 all_month_price = SUBSCRIPTION_PRICES['group'][group_size_str]['all'].get('month', 0)
                                 upgrade_price = all_month_price - current_month_price
                                 if upgrade_price > 0:
-                                    markup.add(InlineKeyboardButton(f"📦 Все режимы (+{upgrade_price}₽/мес)", callback_data=f"payment:upgrade_plan:{subscription_id}:all"))
+                                    markup.add(InlineKeyboardButton(f"💎 Movie Planner PRO (+{upgrade_price}₽/мес)", callback_data=f"payment:upgrade_plan:{subscription_id}:all"))
                                 
                                 # Предлагаем докупить отдельные функции (если их 1-2)
                                 if len(missing_functions) <= 2:
@@ -4285,7 +4243,7 @@ def register_payment_callbacks(bot_instance):
                             if not has_tickets:
                                 expansion_options.append(("🎫 Билеты в кино", "payment:subscribe:personal:tickets:month"))
                             if not (has_notifications and has_recommendations and has_tickets):
-                                expansion_options.append(("📦 Все режимы", "payment:subscribe:personal:all:month"))
+                                expansion_options.append(("💎 Movie Planner PRO", "payment:subscribe:personal:all:month"))
                         
                             markup = InlineKeyboardMarkup(row_width=1)
                             for option_text, callback_data in expansion_options:
@@ -4449,7 +4407,7 @@ def register_payment_callbacks(bot_instance):
                             except Exception as e:
                                 logger.warning(f"[PAYMENT] Ошибка answer_callback_query: {e}")
                             
-                            text = "⚠️ <b>У вас уже есть подписка \"Все режимы\"</b>\n\n"
+                            text = "⚠️ <b>У вас уже есть подписка 💎 Movie Planner PRO</b>\n\n"
                             text += "Вы не можете добавить дополнительные подписки к пакетной.\n\n"
                             text += "Если хотите изменить — сначала отмените текущую."
                             markup = InlineKeyboardMarkup(row_width=1)
@@ -4487,13 +4445,13 @@ def register_payment_callbacks(bot_instance):
                             except Exception as e:
                                 logger.warning(f"[PAYMENT] Ошибка answer_callback_query: {e}")
                             
-                            text = "📦 <b>Оформление подписки \"Все режимы\"</b>\n\n"
+                            text = "💎 <b>Оформление подписки Movie Planner PRO</b>\n\n"
                             text += "⚠️ <b>У вас уже есть активные подписки:</b>\n"
                             for name in existing_sub_names:
                                 text += f"• {name}\n"
                             
                             text += f"\n💰 Текущие: {total_existing_price}₽/мес\n"
-                            text += f"💰 \"Все режимы\": {new_price}₽"
+                            text += f"💰 💎 Movie Planner PRO: {new_price}₽"
                             if period_type != 'month':
                                 period_names = {'3months': '3 мес', 'year': 'год', 'lifetime': 'навсегда'}
                                 text += f" за {period_names.get(period_type, period_type)}"
@@ -4568,18 +4526,18 @@ def register_payment_callbacks(bot_instance):
                                 logger.warning(f"[PAYMENT] Ошибка answer_callback_query: {e}")
                             
                             text = f"⚠️ У вас уже \"{', '.join(existing_sub_names)}\"\n\n"
-                            text += "Оформите \"Все режимы\" для полного доступа.\n"
+                            text += "Оформите 💎 Movie Planner PRO для полного доступа.\n"
                             text += "Текущие подписки будут отменены автоматически."
                             
                             markup = InlineKeyboardMarkup(row_width=1)
                             all_month = SUBSCRIPTION_PRICES['personal']['all'].get('month', 0)
                             all_3m = SUBSCRIPTION_PRICES['personal']['all'].get('3months', 0)
                             all_life = SUBSCRIPTION_PRICES['personal']['all'].get('lifetime', 0)
-                            markup.add(InlineKeyboardButton(f"Все режимы ({all_month}₽/мес)", callback_data="payment:subscribe:personal:all:month"))
+                            markup.add(InlineKeyboardButton(f"💎 Movie Planner PRO ({all_month}₽/мес)", callback_data="payment:subscribe:personal:all:month"))
                             if all_3m > 0:
-                                markup.add(InlineKeyboardButton(f"Все режимы ({all_3m}₽/3 мес)", callback_data="payment:subscribe:personal:all:3months"))
+                                markup.add(InlineKeyboardButton(f"💎 Movie Planner PRO ({all_3m}₽/3 мес)", callback_data="payment:subscribe:personal:all:3months"))
                             if all_life > 0:
-                                markup.add(InlineKeyboardButton(f"Все режимы ({all_life}₽ навсегда)", callback_data="payment:subscribe:personal:all:lifetime"))
+                                markup.add(InlineKeyboardButton(f"💎 Movie Planner PRO ({all_life}₽ навсегда)", callback_data="payment:subscribe:personal:all:lifetime"))
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
                             
                             try:
@@ -4611,7 +4569,7 @@ def register_payment_callbacks(bot_instance):
                             plan_name = plan_names_short.get(plan_type, plan_type)
                             text = f"✅ <b>У вас уже есть \"{plan_name}\"</b>\n\n"
                             text += "Эта подписка уже активна.\n\n"
-                            text += "Для полного доступа оформите подписку \"Все режимы\":"
+                            text += "Для полного доступа оформите подписку 💎 Movie Planner PRO:"
                             
                             markup = InlineKeyboardMarkup(row_width=1)
                             all_month = SUBSCRIPTION_PRICES['personal']['all'].get('month', 0)
@@ -4620,21 +4578,21 @@ def register_payment_callbacks(bot_instance):
 
                             markup.add(
                                 InlineKeyboardButton(
-                                    f"📦 Все режимы ({all_month}₽/мес)",
+                                    f"💎 Movie Planner PRO ({all_month}₽/мес)",
                                     callback_data="payment:subscribe:personal:all:month"
                                 )
                             )
                             if all_3m > 0:
                                 markup.add(
                                     InlineKeyboardButton(
-                                        f"📦 Все режимы ({all_3m}₽/3 мес)",
+                                        f"💎 Movie Planner PRO ({all_3m}₽/3 мес)",
                                         callback_data="payment:subscribe:personal:all:3months"
                                     )
                                 )
                             if all_life > 0:
                                 markup.add(
                                     InlineKeyboardButton(
-                                        f"📦 Все режимы ({all_life}₽ навсегда)",
+                                        f"💎 Movie Planner PRO ({all_life}₽ навсегда)",
                                         callback_data="payment:subscribe:personal:all:lifetime"
                                     )
                                 )
@@ -4710,7 +4668,7 @@ def register_payment_callbacks(bot_instance):
                             markup.add(InlineKeyboardButton(f"💳 Списать сейчас ({combined_price}₽)", callback_data=f"payment:combine:pay_now:{plan_type}:{period_type}"))
                             if next_payment_date:
                                 markup.add(InlineKeyboardButton(f"📅 Добавить к следующему ({combined_price}₽)", callback_data=f"payment:combine:add_to_next:{plan_type}:{period_type}"))
-                            markup.add(InlineKeyboardButton("📦 Все режимы", callback_data="payment:combine:upgrade_to_all:month"))
+                            markup.add(InlineKeyboardButton("💎 Movie Planner PRO", callback_data="payment:combine:upgrade_to_all:month"))
                             markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:tariffs:personal"))
                             
                             try:
@@ -4771,7 +4729,7 @@ def register_payment_callbacks(bot_instance):
                         }
                         period_name = period_names.get(period_type, period_type)
                         price = SUBSCRIPTION_PRICES['personal']['all'][period_type]
-                        text = "📦 <b>Все режимы</b>\n\n"
+                        text = "💎 <b>Movie Planner PRO</b>\n\n"
                         text += "💎 <b>Что входит в подписку:</b>\n\n"
                         text += "🔔 <b>Уведомления о сериалах:</b>\n"
                         text += "• Автоматические уведомления о выходе новых серий\n"
@@ -4841,7 +4799,7 @@ def register_payment_callbacks(bot_instance):
                         period_name = period_names.get(period_type, period_type)
                         base_price = SUBSCRIPTION_PRICES['group'][group_size]['all'][period_type]
                         price = calculate_discounted_price(user_id, 'group', 'all', period_type, group_size)
-                        text = f"📦 <b>Все режимы (на {group_size} участников)</b>\n\n"
+                        text = f"💎 <b>Movie Planner PRO (на {group_size} участников)</b>\n\n"
                         text += "💎 <b>Что входит в подписку:</b>\n\n"
                         text += "🔔 <b>Уведомления о сериалах:</b>\n"
                         text += "• Автоматические уведомления о выходе новых серий\n"
@@ -7150,7 +7108,7 @@ def register_payment_callbacks(bot_instance):
                                 
                                 text = f"👥 <b>Групповая подписка</b>\n\n"
                                 if plan_type == 'all':
-                                    text += f"📦 <b>Пакетная подписка - Все режимы</b>\n\n"
+                                    text += f"💎 <b>Movie Planner PRO</b>\n\n"
                                 text += f"Группа: <b>{group_title}</b>\n"
                                 if group_username:
                                     text += f"@{group_username}\n"
