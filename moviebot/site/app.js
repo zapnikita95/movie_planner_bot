@@ -350,7 +350,7 @@
         return `
           <div class="card plan-card">
             <div class="card-poster-wrap">
-              ${poster ? '<img src="' + poster + '" alt="" class="card-poster" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">' : ''}
+              ${poster ? '<img src="' + poster + '" alt="" class="card-poster" width="70" height="95" referrerpolicy="no-referrer" loading="lazy" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">' : ''}
               <div class="film-poster-placeholder" style="${poster ? 'display:none' : ''}">🎬</div>
             </div>
             <div class="plan-info">
@@ -404,7 +404,7 @@
     return `
       <div class="card film-card">
         <div class="card-poster-wrap">
-          ${poster ? '<img src="' + poster + '" alt="" class="card-poster" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">' : ''}
+          ${poster ? '<img src="' + poster + '" alt="" class="card-poster" width="80" height="120" referrerpolicy="no-referrer" loading="lazy" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">' : ''}
           <div class="film-poster-placeholder" style="${poster ? 'display:none' : ''}">${m.is_series ? '📺' : '🎬'}</div>
         </div>
         <div class="film-info">
@@ -462,7 +462,7 @@
             return `
               <div class="card series-card">
                 <div class="card-poster-wrap">
-                  ${poster ? '<img src="' + poster + '" alt="" class="card-poster" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">' : ''}
+                  ${poster ? '<img src="' + poster + '" alt="" class="card-poster" width="80" height="120" referrerpolicy="no-referrer" loading="lazy" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">' : ''}
                   <div class="film-poster-placeholder" style="${poster ? 'display:none' : ''}">📺</div>
                 </div>
                 <div class="film-info">
@@ -492,7 +492,7 @@
             return `
               <div class="card film-card">
                 <div class="card-poster-wrap">
-                  ${poster ? '<img src="' + poster + '" alt="" class="card-poster" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">' : ''}
+                  ${poster ? '<img src="' + poster + '" alt="" class="card-poster" width="80" height="120" referrerpolicy="no-referrer" loading="lazy" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">' : ''}
                   <div class="film-poster-placeholder" style="${poster ? 'display:none' : ''}">⭐</div>
                 </div>
                 <div class="film-info">
