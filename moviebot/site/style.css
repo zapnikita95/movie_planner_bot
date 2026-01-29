@@ -708,7 +708,7 @@ section {
 .plans-today-list .plan-card {
   max-width: 100%;
 }
-/* Планы: постер | дата+формат сверху, название снизу | кнопка */
+/* Планы: постер | дата+формат сверху, название снизу | кнопка — одна строка по центру */
 .plan-card {
   display: grid;
   grid-template-columns: 70px 1fr minmax(120px, 160px);
@@ -719,17 +719,19 @@ section {
   border-radius: 12px;
   border: 1px solid var(--border-color);
   min-width: 0;
+  grid-auto-rows: min-content;
 }
 .plan-card .card-poster-wrap {
+  align-self: center;
   width: 70px;
+  height: 95px;
+  min-width: 70px;
   max-width: 70px;
-  height: 0;
-  padding-bottom: 135%;
+  flex-shrink: 0;
   position: relative;
   border-radius: 8px;
   overflow: hidden;
   background: rgba(102, 126, 234, 0.15);
-  flex-shrink: 0;
 }
 .plan-card .card-poster-wrap img,
 .plan-card .card-poster-wrap .film-poster-placeholder {
@@ -737,8 +739,6 @@ section {
   inset: 0;
   width: 100%;
   height: 100%;
-  max-width: 100%;
-  max-height: 100%;
   object-fit: cover;
   display: flex;
   align-items: center;
@@ -750,6 +750,7 @@ section {
   flex-direction: column;
   gap: 6px;
   min-width: 0;
+  justify-content: center;
 }
 .plan-card .plan-meta {
   display: flex;
@@ -791,6 +792,8 @@ section {
   }
   .plan-card .card-poster-wrap {
     width: 50px;
+    height: 68px;
+    min-width: 50px;
     max-width: 50px;
   }
   .plan-card .btn-small {

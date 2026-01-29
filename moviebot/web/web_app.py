@@ -3002,51 +3002,24 @@ def create_web_app(bot):
         conn = get_db_connection()
         cur = get_db_cursor()
         with db_lock:
-            try:
-                cur.execute("""
-                    SELECT id, kp_id, title, year, is_series, description, rating FROM movies
-                    WHERE chat_id = %s AND watched = 0
-                    ORDER BY id DESC
-                    LIMIT 200
-                """, (chat_id,))
-                rows = cur.fetchall()
-                has_extra = True
-            except Exception as e:
-                logger.warning(f"[SITE UNWATCHED] Fallback query (movies.description/rating missing?): {e}")
-                cur.execute("""
-                    SELECT id, kp_id, title, year, is_series FROM movies
-                    WHERE chat_id = %s AND watched = 0
-                    ORDER BY id DESC
-                    LIMIT 200
-                """, (chat_id,))
-                rows = cur.fetchall()
-                has_extra = False
+            cur.execute("""
+                SELECT id, kp_id, title, year, is_series FROM movies
+                WHERE chat_id = %s AND watched = 0
+                ORDER BY id DESC
+                LIMIT 200
+            """, (chat_id,))
+            rows = cur.fetchall()
         items = []
         for r in rows:
-            rec = {
+            items.append({
                 "film_id": r.get('id') if isinstance(r, dict) else r[0],
                 "kp_id": str(r.get('kp_id') if isinstance(r, dict) else r[1]),
                 "title": r.get('title') if isinstance(r, dict) else r[2],
                 "year": r.get('year') if isinstance(r, dict) else r[3],
                 "is_series": bool(r.get('is_series') if isinstance(r, dict) else (r[4] if len(r) > 4 else 0)),
-            }
-            if has_extra and len(r) > 5:
-                rec["description"] = r.get('description') if isinstance(r, dict) else (r[5] if len(r) > 5 else None)
-                rec["rating_kp"] = None
-                if isinstance(r, dict) and r.get('rating') is not None:
-                    try:
-                        rec["rating_kp"] = float(r['rating'])
-                    except (TypeError, ValueError):
-                        pass
-                elif len(r) > 6 and r[6] is not None:
-                    try:
-                        rec["rating_kp"] = float(r[6])
-                    except (TypeError, ValueError):
-                        pass
-            else:
-                rec["description"] = None
-                rec["rating_kp"] = None
-            items.append(rec)
+                "description": None,
+                "rating_kp": None,
+            })
         return jsonify({"success": True, "items": items})
 
     @app.route('/api/site/series', methods=['GET', 'OPTIONS'])
@@ -3164,56 +3137,27 @@ def create_web_app(bot):
         from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
         conn = get_db_connection()
         cur = get_db_cursor()
-        has_extra = True
         with db_lock:
-            try:
-                cur.execute("""
-                    SELECT r.rating, r.kp_id, m.title, m.year, m.id as film_id, m.description, m.rating as rating_kp
-                    FROM ratings r
-                    JOIN movies m ON r.film_id = m.id AND r.chat_id = m.chat_id
-                    WHERE r.chat_id = %s
-                    ORDER BY r.id DESC
-                    LIMIT 50
-                """, (chat_id,))
-                rows = cur.fetchall()
-            except Exception as e:
-                logger.warning(f"[SITE RATINGS] Fallback query (movies.description/rating missing?): {e}")
-                cur.execute("""
-                    SELECT r.rating, r.kp_id, m.title, m.year, m.id as film_id
-                    FROM ratings r
-                    JOIN movies m ON r.film_id = m.id AND r.chat_id = m.chat_id
-                    WHERE r.chat_id = %s
-                    ORDER BY r.id DESC
-                    LIMIT 50
-                """, (chat_id,))
-                rows = cur.fetchall()
-                has_extra = False
+            cur.execute("""
+                SELECT r.rating, r.kp_id, m.title, m.year, m.id as film_id
+                FROM ratings r
+                JOIN movies m ON r.film_id = m.id AND r.chat_id = m.chat_id
+                WHERE r.chat_id = %s
+                ORDER BY r.id DESC
+                LIMIT 50
+            """, (chat_id,))
+            rows = cur.fetchall()
         items = []
         for r in rows:
-            rec = {
+            items.append({
                 "rating": r.get('rating') if isinstance(r, dict) else r[0],
                 "kp_id": str(r.get('kp_id') or '') if isinstance(r, dict) else str(r[1] or ''),
                 "title": r.get('title') if isinstance(r, dict) else r[2],
                 "year": r.get('year') if isinstance(r, dict) else r[3],
                 "film_id": r.get('film_id') if isinstance(r, dict) else r[4],
-            }
-            if has_extra and len(r) > 5:
-                rec["description"] = r.get('description') if isinstance(r, dict) else (r[5] if len(r) > 5 else None)
-                rec["rating_kp"] = None
-                if isinstance(r, dict) and r.get('rating_kp') is not None:
-                    try:
-                        rec["rating_kp"] = float(r['rating_kp'])
-                    except (TypeError, ValueError):
-                        pass
-                elif len(r) > 6 and r[6] is not None:
-                    try:
-                        rec["rating_kp"] = float(r[6])
-                    except (TypeError, ValueError):
-                        pass
-            else:
-                rec["description"] = None
-                rec["rating_kp"] = None
-            items.append(rec)
+                "description": None,
+                "rating_kp": None,
+            })
         return jsonify({"success": True, "items": items})
 
     logger.info(f"[WEB APP] ===== FLASK ПРИЛОЖЕНИЕ СОЗДАНО =====")
