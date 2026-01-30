@@ -561,11 +561,13 @@ def edit_plan_ticket_callback(call):
         chat_id = call.message.chat.id
         plan_id = int(call.data.split(":")[1])
         
+        import time
         from moviebot.states import user_ticket_state
         user_ticket_state[user_id] = {
             'step': 'waiting_ticket_file',
             'plan_id': plan_id,
-            'chat_id': chat_id
+            'chat_id': chat_id,
+            'created_at': time.time()
         }
         
         markup = InlineKeyboardMarkup()

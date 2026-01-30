@@ -669,12 +669,12 @@ def handle_promo(message):
 
 def check_ticket_text_reply(message):
     """Аналог check_plan_datetime_reply — точная проверка для текстовых шагов билетов"""
-    from moviebot.states import user_ticket_state
+    from moviebot.states import user_ticket_state, is_user_in_valid_ticket_state
     
     is_private = message.chat.type == 'private'
     
     user_id = message.from_user.id
-    if user_id not in user_ticket_state:
+    if not is_user_in_valid_ticket_state(user_id):
         return False
     
     state = user_ticket_state[user_id]
@@ -859,12 +859,14 @@ def handle_ticket_text_reply(message):
                 plan_id = cursor.fetchone()[0]
                 connection.commit()
             
-            # Переход к загрузке билетов
+            # Переход к загрузке билетов (TTL 15 мин)
+            import time
             user_ticket_state[user_id] = {
                 'step': 'upload_ticket',
                 'plan_id': plan_id,
                 'chat_id': chat_id,
-                'type': 'event'
+                'type': 'event',
+                'created_at': time.time()
             }
             
             dt_local = plan_dt.astimezone(user_tz)
@@ -890,9 +892,9 @@ def handle_ticket_text_reply(message):
 
 # Сохраняем твой существующий check_ticket_message только для "готово" в upload/add_more
 def check_ticket_done(message):
-    from moviebot.states import user_ticket_state
+    from moviebot.states import user_ticket_state, is_user_in_valid_ticket_state
     user_id = message.from_user.id
-    if user_id not in user_ticket_state:
+    if not is_user_in_valid_ticket_state(user_id):
         return False
     step = user_ticket_state[user_id].get('step')
     return step in ['upload_ticket', 'add_more_tickets'] and message.text.lower().strip() == 'готово'

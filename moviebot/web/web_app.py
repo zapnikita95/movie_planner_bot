@@ -2386,7 +2386,8 @@ def create_web_app(bot):
             user_ticket_state[user_id] = {
                 'step': 'upload_ticket',
                 'plan_id': plan_id,
-                'chat_id': chat_id
+                'chat_id': chat_id,
+                'created_at': time.time()
             }
             
             # Создаем клавиатуру с отменой

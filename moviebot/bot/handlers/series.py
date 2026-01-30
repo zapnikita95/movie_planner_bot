@@ -1468,7 +1468,8 @@ def ticket_session_callback(call):
                 'step': 'upload_ticket',
                 'plan_id': plan_id,
                 'chat_id': chat_id,
-                'file_id': file_id
+                'file_id': file_id,
+                'created_at': time.time()
             }
             text += "\n\n📎 Файл готов к добавлению. Нажмите '➕ Добавить билеты' для продолжения."
         
@@ -2445,7 +2446,8 @@ def ticket_command(message):
             user_ticket_state[user_id] = {
                 'step': 'select_session',
                 'file_id': file_id,
-                'chat_id': chat_id
+                'chat_id': chat_id,
+                'created_at': time.time()
             }
             
             # Показываем список сеансов в кино
@@ -3536,11 +3538,12 @@ def handle_rand_content_type(call):
             user_id = call.from_user.id
             chat_id = call.message.chat.id
             
-            # Начинаем флоу добавления билета на мероприятие
+            # Начинаем флоу добавления билета на мероприятие (TTL 15 мин)
             user_ticket_state[user_id] = {
-                'step': 'event_add_name',  # ← измени на это
+                'step': 'event_add_name',
                 'chat_id': chat_id,
-                'type': 'event'
+                'type': 'event',
+                'created_at': time.time()
             }
             
             markup = InlineKeyboardMarkup()
@@ -3626,11 +3629,12 @@ def handle_rand_content_type(call):
             chat_id = call.message.chat.id
             plan_id = int(call.data.split(":")[1])
             
-            # Устанавливаем состояние для загрузки дополнительных билетов
+            # Устанавливаем состояние для загрузки дополнительных билетов (TTL 15 мин)
             user_ticket_state[user_id] = {
                 'step': 'add_more_tickets',
                 'plan_id': plan_id,
-                'chat_id': chat_id
+                'chat_id': chat_id,
+                'created_at': time.time()
             }
             
             markup = InlineKeyboardMarkup()
@@ -3687,11 +3691,12 @@ def handle_rand_content_type(call):
             
             plan_dt = plan_row.get('plan_datetime') if isinstance(plan_row, dict) else plan_row[0]
             
-            # Устанавливаем состояние для изменения времени
+            # Устанавливаем состояние для изменения времени (TTL 15 мин)
             user_ticket_state[user_id] = {
                 'step': 'edit_time',
                 'plan_id': plan_id,
-                'chat_id': chat_id
+                'chat_id': chat_id,
+                'created_at': time.time()
             }
             
             # Формируем сообщение с примером
@@ -5437,6 +5442,7 @@ def send_event_prompt(bot, message_or_call, state, text, markup=None):
 def is_event_text(message):
     # Пропускаем, если пользователь в состоянии /add_tags
     from moviebot.bot.handlers.tags import user_add_tag_state
+    from moviebot.states import is_user_in_valid_ticket_state
     user_id = message.from_user.id
     if user_id in user_add_tag_state:
         state_tag = user_add_tag_state.get(user_id, {})
@@ -5444,8 +5450,8 @@ def is_event_text(message):
             prompt_message_id = state_tag.get('prompt_message_id')
             if prompt_message_id and message.reply_to_message.message_id == prompt_message_id:
                 return False  # Пропускаем - обработает handle_add_tag_reply
-    
-    user_id = message.from_user.id
+    if not is_user_in_valid_ticket_state(user_id):
+        return False
     state = user_ticket_state.get(user_id, {})
     return (state.get('type') == 'event' and state.get('step') in ['event_add_name', 'event_add_date'])
 
@@ -5491,7 +5497,10 @@ def handle_event_text(message):
 
 # === Фото/файл: один билет ===
 def is_event_file(message):
+    from moviebot.states import is_user_in_valid_ticket_state
     user_id = message.from_user.id
+    if not is_user_in_valid_ticket_state(user_id):
+        return False
     state = user_ticket_state.get(user_id, {})
     if state.get('type') != 'event' or state.get('step') != 'event_add_ticket':
         return False

@@ -1673,8 +1673,9 @@ def handle_rate_list_reply(message):
                 logger.info(f"[HANDLE RATE LIST REPLY] Пропуск — пользователь в планировании, но не на step=3")
                 return
         
-        # Остальные состояния — пропускаем
-        if (user_id in user_ticket_state or
+        # Остальные состояния — пропускаем (ticket state с TTL 15 мин)
+        from moviebot.states import is_user_in_valid_ticket_state
+        if (is_user_in_valid_ticket_state(user_id) or
             user_id in user_settings_state or
             user_id in user_edit_state or
             user_id in user_view_film_state or
@@ -1894,19 +1895,19 @@ def save_movie_message(message):
     except Exception as e:
         logger.warning(f"[SAVE MOVIE] Ошибка при сохранении ссылки в bot_messages: {e}")
     
-    # Пропускаем, если пользователь работает с билетами или планированием
-    # НО: если это реплай на сообщение с оценкой (rating_messages), обрабатываем всегда
-    from moviebot.states import rating_messages
+    # Ссылка на Кинопоиск — всегда обрабатываем как добавление фильма, не блокируем состоянием билетов
+    from moviebot.states import rating_messages, is_user_in_valid_ticket_state
+    user_id_msg = message.from_user.id
+    if links:
+        user_ticket_state.pop(user_id_msg, None)
     is_rating_reply = message.reply_to_message and message.reply_to_message.message_id in rating_messages
-    
     if not is_rating_reply:
-        if message.from_user.id in user_ticket_state:
-            state = user_ticket_state.get(message.from_user.id, {})
+        if is_user_in_valid_ticket_state(user_id_msg):
+            state = user_ticket_state.get(user_id_msg, {})
             step = state.get('step')
-            logger.info(f"[SAVE MOVIE] Пропущено - пользователь в user_ticket_state, step={step}")
+            logger.info(f"[SAVE MOVIE] Пропущено - пользователь в user_ticket_state (не истёк), step={step}")
             return
-        
-        if message.from_user.id in user_plan_state:
+        if user_id_msg in user_plan_state:
             logger.info(f"[SAVE MOVIE] Пропущено - пользователь в user_plan_state")
             return
     
@@ -2090,8 +2091,9 @@ def main_text_handler(message):
                 logger.warning(f"[MAIN TEXT HANDLER] Не удалось распарсить дату/время: {day_or_date}")
             return
     
-    # Если пользователь в любом из состояний, пропускаем - специализированные handlers обработают
-    if (user_id in user_ticket_state or user_id in user_search_state or 
+    # Если пользователь в любом из состояний, пропускаем - специализированные handlers обработают (ticket state с TTL 15 мин)
+    from moviebot.states import is_user_in_valid_ticket_state
+    if (is_user_in_valid_ticket_state(user_id) or user_id in user_search_state or 
         user_id in user_import_state or user_id in user_edit_state or 
         user_id in user_settings_state or user_id in user_plan_state or
         user_id in user_clean_state or user_id in user_promo_state or 
@@ -2164,8 +2166,9 @@ def main_file_handler(message):
     
     logger.info(f"[MAIN FILE HANDLER] Получено фото/документ от {user_id}")
     
-    # Обработка билетов
-    if user_id in user_ticket_state:
+    # Обработка билетов (только если состояние не истекло)
+    from moviebot.states import is_user_in_valid_ticket_state
+    if is_user_in_valid_ticket_state(user_id):
         state = user_ticket_state[user_id]
         step = state.get('step')
         
@@ -2692,10 +2695,12 @@ def add_more_tickets_from_plan(call):
     plan_id = int(call.data.split(":")[1])
     user_id = call.from_user.id
 
+    import time
     user_ticket_state[user_id] = {
         'step': 'add_more_tickets',
         'plan_id': plan_id,
-        'chat_id': call.message.chat.id
+        'chat_id': call.message.chat.id,
+        'created_at': time.time()
     }
 
     bot.edit_message_text(

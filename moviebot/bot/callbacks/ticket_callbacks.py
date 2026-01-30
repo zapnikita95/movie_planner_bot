@@ -1,6 +1,7 @@
 # moviebot/bot/callbacks/ticket_callbacks.py
 
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+import time
 from moviebot.states import user_ticket_state
 from moviebot.utils.helpers import has_tickets_access, has_pro_access
 from moviebot.bot.bot_init import bot
@@ -51,11 +52,12 @@ def add_ticket_from_plan_callback(call):
                 pass
             return
 
-        # Состояние
+        # Состояние (TTL 15 мин)
         user_ticket_state[user_id] = {
             'step': 'upload_ticket',
             'plan_id': plan_id,
-            'chat_id': chat_id
+            'chat_id': chat_id,
+            'created_at': time.time()
         }
 
         # Клавиатура с отменой
@@ -128,7 +130,8 @@ def add_more_tickets_from_plan(call):
     user_ticket_state[user_id] = {
         'step': 'add_more_tickets',
         'plan_id': plan_id,
-        'chat_id': chat_id
+        'chat_id': chat_id,
+        'created_at': time.time()
     }
 
     try:

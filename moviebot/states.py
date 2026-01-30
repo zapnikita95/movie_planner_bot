@@ -1,6 +1,7 @@
 """
 Модуль для глобальных состояний бота
 """
+import time
 
 # Состояния планирования
 user_plan_state = {}  # user_id: {'step': int, 'link': str, 'type': str, 'day_or_date': str}
@@ -22,8 +23,24 @@ clean_unwatched_votes = {}  # message_id: {'chat_id': int, 'members_count': int,
 # Состояния редактирования
 user_edit_state = {}  # user_id: {'action': str, 'plan_id': int, 'step': str, ...}
 
-# Состояния работы с билетами
-user_ticket_state = {}  # user_id: {'step': str, 'plan_id': int, 'file_id': str, ...}
+# Состояния работы с билетами (TTL 15 мин — не блокировать часы)
+TICKET_STATE_TTL_SEC = 900
+user_ticket_state = {}  # user_id: {'step': str, 'plan_id': int, 'file_id': str, 'created_at': float, ...}
+
+
+def is_user_in_valid_ticket_state(user_id):
+    """True, если пользователь в режиме билетов и состояние не истекло. Истёкшее состояние удаляется."""
+    state = user_ticket_state.get(user_id)
+    if not state:
+        return False
+    created = state.get('created_at') or 0
+    if time.time() - created > TICKET_STATE_TTL_SEC:
+        try:
+            del user_ticket_state[user_id]
+        except KeyError:
+            pass
+        return False
+    return True
 
 # Состояния поиска
 user_search_state = {}  # user_id: {'chat_id': int, 'message_id': int}
