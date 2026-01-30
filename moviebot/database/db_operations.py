@@ -1696,6 +1696,20 @@ def get_admin_statistics():
             row = cursor_local.fetchone()
             stats['total_plans'] = row['count'] if row else 0
             
+            # Пользователей, хотя бы раз добавивших фильм в базу (личные чаты: chat_id > 0)
+            cursor_local.execute('''
+                SELECT COUNT(DISTINCT chat_id) as count FROM movies WHERE chat_id > 0
+            ''')
+            row = cursor_local.fetchone()
+            stats['users_added_film'] = row['count'] if row else 0
+            
+            # Пользователей, хотя бы раз запланировавших просмотр
+            cursor_local.execute('''
+                SELECT COUNT(DISTINCT user_id) as count FROM plans WHERE user_id IS NOT NULL AND user_id > 0
+            ''')
+            row = cursor_local.fetchone()
+            stats['users_planned'] = row['count'] if row else 0
+            
             # Всего оценок
             cursor_local.execute('SELECT COUNT(*) as count FROM ratings')
             row = cursor_local.fetchone()
@@ -1847,6 +1861,32 @@ def get_admin_statistics():
                 conn_local.close()
             except:
                 pass
+
+
+def get_latest_tags(limit=3):
+    """Возвращает последние созданные подборки (по id DESC) для кнопок в уведомлениях."""
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    try:
+        with db_lock:
+            cursor_local.execute(
+                'SELECT id, name, short_code FROM tags ORDER BY id DESC LIMIT %s',
+                (limit,)
+            )
+            rows = cursor_local.fetchall()
+        return [dict(r) if isinstance(r, dict) else {'id': r[0], 'name': r[1], 'short_code': r[2]} for r in rows]
+    except Exception as e:
+        logger.error(f"[GET_LATEST_TAGS] Ошибка: {e}", exc_info=True)
+        return []
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
 
 
 def is_bot_participant(chat_id, user_id):

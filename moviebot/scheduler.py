@@ -2993,6 +2993,293 @@ def start_dice_game():
     check_and_send_random_events()
 
 
+# --- Онбординг: уведомления новым пользователям (разнесены по минутам, чтобы не шли вместе) ---
+EXTENSION_URL = "https://chromewebstore.google.com/detail/movie-planner-bot/fldeclcfcngcjphhklommcebkpfipdol"
+
+
+def _get_first_start_per_user(cursor_local, since_hours=80):
+    """Возвращает словарь user_id -> first_start (datetime) для пользователей с /start за последние since_hours часов."""
+    sh = int(since_hours)
+    interval_sql = "INTERVAL '%d hours'" % sh
+    try:
+        with db_lock:
+            cursor_local.execute("""
+                SELECT user_id, MIN(timestamp) as first_ts
+                FROM stats
+                WHERE command_or_action = '/start' AND user_id > 0
+                AND timestamp >= NOW() - """ + interval_sql + """
+                GROUP BY user_id
+            """)
+            rows = cursor_local.fetchall()
+    except Exception as e:
+        try:
+            with db_lock:
+                cursor_local.execute("""
+                    SELECT user_id, MIN(timestamp::timestamptz) as first_ts
+                    FROM stats
+                    WHERE command_or_action = '/start' AND user_id > 0
+                    AND timestamp::timestamptz >= NOW() - """ + interval_sql + """
+                    GROUP BY user_id
+                """)
+            rows = cursor_local.fetchall()
+        except Exception as e2:
+            logger.warning(f"[ONBOARDING] Ошибка получения first_start: {e}, {e2}")
+            return {}
+    result = {}
+    for r in rows:
+        uid = r.get('user_id') if isinstance(r, dict) else r[0]
+        ts = r.get('first_ts') if isinstance(r, dict) else r[1]
+        if ts and uid:
+            if hasattr(ts, 'tzinfo') and ts.tzinfo is None:
+                ts = pytz.utc.localize(ts) if pytz else ts
+            result[uid] = ts
+    return result
+
+
+def _onboarding_set_sent(chat_id, key):
+    from moviebot.database.db_connection import get_db_connection, get_db_cursor
+    conn = get_db_connection()
+    cur = get_db_cursor()
+    try:
+        with db_lock:
+            cur.execute("""
+                INSERT INTO settings (chat_id, key, value) VALUES (%s, %s, '1')
+                ON CONFLICT (chat_id, key) DO UPDATE SET value = '1'
+            """, (chat_id, key))
+            conn.commit()
+    finally:
+        try:
+            cur.close()
+        except:
+            pass
+        try:
+            conn.close()
+        except:
+            pass
+
+
+def _onboarding_was_sent(chat_id, key, cursor_local):
+    with db_lock:
+        cursor_local.execute("SELECT value FROM settings WHERE chat_id = %s AND key = %s", (chat_id, key))
+        row = cursor_local.fetchone()
+    if not row:
+        return False
+    val = row.get('value') if isinstance(row, dict) else row[0]
+    return val == '1' or val == 'true'
+
+
+def check_onboarding_24h():
+    """Через 24ч после первого /start: если пользователь ничего не сделал (0 фильмов) — привет + запланировать + 3 подборки."""
+    from moviebot.database.db_connection import get_db_connection, get_db_cursor
+    from moviebot.database.db_operations import get_latest_tags
+
+    if not bot:
+        return
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    now = datetime.now(PLANS_TZ)
+    if now.tzinfo is None:
+        now = pytz.utc.localize(now)
+    try:
+        first_starts = _get_first_start_per_user(cursor_local, since_hours=80)
+        for user_id, first_ts in first_starts.items():
+            if first_ts.tzinfo is None:
+                first_ts = pytz.utc.localize(first_ts)
+            delta = (now - first_ts).total_seconds() / 3600
+            if not (23 <= delta <= 25):
+                continue
+            chat_id = user_id
+            if _onboarding_was_sent(chat_id, 'onboarding_24h_sent', cursor_local):
+                continue
+            with db_lock:
+                cursor_local.execute("SELECT COUNT(*) FROM movies WHERE chat_id = %s", (chat_id,))
+                cnt = cursor_local.fetchone()
+            movies_count = cnt.get('count', 0) if isinstance(cnt, dict) else (cnt[0] if cnt else 0)
+            if movies_count > 0:
+                continue
+            text = (
+                "Привет! Вижу, вы добавили Movie Planner, но пока ничего не попробовали 😅\n\n"
+                "Давайте запланируем фильм на выходные? Просто пришлите в чат ссылку на любой фильм или сериал с Кинопоиска — его можно добавить в базу и запланировать просмотр. Далее нужно будет нажать \"Запланировать\", выбрать формат — \"🏠 Дома\" или \"🎥 В кино\", и своим языком указать, когда хотите посмотреть фильм: например, \"суббота вечер\". Готово!\n\n"
+                "Вам придет напоминание о запланированном просмотре.\n\n"
+                "Также, чтобы добавить фильмы в вашу базу, вы можете добавить одну из подборок:"
+            )
+            markup = InlineKeyboardMarkup(row_width=1)
+            try:
+                bot_username = bot.get_me().username
+            except Exception:
+                bot_username = None
+            for tag in get_latest_tags(3):
+                name = (tag.get('name') or '')[:40]
+                short = tag.get('short_code') or ''
+                if bot_username and short:
+                    markup.add(InlineKeyboardButton(name, url=f"https://t.me/{bot_username}?start=tag_{short}"))
+                else:
+                    markup.add(InlineKeyboardButton(name, callback_data="noop"))
+            try:
+                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                _onboarding_set_sent(chat_id, 'onboarding_24h_sent')
+                logger.info(f"[ONBOARDING 24H] Отправлено user_id={user_id}")
+            except Exception as e:
+                logger.warning(f"[ONBOARDING 24H] Не удалось отправить user_id={user_id}: {e}")
+    except Exception as e:
+        logger.error(f"[ONBOARDING 24H] Ошибка: {e}", exc_info=True)
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
+
+
+def check_onboarding_plan_reminder():
+    """Через 2–3 дня после /start: если добавил хотя бы 1 фильм, но не запланировал — напомнить запланировать + кнопка к фильму + 3 подборки."""
+    from moviebot.database.db_connection import get_db_connection, get_db_cursor
+    from moviebot.database.db_operations import get_latest_tags
+
+    if not bot:
+        return
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    now = datetime.now(PLANS_TZ)
+    if now.tzinfo is None:
+        now = pytz.utc.localize(now)
+    try:
+        first_starts = _get_first_start_per_user(cursor_local, since_hours=80)
+        for user_id, first_ts in first_starts.items():
+            if first_ts.tzinfo is None:
+                first_ts = pytz.utc.localize(first_ts)
+            delta_days = (now - first_ts).total_seconds() / 86400
+            if not (2 <= delta_days <= 3):
+                continue
+            chat_id = user_id
+            if _onboarding_was_sent(chat_id, 'onboarding_plan_reminder_sent', cursor_local):
+                continue
+            with db_lock:
+                cursor_local.execute(
+                    "SELECT COUNT(*) FROM movies WHERE chat_id = %s", (chat_id,)
+                )
+                mrow = cursor_local.fetchone()
+                cursor_local.execute(
+                    "SELECT COUNT(*) FROM plans WHERE chat_id = %s AND user_id = %s",
+                    (chat_id, user_id)
+                )
+                prow = cursor_local.fetchone()
+            movies_count = mrow.get('count', 0) if isinstance(mrow, dict) else (mrow[0] if mrow else 0)
+            plans_count = prow.get('count', 0) if isinstance(prow, dict) else (prow[0] if prow else 0)
+            if movies_count == 0 or plans_count > 0:
+                continue
+            with db_lock:
+                cursor_local.execute(
+                    "SELECT id, title, kp_id FROM movies WHERE chat_id = %s ORDER BY id DESC LIMIT 1",
+                    (chat_id,)
+                )
+                film_row = cursor_local.fetchone()
+            if not film_row:
+                continue
+            film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
+            title = film_row.get('title') or 'фильм'
+            if isinstance(title, str):
+                title = title[:80]
+            kp_id = film_row.get('kp_id') if isinstance(film_row, dict) else film_row[2]
+            try:
+                import html as html_module
+                title_esc = html_module.escape(str(title)[:80])
+            except Exception:
+                title_esc = str(title)[:80]
+            text = (
+                f"Вы добавили фильм {title_esc}! 🎬\n\n"
+                "Хотите запланировать просмотр? Просто перейдите к описанию фильма, выберите \"Запланировать\" под карточкой — и установите напоминание о просмотре.\n\n"
+                "Также, вот несколько подборок фильмов, которые вы можете добавить, чтобы наполнить вашу базу фильмов:"
+            )
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"back_to_film:{kp_id or film_id}"))
+            try:
+                bot_username = bot.get_me().username
+            except Exception:
+                bot_username = None
+            for tag in get_latest_tags(3):
+                name = (tag.get('name') or '')[:40]
+                short = tag.get('short_code') or ''
+                if bot_username and short:
+                    markup.add(InlineKeyboardButton(name, url=f"https://t.me/{bot_username}?start=tag_{short}"))
+                else:
+                    markup.add(InlineKeyboardButton(name, callback_data="noop"))
+            try:
+                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                _onboarding_set_sent(chat_id, 'onboarding_plan_reminder_sent')
+                logger.info(f"[ONBOARDING PLAN] Отправлено user_id={user_id}, film_id={film_id}")
+            except Exception as e:
+                logger.warning(f"[ONBOARDING PLAN] Не удалось отправить user_id={user_id}: {e}")
+    except Exception as e:
+        logger.error(f"[ONBOARDING PLAN] Ошибка: {e}", exc_info=True)
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
+
+
+def check_onboarding_48h():
+    """Через 48–72ч после /start: если всё ещё нет добавленных фильмов — предложить расширение."""
+    from moviebot.database.db_connection import get_db_connection, get_db_cursor
+
+    if not bot:
+        return
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    now = datetime.now(PLANS_TZ)
+    if now.tzinfo is None:
+        now = pytz.utc.localize(now)
+    try:
+        first_starts = _get_first_start_per_user(cursor_local, since_hours=80)
+        for user_id, first_ts in first_starts.items():
+            if first_ts.tzinfo is None:
+                first_ts = pytz.utc.localize(first_ts)
+            delta_h = (now - first_ts).total_seconds() / 3600
+            if not (48 <= delta_h <= 72):
+                continue
+            chat_id = user_id
+            if _onboarding_was_sent(chat_id, 'onboarding_48h_sent', cursor_local):
+                continue
+            with db_lock:
+                cursor_local.execute("SELECT COUNT(*) FROM movies WHERE chat_id = %s", (chat_id,))
+                cnt = cursor_local.fetchone()
+            movies_count = cnt.get('count', 0) if isinstance(cnt, dict) else (cnt[0] if cnt else 0)
+            if movies_count > 0:
+                continue
+            text = (
+                "Привет! Вижу, Вы пока не успели ничего добавить в Movie Planner 😊\n\n"
+                "Вот что сильно упрощает жизнь: установите расширение для Chrome — и добавляйте фильмы/сериалы одним кликом прямо с Кинопоиска, IMDb или Letterboxd, а также любые фильмы с большинства стримингов.\n\n"
+                "После установки просто зайдите на страницу любого фильма на Кинопоиске — и сможете добавить его в базу и запланировать просмотр. Попробуете? 😄"
+            )
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("💻 Перейти к расширению", url=EXTENSION_URL))
+            try:
+                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                _onboarding_set_sent(chat_id, 'onboarding_48h_sent')
+                logger.info(f"[ONBOARDING 48H] Отправлено user_id={user_id}")
+            except Exception as e:
+                logger.warning(f"[ONBOARDING 48H] Не удалось отправить user_id={user_id}: {e}")
+    except Exception as e:
+        logger.error(f"[ONBOARDING 48H] Ошибка: {e}", exc_info=True)
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
+
+
 def check_unwatched_films_notification():
     """Проверяет и отправляет уведомления о непросмотренных фильмах пользователям с более чем 5 фильмами.
     ПРИОРИТЕТ 4 (ниже остальных): Выполняется только в воскресенье или вторник, после 14:00 по местному времени.

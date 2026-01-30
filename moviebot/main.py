@@ -149,6 +149,9 @@ from moviebot.scheduler import (
     check_premiere_reminder,
     check_and_send_random_events,
     check_unwatched_films_notification,
+    check_onboarding_24h,
+    check_onboarding_plan_reminder,
+    check_onboarding_48h,
     choose_random_participant,  # Оставлено для обратной совместимости
     start_dice_game  # Оставлено для обратной совместимости
 )
@@ -169,15 +172,20 @@ if process_recurring_payments:
 scheduler.add_job(clean_home_plans, 'cron', hour=9, minute=0, timezone=PLANS_TZ, id='clean_home_plans')
 scheduler.add_job(hourly_stats, 'interval', hours=1, id='hourly_stats')
 
-# Уведомления о планах и случайные события
-# ПРИОРИТЕТ 1: Уведомление о нет планов дома - пятница, базовое время пользователя (проверяется внутри функции)
+# Уведомления о планах и случайные события (разнесены по времени, чтобы не шли вместе)
+# ПРИОРИТЕТ 1: Уведомление «нет планов дома на выходные» — пятница 19:00
 scheduler.add_job(check_weekend_schedule, 'cron', day_of_week='fri', hour=19, minute=0, timezone=PLANS_TZ, id='check_weekend_schedule')
-# ПРИОРИТЕТ 2: Уведомление о нет планов в кино - четверг
-scheduler.add_job(check_premiere_reminder, 'cron', day_of_week='thu', hour=19, minute=0, timezone=PLANS_TZ, id='check_premiere_reminder')
-# ПРИОРИТЕТ 3: Случайные события - пт/сб/вс (проверяется внутри функции)
-scheduler.add_job(check_and_send_random_events, 'cron', day_of_week='fri-sun', hour=20, minute=0, timezone=PLANS_TZ, id='check_and_send_random_events')
+# ПРИОРИТЕТ 2: Уведомление «нет планов в кино на выходные» — четверг 18:45
+scheduler.add_job(check_premiere_reminder, 'cron', day_of_week='thu', hour=18, minute=45, timezone=PLANS_TZ, id='check_premiere_reminder')
+# ПРИОРИТЕТ 3: Случайные события (dice / выбор участника) — пт/сб/вс 20:15
+scheduler.add_job(check_and_send_random_events, 'cron', day_of_week='fri-sun', hour=20, minute=15, timezone=PLANS_TZ, id='check_and_send_random_events')
 # ПРИОРИТЕТ 4: Уведомление о непросмотренных фильмах - воскресенье и вторник (проверяется внутри функции)
 scheduler.add_job(check_unwatched_films_notification, 'cron', day_of_week='tue,sun', hour=15, minute=0, timezone=PLANS_TZ, id='check_unwatched_films_notification')
+
+# Онбординг: уведомления новым пользователям (разнесены по минутам, чтобы не шли вместе)
+scheduler.add_job(check_onboarding_24h, 'cron', minute=5, timezone=PLANS_TZ, id='check_onboarding_24h')
+scheduler.add_job(check_onboarding_plan_reminder, 'cron', minute=25, timezone=PLANS_TZ, id='check_onboarding_plan_reminder')
+scheduler.add_job(check_onboarding_48h, 'cron', minute=45, timezone=PLANS_TZ, id='check_onboarding_48h')
 
 # Регистрация ВСЕХ хэндлеров
 logger.info("=" * 80)

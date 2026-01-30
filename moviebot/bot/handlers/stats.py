@@ -818,7 +818,9 @@ def register_stats_handlers(bot):
             text += "🎬 <b>Контент:</b>\n"
             text += f"   • Всего фильмов: {stats.get('total_movies', 0)}\n"
             text += f"   • Всего планов: {stats.get('total_plans', 0)}\n"
-            text += f"   • Всего оценок: {stats.get('total_ratings', 0)}\n\n"
+            text += f"   • Всего оценок: {stats.get('total_ratings', 0)}\n"
+            text += f"   • Пользователей, добавивших хотя бы 1 фильм: {stats.get('users_added_film', 0)}\n"
+            text += f"   • Пользователей, запланировавших хотя бы 1 просмотр: {stats.get('users_planned', 0)}\n\n"
             
             # Переходы по ссылкам подборок
             tag_add_total = stats.get('tag_add_total', 0)
