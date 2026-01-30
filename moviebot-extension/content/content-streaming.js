@@ -1489,8 +1489,8 @@
           });
           container.appendChild(markBtn);
           
-          // Кнопка "Отметить все до этой" если это не 1×1
-          if (nextSeason > 1 || nextEpisode > 1) {
+          // Кнопка "Отметить все до этой" только если есть непросмотренные до следующей серии (и это не 1×1)
+          if ((nextSeason > 1 || nextEpisode > 1) && filmData.has_unwatched_before) {
             const markAllBtn = document.createElement('button');
             markAllBtn.textContent = '✅ Отметить все до этой';
             markAllBtn.style.cssText = `
@@ -1660,9 +1660,12 @@
             container.appendChild(markCurrentBtn);
           }
           
-          // Показываем кнопку "Отметить все предыдущие" только если есть непросмотренные до целевой
-          const hasUnwatchedBefore = filmData.has_unwatched_before && 
-            (targetSeason > 1 || targetEpisode > 1);
+          // Показываем кнопку "Отметить все предыдущие" только если есть непросмотренные до целевой.
+          // Не показываем, если целевая серия = текущая страница и текущая не отмечена (значит это следующая непросмотренная — все предыдущие уже отмечены).
+          const isTargetCurrentPage = (targetSeason === info.season && targetEpisode === info.episode);
+          const hasUnwatchedBefore = filmData.has_unwatched_before &&
+            (targetSeason > 1 || targetEpisode > 1) &&
+            !(isTargetCurrentPage && !filmData.current_episode_watched);
           
           if (hasUnwatchedBefore && targetSeason && targetEpisode) {
             const markAllBtn = document.createElement('button');
@@ -1765,9 +1768,12 @@
             container.appendChild(markCurrentBtn);
           }
           
-          // Показываем кнопку "Отметить все предыдущие" только если есть непросмотренные до целевой
-          const hasUnwatchedBefore = filmData.has_unwatched_before && 
-            (targetSeason > 1 || targetEpisode > 1);
+          // Показываем кнопку "Отметить все предыдущие" только если есть непросмотренные до целевой.
+          // Не показываем, если целевая = текущая страница и текущая не отмечена (все предыдущие уже отмечены).
+          const isTargetCurrentPage = (targetSeason === info.season && targetEpisode === info.episode);
+          const hasUnwatchedBefore = filmData.has_unwatched_before &&
+            (targetSeason > 1 || targetEpisode > 1) &&
+            !(isTargetCurrentPage && !filmData.current_episode_watched);
           
           if (hasUnwatchedBefore && targetSeason && targetEpisode) {
             const markAllBtn = document.createElement('button');
