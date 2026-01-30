@@ -2,6 +2,7 @@ from moviebot.bot.bot_init import bot, BOT_ID
 """
 Обработчики команд /stats, /total, /admin_stats
 """
+import html as html_module
 import logging
 from datetime import datetime
 
@@ -810,7 +811,8 @@ def register_stats_handlers(bot):
                 for promo in promo_stats['promocodes'][:5]:  # Показываем первые 5
                     discount_str = f"{promo['discount_value']}%" if promo['discount_type'] == 'percent' else f"{int(promo['discount_value'])} руб/звезд"
                     status = "✅" if promo['is_active'] else "❌"
-                    text += f"     {status} {promo['code']} ({discount_str}) — использовано: {promo['used_count']}/{promo['total_uses']}, осталось: {promo['remaining']}\n"
+                    code_escaped = html_module.escape(str(promo.get('code', '')))
+                    text += f"     {status} {code_escaped} ({discount_str}) — использовано: {promo['used_count']}/{promo['total_uses']}, осталось: {promo['remaining']}\n"
             text += "\n"
             
             text += "🎬 <b>Контент:</b>\n"
@@ -828,7 +830,8 @@ def register_stats_handlers(bot):
                     name = r.get('name', '') if isinstance(r, dict) else (r[1] if len(r) > 1 else '')
                     cnt = r.get('add_count', 0) if isinstance(r, dict) else (r[3] if len(r) > 3 else 0)
                     name_short = (name[:35] + '…') if len(name) > 35 else name
-                    text += f"   {i}. {name_short}: {cnt}\n"
+                    name_escaped = html_module.escape(name_short)
+                    text += f"   {i}. {name_escaped}: {cnt}\n"
             text += "\n"
             
             # Топ команд за день
@@ -842,7 +845,8 @@ def register_stats_handlers(bot):
                     else:
                         cmd = cmd_row.get('command_or_action') if isinstance(cmd_row, dict) else (cmd_row[0] if cmd_row and len(cmd_row) > 0 else '')
                         count = cmd_row[1] if len(cmd_row) > 1 else 0
-                    text += f"   {i}. {cmd}: {count}\n"
+                    cmd_escaped = html_module.escape(str(cmd))
+                    text += f"   {i}. {cmd_escaped}: {count}\n"
                 text += "\n"
             
             # Топ команд за неделю
@@ -856,7 +860,8 @@ def register_stats_handlers(bot):
                     else:
                         cmd = cmd_row.get('command_or_action') if isinstance(cmd_row, dict) else (cmd_row[0] if cmd_row and len(cmd_row) > 0 else '')
                         count = cmd_row[1] if len(cmd_row) > 1 else 0
-                    text += f"   {i}. {cmd}: {count}\n"
+                    cmd_escaped = html_module.escape(str(cmd))
+                    text += f"   {i}. {cmd_escaped}: {count}\n"
             
             bot.reply_to(message, text, parse_mode='HTML')
             
