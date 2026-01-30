@@ -11,10 +11,12 @@
         <!-- Экран авторизации -->
         <div id="auth-screen" class="screen">
             <div class="container">
-                <div class="header">
-                    <img id="logo-img-auth" src="icons/icon48.png" alt="Logo" class="logo">
-                    <h1>Movie Planner</h1>
-                </div>
+                <a href="https://movie-planner.ru" target="_blank" rel="noopener" class="header-link">
+                    <div class="header">
+                        <img id="logo-img-auth" src="icons/icon48.png" alt="Logo" class="logo">
+                        <h1>Movie Planner</h1>
+                    </div>
+                </a>
                 <div style="padding: 0 10px; margin-bottom: 16px; font-size: 13px; line-height: 1.6; color: #666; text-align: left;">
                     <p style="margin: 0 0 12px 0;">Получите код в Telegram-боте и введите его ниже — так вы свяжете базу и расширение.</p>
                     <p style="margin: 0 0 16px 0; font-size: 12px; color: #999;">Данные хранятся в вашей базе, доступ через бота, уведомления о планах — в Телеграм.</p>
@@ -31,10 +33,12 @@
         <!-- Экран главного меню -->
         <div id="main-screen" class="screen hidden">
             <div class="container">
-                <div class="header">
-                    <img id="logo-img" src="icons/icon48.png" alt="Logo" class="logo">
-                    <h1>Movie Planner</h1>
-                </div>
+                <a href="https://movie-planner.ru" target="_blank" rel="noopener" class="header-link">
+                    <div class="header">
+                        <img id="logo-img" src="icons/icon48.png" alt="Logo" class="logo">
+                        <h1>Movie Planner</h1>
+                    </div>
+                </a>
                 <div id="film-info" class="film-info hidden">
                     <h2 id="film-title"></h2>
                     <p id="film-year"></p>
@@ -90,8 +94,13 @@
                     </div>
                     <div id="search-results" class="search-results hidden"></div>
                 </div>
+                <div class="container-footer">
+                    <div id="logout-link" class="logout-link">Отвязать аккаунт</div>
+                </div>
             </div>
-            <div id="logout-link" class="logout-link">Отвязать аккаунт</div>
+            <div class="purple-footer">
+                <a href="https://movie-planner.ru" target="_blank" rel="noopener" class="cabinet-link">Перейти в личный кабинет</a>
+            </div>
         </div>
     </div>
     <script src="popup.js"></script>
