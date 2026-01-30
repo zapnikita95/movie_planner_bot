@@ -2493,7 +2493,7 @@ def check_weekend_schedule():
         if current_weekday != 4:
             return
         
-        # Получаем все групповые чаты
+        # Получаем все чаты (личные и группы) — уведомление «нет планов дома» и в личку, и в группы
         with db_lock:
             cursor_local.execute("SELECT DISTINCT chat_id FROM movies")
             chat_rows = cursor_local.fetchall()
@@ -2501,16 +2501,7 @@ def check_weekend_schedule():
         for row in chat_rows:
             chat_id = row.get('chat_id') if isinstance(row, dict) else row[0]
             
-            # Проверяем, что это групповой чат (не личный)
-            try:
-                chat_info = bot.get_chat(chat_id)
-                if chat_info.type == 'private':
-                    continue  # Пропускаем личные чаты
-            except Exception as e:
-                logger.warning(f"[WEEKEND SCHEDULE] Не удалось получить информацию о чате {chat_id}: {e}")
-                continue
-            
-            # Проверяем, включены ли случайные события
+            # Проверяем, включены ли напоминания (random_events_enabled = общий флаг для этой группы уведомлений)
             if not get_random_events_enabled(chat_id):
                 continue
             
@@ -2648,21 +2639,13 @@ def check_premiere_reminder():
         if current_weekday != 3:
             return
         
-        # Получаем все групповые чаты
+        # Получаем все чаты (личные и группы) — уведомление «нет планов в кино» и в личку, и в группы
         with db_lock:
             cursor_local.execute("SELECT DISTINCT chat_id FROM movies")
             chat_rows = cursor_local.fetchall()
         
         for row in chat_rows:
             chat_id = row.get('chat_id') if isinstance(row, dict) else row[0]
-            
-            try:
-                chat_info = bot.get_chat(chat_id)
-                if chat_info.type == 'private':
-                    continue
-            except Exception as e:
-                logger.warning(f"[PREMIERE REMINDER] Не удалось получить информацию о чате {chat_id}: {e}")
-                continue
             
             if not get_random_events_enabled(chat_id):
                 continue
