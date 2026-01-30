@@ -402,7 +402,7 @@
     const desc = (m.description || '').trim();
     const descHtml = desc ? '<div class="film-description">' + escapeHtml(desc.slice(0, 200)) + (desc.length > 200 ? '…' : '') + '</div>' : '';
     return `
-      <div class="card film-card">
+      <a href="${link}" target="_blank" rel="noopener" class="card film-card">
         <div class="card-poster-wrap">
           ${poster ? '<img src="' + poster + '" alt="" class="card-poster" width="80" height="120" referrerpolicy="no-referrer" loading="lazy" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">' : ''}
           <div class="film-poster-placeholder" style="${poster ? 'display:none' : ''}">${m.is_series ? '📺' : '🎬'}</div>
@@ -411,9 +411,9 @@
           <div class="film-title">${escapeHtml(m.title)}${year}${ratingStr}</div>
           ${descHtml}
           <div class="film-status">Статус: В базе</div>
-          <a href="${link}" target="_blank" rel="noopener" class="btn btn-small btn-primary">Продолжить в Telegram</a>
+          <span class="btn btn-small btn-primary">Продолжить в Telegram</span>
         </div>
-      </div>`;
+      </a>`;
   }
 
   function renderUnwatchedList() {
@@ -460,7 +460,7 @@
             const progress = s.progress ? `Прогресс: ${s.progress}` : 'Не начат';
             const poster = posterUrl(s.kp_id);
             return `
-              <div class="card series-card">
+              <a href="${link}" target="_blank" rel="noopener" class="card series-card">
                 <div class="card-poster-wrap">
                   ${poster ? '<img src="' + poster + '" alt="" class="card-poster" width="80" height="120" referrerpolicy="no-referrer" loading="lazy" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">' : ''}
                   <div class="film-poster-placeholder" style="${poster ? 'display:none' : ''}">📺</div>
@@ -468,9 +468,9 @@
                 <div class="film-info">
                   <div class="film-title">${escapeHtml(s.title)}</div>
                   <div class="film-status">${progress}</div>
-                  <a href="${link}" target="_blank" rel="noopener" class="btn btn-small btn-primary">Продолжить в Telegram</a>
+                  <span class="btn btn-small btn-primary">Продолжить в Telegram</span>
                 </div>
-              </div>`;
+              </a>`;
           }).join('')
         : '<p class="empty-hint">Нет сериалов. Добавьте в боте.</p>';
     });
@@ -490,7 +490,7 @@
             const desc = (r.description || '').trim();
             const descHtml = desc ? '<div class="film-description">' + escapeHtml(desc.slice(0, 200)) + (desc.length > 200 ? '…' : '') + '</div>' : '';
             return `
-              <div class="card film-card">
+              <a href="${link}" target="_blank" rel="noopener" class="card film-card">
                 <div class="card-poster-wrap">
                   ${poster ? '<img src="' + poster + '" alt="" class="card-poster" width="80" height="120" referrerpolicy="no-referrer" loading="lazy" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">' : ''}
                   <div class="film-poster-placeholder" style="${poster ? 'display:none' : ''}">⭐</div>
@@ -499,9 +499,9 @@
                   <div class="film-title">${escapeHtml(r.title)}${year}${ratingKpStr}</div>
                   ${descHtml}
                   <div class="film-status">⭐ ${r.rating}</div>
-                  <a href="${link}" target="_blank" rel="noopener" class="btn btn-small btn-primary">Открыть в боте</a>
+                  <span class="btn btn-small btn-primary">Продолжить в Telegram</span>
                 </div>
-              </div>`;
+              </a>`;
           }).join('')
         : '<p class="empty-hint">Нет оценок.</p>';
     }).catch(() => {
