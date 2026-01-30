@@ -120,6 +120,119 @@ def add_tags_command(message):
     logger.info(f"[ADD TAG COMMAND] Состояние установлено: {user_add_tag_state[user_id]}")
 
 
+# Состояние для удаления подборки /delete_tag
+user_delete_tag_state = {}
+
+
+@bot.message_handler(commands=['delete_tag'])
+def delete_tag_command(message):
+    """Команда /delete_tag — удаление подборки (только для админов, только свои подборки)"""
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    if not (is_admin(user_id) or is_owner(user_id)):
+        bot.reply_to(message, "❌ Эта команда доступна только администраторам.")
+        return
+    prompt_msg = bot.reply_to(
+        message,
+        "🗑 <b>Удаление подборки</b>\n\n"
+        "В ответ на это сообщение пришлите код подборки или ссылку на подборку.\n\n"
+        "Примеры:\n"
+        "<code>I6E3MXB8CDC</code>\n"
+        "или ссылка: <code>https://t.me/YourBot?start=tag_I6E3MXB8CDC</code>",
+        parse_mode='HTML'
+    )
+    prompt_message_id = prompt_msg.message_id if prompt_msg else None
+    user_delete_tag_state[user_id] = {
+        'step': 'waiting_for_tag_to_delete',
+        'chat_id': chat_id,
+        'prompt_message_id': prompt_message_id,
+    }
+    logger.info(f"[DELETE TAG] Состояние установлено для user_id={user_id}, prompt_message_id={prompt_message_id}")
+
+
+def check_delete_tag_reply(message):
+    """Проверяет, является ли сообщение ответом на промпт /delete_tag"""
+    user_id = message.from_user.id
+    if user_id not in user_delete_tag_state:
+        return False
+    state = user_delete_tag_state[user_id]
+    if state.get('step') != 'waiting_for_tag_to_delete':
+        return False
+    if not message.reply_to_message:
+        return False
+    prompt_message_id = state.get('prompt_message_id')
+    if not prompt_message_id or message.reply_to_message.message_id != prompt_message_id:
+        return False
+    return True
+
+
+@bot.message_handler(content_types=['text'], func=check_delete_tag_reply)
+def handle_delete_tag_reply(message):
+    """Обработчик ответа на /delete_tag: удаляет подборку по коду или ссылке"""
+    user_id = message.from_user.id
+    chat_id = message.chat.id
+    text = (message.text or "").strip()
+    if not text:
+        bot.reply_to(message, "❌ Пришлите код подборки или ссылку.")
+        if user_id in user_delete_tag_state:
+            del user_delete_tag_state[user_id]
+        return
+    # Извлекаем short_code: либо из ссылки tag_XXXXX, либо как сам текст (код)
+    short_code = None
+    match_link = re.search(r'start=tag_([A-Za-z0-9]+)', text)
+    if match_link:
+        short_code = match_link.group(1)
+    else:
+        # Код без ссылки: только буквы и цифры
+        code_candidate = re.sub(r'^\s*|\s*$', '', text)
+        if code_candidate and len(code_candidate) <= 32 and re.match(r'^[A-Za-z0-9]+$', code_candidate):
+            short_code = code_candidate
+    if not short_code:
+        bot.reply_to(message, "❌ Не найден код подборки. Пришлите код (например I6E3MXB8CDC) или ссылку на подборку.")
+        if user_id in user_delete_tag_state:
+            del user_delete_tag_state[user_id]
+        return
+    conn = get_db_connection()
+    cursor = get_db_cursor()
+    try:
+        with db_lock:
+            cursor.execute('SELECT id, name, created_by FROM tags WHERE short_code = %s', (short_code,))
+            row = cursor.fetchone()
+        if not row:
+            bot.reply_to(message, f"❌ Подборка с кодом <code>{short_code}</code> не найдена.", parse_mode='HTML')
+            if user_id in user_delete_tag_state:
+                del user_delete_tag_state[user_id]
+            return
+        tag_id = row.get('id') if isinstance(row, dict) else row[0]
+        tag_name = row.get('name') if isinstance(row, dict) else row[1]
+        created_by = row.get('created_by') if isinstance(row, dict) else row[2]
+        if created_by != user_id and not is_owner(user_id):
+            bot.reply_to(message, "❌ Удалять можно только свои подборки (или вы владелец бота).")
+            if user_id in user_delete_tag_state:
+                del user_delete_tag_state[user_id]
+            return
+        with db_lock:
+            cursor.execute('DELETE FROM tags WHERE id = %s', (tag_id,))
+            conn.commit()
+        tag_name_short = strip_html_tags(tag_name)[:50]
+        bot.reply_to(message, f"✅ Подборка «{tag_name_short}» удалена.")
+        logger.info(f"[DELETE TAG] user_id={user_id} удалил подборку id={tag_id}, code={short_code}")
+    except Exception as e:
+        logger.error(f"[DELETE TAG] Ошибка: {e}", exc_info=True)
+        bot.reply_to(message, "❌ Ошибка при удалении подборки.")
+    finally:
+        try:
+            cursor.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+        if user_id in user_delete_tag_state:
+            del user_delete_tag_state[user_id]
+
+
 def check_add_tag_reply(message):
     """Проверяет, является ли сообщение ответом для команды /add_tags - ТОЛЬКО РЕПЛАИ НА ПРОМПТ"""
     # КРИТИЧЕСКОЕ ЛОГИРОВАНИЕ - проверяем, вызывается ли функция вообще
@@ -228,63 +341,51 @@ def handle_add_tag_reply(message):
         
         logger.info(f"[ADD TAG] Извлечено название подборки (длина: {len(tag_name)}): '{tag_name[:100]}...' (первые 100 символов)")
         
-        # Извлекаем все kp_id из текста
+        # Текст ПОСЛЕ закрывающей кавычки — только из него извлекаем числовые ID (чтобы не брать "2026" из "Оскар-2026")
+        text_after_quote = text[quote_end + 1:].strip()
+        
+        # Извлекаем все kp_id
         kp_ids = set()
         
-        # 1. Ищем ссылки на Кинопоиск (полные URL)
+        # 1. Ищем ссылки на Кинопоиск (полные URL) — в целом тексте
         links = re.findall(r'https?://(?:www\.)?kinopoisk\.(?:ru|com)/(?:film|series)/(\d+)', text, re.IGNORECASE)
         for link_match in links:
             kp_ids.add(link_match)
             logger.info(f"[ADD TAG] Найдена ссылка: {link_match}")
         
-        # 2. Ищем короткие ссылки типа kinopoisk.ru/film/123 (без протокола)
+        # 2. Ищем короткие ссылки типа kinopoisk.ru/film/123 (без протокола) — в целом тексте
         short_links = re.findall(r'kinopoisk\.(?:ru|com)/(?:film|series)/(\d+)', text, re.IGNORECASE)
         for short_link in short_links:
             kp_ids.add(short_link)
             logger.info(f"[ADD TAG] Найдена короткая ссылка: {short_link}")
         
-        # 3. Ищем ID через запятую или пробел (например: "10246904, 5268266, 8106285" или "10246904 5268266 8106285")
-        # Ищем последовательности цифр любой длины (kp_id может быть коротким, например 474, 488)
-        # НО: исключаем те, что уже найдены в ссылках
-        # Сначала ищем длинные ID (4+ цифр) - они точно ID
+        # 3. Числовые ID (4–10 цифр) — только после закрывающей кавычки, чтобы не брать год из названия
         id_pattern_long = r'\b\d{4,10}\b'
-        found_ids_long = re.findall(id_pattern_long, text)
+        found_ids_long = re.findall(id_pattern_long, text_after_quote)
         for found_id in found_ids_long:
-            # Проверяем, что это не часть ссылки (уже обработано выше)
-            found_pos = text.find(found_id)
-            if found_pos > 0:
-                before = text[max(0, found_pos-20):found_pos].lower()
-                after = text[found_pos+len(found_id):min(len(text), found_pos+len(found_id)+5)]
-                # Если это часть ссылки, пропускаем
-                if 'kinopoisk' in before or '/' in after:
+            found_pos = text_after_quote.find(found_id)
+            if found_pos >= 0:
+                before = text_after_quote[max(0, found_pos - 20):found_pos].lower()
+                after = text_after_quote[found_pos + len(found_id):found_pos + len(found_id) + 10]
+                if 'kinopoisk' in before or '/film/' in before or '/series/' in before or '/film/' in after or '/series/' in after or (after.startswith('/')):
                     continue
             kp_ids.add(found_id)
             logger.info(f"[ADD TAG] Найден ID: {found_id}")
         
-        # Теперь ищем короткие ID (1-3 цифры) - только если они стоят отдельно (окружены пробелами/запятыми)
-        # Это нужно для случаев типа "474, 488" где ID короткие
-        # Находим позицию конца названия в кавычках
-        quote_end_pos = text.rfind('"')
-        if quote_end_pos >= 0:
-            # Ищем ID только после закрывающей кавычки
-            text_after_quote = text[quote_end_pos + 1:].strip()
-            if text_after_quote:
-                # Разбиваем текст после кавычек по запятым и пробелам
-                # Берем все части, которые являются числами длиной 1-3 цифры
-                parts = re.split(r'[\s,]+', text_after_quote)
-                for part in parts:
-                    part = part.strip()
-                    if part and part.isdigit() and 1 <= len(part) <= 3:
-                        # Проверяем, что это не часть ссылки
-                        found_pos_in_full = text.find(part, quote_end_pos)
-                        if found_pos_in_full > 0:
-                            before = text[max(0, found_pos_in_full-20):found_pos_in_full].lower()
-                            after = text[found_pos_in_full+len(part):min(len(text), found_pos_in_full+len(part)+5)]
-                            # Если это часть ссылки, пропускаем
-                            if 'kinopoisk' in before or '/' in after:
-                                continue
-                        kp_ids.add(part)
-                        logger.info(f"[ADD TAG] Найден короткий ID: {part}")
+        # 4. Короткие ID (1–3 цифры) — только после закрывающей кавычки
+        if text_after_quote:
+            parts = re.split(r'[\s,]+', text_after_quote)
+            for part in parts:
+                part = part.strip()
+                if part and part.isdigit() and 1 <= len(part) <= 3:
+                    found_pos = text_after_quote.find(part)
+                    if found_pos >= 0:
+                        before = text_after_quote[max(0, found_pos - 20):found_pos].lower()
+                        after = text_after_quote[found_pos + len(part):found_pos + len(part) + 10]
+                        if 'kinopoisk' in before or '/film/' in before or '/series/' in before or (after.startswith('/')):
+                            continue
+                    kp_ids.add(part)
+                    logger.info(f"[ADD TAG] Найден короткий ID: {part}")
         
         logger.info(f"[ADD TAG] Всего найдено уникальных kp_id: {len(kp_ids)}")
         
