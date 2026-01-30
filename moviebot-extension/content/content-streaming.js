@@ -1025,6 +1025,7 @@
         }
       });
     } catch (e) {
+      if (isContextInvalidated(e)) return;
       console.error('[STREAMING] Ошибка сохранения lastStreamingOverlay:', e);
     }
   }
@@ -1036,6 +1037,7 @@
       const data = await st.get([CACHE_KEY]);
       return data[CACHE_KEY] || [];
     } catch (e) {
+      if (isContextInvalidated(e)) return [];
       console.error('[STREAMING] Ошибка получения кэша:', e);
       return [];
     }
@@ -1058,6 +1060,7 @@
       if (cache.length > MAX_CACHE_SIZE) cache.splice(MAX_CACHE_SIZE);
       await st.set({ [CACHE_KEY]: cache });
     } catch (e) {
+      if (isContextInvalidated(e)) return;
       console.error('[STREAMING] Ошибка сохранения в кэш:', e);
     }
   }
@@ -2051,8 +2054,14 @@
         }
       } catch (fetchError) {
         if (isContextInvalidated(fetchError)) { alertReloadPage(); return; }
-        console.error('[STREAMING] Ошибка fetch при отметке серии:', fetchError);
-        showToast('❌ Ошибка подключения', 3000);
+        const msg = (fetchError && fetchError.message) ? String(fetchError.message) : '';
+        const is502or503 = /502|503/.test(msg);
+        if (is502or503) {
+          showToast('❌ Сервер временно недоступен. Попробуйте позже.', 4000);
+        } else {
+          console.error('[STREAMING] Ошибка fetch при отметке серии:', fetchError);
+          showToast('❌ Ошибка подключения', 3000);
+        }
       }
     } catch (e) {
       if (isContextInvalidated(e)) { alertReloadPage(); return; }
