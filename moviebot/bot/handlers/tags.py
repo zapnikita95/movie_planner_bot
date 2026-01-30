@@ -120,106 +120,45 @@ def add_tags_command(message):
     logger.info(f"[ADD TAG COMMAND] Состояние установлено: {user_add_tag_state[user_id]}")
 
 
-# Состояние для удаления подборки /delete_tag
-user_delete_tag_state = {}
-
-
-@bot.message_handler(commands=['delete_tag'])
+@bot.message_handler(commands=['delete_tag', 'delete_tags'])
 def delete_tag_command(message):
-    """Команда /delete_tag — удаление подборки (только для админов, только свои подборки)"""
+    """Команда /delete_tag или /delete_tags — выбор подборки кнопками, удаление с подтверждением (только свои)"""
     user_id = message.from_user.id
     chat_id = message.chat.id
     if not (is_admin(user_id) or is_owner(user_id)):
         bot.reply_to(message, "❌ Эта команда доступна только администраторам.")
         return
-    prompt_msg = bot.reply_to(
-        message,
-        "🗑 <b>Удаление подборки</b>\n\n"
-        "В ответ на это сообщение пришлите код подборки или ссылку на подборку.\n\n"
-        "Примеры:\n"
-        "<code>I6E3MXB8CDC</code>\n"
-        "или ссылка: <code>https://t.me/YourBot?start=tag_I6E3MXB8CDC</code>",
-        parse_mode='HTML'
-    )
-    prompt_message_id = prompt_msg.message_id if prompt_msg else None
-    user_delete_tag_state[user_id] = {
-        'step': 'waiting_for_tag_to_delete',
-        'chat_id': chat_id,
-        'prompt_message_id': prompt_message_id,
-    }
-    logger.info(f"[DELETE TAG] Состояние установлено для user_id={user_id}, prompt_message_id={prompt_message_id}")
-
-
-def check_delete_tag_reply(message):
-    """Проверяет, является ли сообщение ответом на промпт /delete_tag"""
-    user_id = message.from_user.id
-    if user_id not in user_delete_tag_state:
-        return False
-    state = user_delete_tag_state[user_id]
-    if state.get('step') != 'waiting_for_tag_to_delete':
-        return False
-    if not message.reply_to_message:
-        return False
-    prompt_message_id = state.get('prompt_message_id')
-    if not prompt_message_id or message.reply_to_message.message_id != prompt_message_id:
-        return False
-    return True
-
-
-@bot.message_handler(content_types=['text'], func=check_delete_tag_reply)
-def handle_delete_tag_reply(message):
-    """Обработчик ответа на /delete_tag: удаляет подборку по коду или ссылке"""
-    user_id = message.from_user.id
-    chat_id = message.chat.id
-    text = (message.text or "").strip()
-    if not text:
-        bot.reply_to(message, "❌ Пришлите код подборки или ссылку.")
-        if user_id in user_delete_tag_state:
-            del user_delete_tag_state[user_id]
-        return
-    # Извлекаем short_code: либо из ссылки tag_XXXXX, либо как сам текст (код)
-    short_code = None
-    match_link = re.search(r'start=tag_([A-Za-z0-9]+)', text)
-    if match_link:
-        short_code = match_link.group(1)
-    else:
-        # Код без ссылки: только буквы и цифры
-        code_candidate = re.sub(r'^\s*|\s*$', '', text)
-        if code_candidate and len(code_candidate) <= 32 and re.match(r'^[A-Za-z0-9]+$', code_candidate):
-            short_code = code_candidate
-    if not short_code:
-        bot.reply_to(message, "❌ Не найден код подборки. Пришлите код (например I6E3MXB8CDC) или ссылку на подборку.")
-        if user_id in user_delete_tag_state:
-            del user_delete_tag_state[user_id]
-        return
     conn = get_db_connection()
     cursor = get_db_cursor()
     try:
         with db_lock:
-            cursor.execute('SELECT id, name, created_by FROM tags WHERE short_code = %s', (short_code,))
-            row = cursor.fetchone()
-        if not row:
-            bot.reply_to(message, f"❌ Подборка с кодом <code>{short_code}</code> не найдена.", parse_mode='HTML')
-            if user_id in user_delete_tag_state:
-                del user_delete_tag_state[user_id]
+            cursor.execute(
+                'SELECT id, name, short_code FROM tags WHERE created_by = %s ORDER BY id DESC',
+                (user_id,)
+            )
+            rows = cursor.fetchall()
+        if not rows:
+            bot.reply_to(message, "❌ У вас нет созданных подборок.")
             return
-        tag_id = row.get('id') if isinstance(row, dict) else row[0]
-        tag_name = row.get('name') if isinstance(row, dict) else row[1]
-        created_by = row.get('created_by') if isinstance(row, dict) else row[2]
-        if created_by != user_id and not is_owner(user_id):
-            bot.reply_to(message, "❌ Удалять можно только свои подборки (или вы владелец бота).")
-            if user_id in user_delete_tag_state:
-                del user_delete_tag_state[user_id]
-            return
-        with db_lock:
-            cursor.execute('DELETE FROM tags WHERE id = %s', (tag_id,))
-            conn.commit()
-        tag_name_short = strip_html_tags(tag_name)[:50]
-        bot.reply_to(message, f"✅ Подборка «{tag_name_short}» удалена.")
-        logger.info(f"[DELETE TAG] user_id={user_id} удалил подборку id={tag_id}, code={short_code}")
+        markup = InlineKeyboardMarkup()
+        for row in rows:
+            tag_id = row.get('id') if isinstance(row, dict) else row[0]
+            tag_name = row.get('name') if isinstance(row, dict) else row[1]
+            short_code = row.get('short_code') if isinstance(row, dict) else row[2]
+            btn_text = strip_html_tags(tag_name)
+            if len(btn_text) > 35:
+                btn_text = btn_text[:32] + "..."
+            markup.add(InlineKeyboardButton(f"📦 {btn_text}", callback_data=f"tag_del_choose:{short_code}"))
+        bot.reply_to(
+            message,
+            "🗑 <b>Удаление подборки</b>\n\nВыберите подборку для удаления:",
+            parse_mode='HTML',
+            reply_markup=markup
+        )
+        logger.info(f"[DELETE TAG] Показаны подборки пользователя user_id={user_id}, всего {len(rows)}")
     except Exception as e:
-        logger.error(f"[DELETE TAG] Ошибка: {e}", exc_info=True)
-        bot.reply_to(message, "❌ Ошибка при удалении подборки.")
+        logger.error(f"[DELETE TAG] Ошибка загрузки списка: {e}", exc_info=True)
+        bot.reply_to(message, "❌ Ошибка при загрузке списка подборок.")
     finally:
         try:
             cursor.close()
@@ -229,8 +168,6 @@ def handle_delete_tag_reply(message):
             conn.close()
         except Exception:
             pass
-        if user_id in user_delete_tag_state:
-            del user_delete_tag_state[user_id]
 
 
 def check_add_tag_reply(message):
@@ -1380,6 +1317,118 @@ def handle_tag_cancel(call):
         bot.answer_callback_query(call.id)
         bot.edit_message_text("❌ Добавление отменено.", call.message.chat.id, call.message.message_id)
     except:
+        pass
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("tag_del_choose:"))
+def handle_tag_del_choose(call):
+    """Выбрана подборка для удаления — показываем подтверждение"""
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    short_code = call.data.replace("tag_del_choose:", "", 1).strip()
+    if not short_code:
+        bot.answer_callback_query(call.id, "Ошибка: не указана подборка")
+        return
+    conn = get_db_connection()
+    cursor = get_db_cursor()
+    try:
+        with db_lock:
+            cursor.execute('SELECT id, name, created_by FROM tags WHERE short_code = %s', (short_code,))
+            row = cursor.fetchone()
+        if not row:
+            bot.answer_callback_query(call.id, "Подборка не найдена")
+            return
+        tag_id = row.get('id') if isinstance(row, dict) else row[0]
+        tag_name = row.get('name') if isinstance(row, dict) else row[1]
+        created_by = row.get('created_by') if isinstance(row, dict) else row[2]
+        if created_by != user_id and not is_owner(user_id):
+            bot.answer_callback_query(call.id, "Можно удалять только свои подборки")
+            return
+        tag_name_short = strip_html_tags(tag_name)[:50]
+        markup = InlineKeyboardMarkup()
+        markup.add(InlineKeyboardButton("✅ Удалить", callback_data=f"tag_del_yes:{short_code}"))
+        markup.add(InlineKeyboardButton("❌ Отмена", callback_data="tag_del_no"))
+        bot.answer_callback_query(call.id)
+        bot.edit_message_text(
+            f"🗑 Удалить подборку «{tag_name_short}»?\n\nЭто действие нельзя отменить.",
+            chat_id,
+            call.message.message_id,
+            reply_markup=markup
+        )
+    except Exception as e:
+        logger.error(f"[DELETE TAG] tag_del_choose: {e}", exc_info=True)
+        bot.answer_callback_query(call.id, "Ошибка")
+    finally:
+        try:
+            cursor.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("tag_del_yes:"))
+def handle_tag_del_yes(call):
+    """Подтверждено удаление подборки"""
+    user_id = call.from_user.id
+    chat_id = call.message.chat.id
+    short_code = call.data.replace("tag_del_yes:", "", 1).strip()
+    if not short_code:
+        bot.answer_callback_query(call.id, "Ошибка")
+        return
+    conn = get_db_connection()
+    cursor = get_db_cursor()
+    try:
+        with db_lock:
+            cursor.execute('SELECT id, name, created_by FROM tags WHERE short_code = %s', (short_code,))
+            row = cursor.fetchone()
+        if not row:
+            bot.answer_callback_query(call.id, "Подборка уже удалена")
+            try:
+                bot.edit_message_text("❌ Подборка не найдена (возможно, уже удалена).", chat_id, call.message.message_id)
+            except Exception:
+                pass
+            return
+        tag_id = row.get('id') if isinstance(row, dict) else row[0]
+        tag_name = row.get('name') if isinstance(row, dict) else row[1]
+        created_by = row.get('created_by') if isinstance(row, dict) else row[2]
+        if created_by != user_id and not is_owner(user_id):
+            bot.answer_callback_query(call.id, "Можно удалять только свои подборки")
+            return
+        with db_lock:
+            cursor.execute('DELETE FROM tags WHERE id = %s', (tag_id,))
+            conn.commit()
+        tag_name_short = strip_html_tags(tag_name)[:50]
+        bot.answer_callback_query(call.id, "Подборка удалена")
+        bot.edit_message_text(f"✅ Подборка «{tag_name_short}» удалена.", chat_id, call.message.message_id)
+        logger.info(f"[DELETE TAG] user_id={user_id} удалил подборку id={tag_id}, code={short_code}")
+    except Exception as e:
+        logger.error(f"[DELETE TAG] tag_del_yes: {e}", exc_info=True)
+        bot.answer_callback_query(call.id, "Ошибка при удалении")
+        try:
+            bot.edit_message_text("❌ Ошибка при удалении подборки.", chat_id, call.message.message_id)
+        except Exception:
+            pass
+    finally:
+        try:
+            cursor.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "tag_del_no")
+def handle_tag_del_no(call):
+    """Отмена удаления подборки"""
+    try:
+        bot.answer_callback_query(call.id)
+        bot.edit_message_text("❌ Отменено.", call.message.chat.id, call.message.message_id)
+    except Exception:
         pass
 
 
