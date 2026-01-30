@@ -957,84 +957,97 @@ async function loadFromStreamingPage(info) {
         
         // Проверяем, просмотрена ли текущая серия
         const currentEpisodeWatched = filmJson.current_episode_watched === true;
-        const nextSeason = filmJson.next_unwatched_season;
-        const nextEpisode = filmJson.next_unwatched_episode;
+        let nextSeason = filmJson.next_unwatched_season;
+        let nextEpisode = filmJson.next_unwatched_episode;
+        // Fallback: если API не вернул next_unwatched (старая версия), при отмеченной текущей — следующая по счёту
+        if (currentEpisodeWatched && (nextSeason == null || nextEpisode == null)) {
+          nextSeason = info.season;
+          nextEpisode = (info.episode || 0) + 1;
+        }
         
-        // Если текущая серия уже просмотрена, показываем следующую непросмотренную
         let targetSeason = info.season;
         let targetEpisode = info.episode;
-        
-        if (currentEpisodeWatched && nextSeason && nextEpisode) {
+        if (currentEpisodeWatched && nextSeason != null && nextEpisode != null) {
           console.log('[POPUP] Текущая серия просмотрена, показываем следующую:', nextSeason, nextEpisode);
           targetSeason = nextSeason;
           targetEpisode = nextEpisode;
         }
         
-        // Сериал с определенными сезоном/серией (или следующей непросмотренной)
-        const markBtn = document.createElement('button');
-        markBtn.textContent = `Отметить серию ${targetSeason}×${targetEpisode}`;
-        markBtn.className = 'btn btn-primary';
-        markBtn.style.marginTop = '8px';
-        markBtn.addEventListener('click', async () => {
-          markBtn.disabled = true;
-          markBtn.textContent = '⏳ Отмечаем...';
-          try {
-            const r = await streamingApiRequest('POST', `${API_BASE_URL}/api/extension/mark-episode`, {
-              chat_id: chatId,
-              user_id: userId,
-              kp_id: kpId,
-              film_id: filmId,
-              season: targetSeason,
-              episode: targetEpisode,
-              online_link: info.url || undefined
-            });
-            if (r.data && r.data.success) {
-              markBtn.textContent = '✅ Отмечено!';
-              markBtn.style.background = '#28a745';
-              // Обновляем данные и перерисовываем
-              setTimeout(async () => {
-                try {
-                  const filmUrl = `${API_BASE_URL}/api/extension/film-info?kp_id=${kpId}&chat_id=${chatId}&user_id=${userId}`;
-                  const filmRes = await streamingApiRequest('GET', filmUrl);
-                  if (filmRes.data && filmRes.data.film) {
-                    const newNextSeason = filmRes.data.film.next_unwatched_season;
-                    const newNextEpisode = filmRes.data.film.next_unwatched_episode;
-                    if (newNextSeason && newNextEpisode) {
-                      markBtn.textContent = `Отметить серию ${newNextSeason}×${newNextEpisode}`;
+        // Если открытая серия уже отмечена — только текст, без кнопок (не предлагаем отмечать другую серию с этого экрана)
+        if (currentEpisodeWatched && targetSeason != null && targetEpisode != null) {
+          const statusText = document.createElement('div');
+          statusText.style.cssText = 'font-size: 12px; color: #666; margin-bottom: 8px;';
+          statusText.textContent = `Ближайшая непросмотренная серия — ${targetSeason}×${targetEpisode}`;
+          actionsEl.appendChild(statusText);
+        } else {
+          // Кнопка: отметить открытую на экране серию (текущую)
+          const markBtn = document.createElement('button');
+          markBtn.textContent = `Отметить серию ${targetSeason}×${targetEpisode}`;
+          markBtn.className = 'btn btn-primary';
+          markBtn.style.marginTop = '8px';
+          markBtn.addEventListener('click', async () => {
+            markBtn.disabled = true;
+            markBtn.textContent = '⏳ Отмечаем...';
+            try {
+              const r = await streamingApiRequest('POST', `${API_BASE_URL}/api/extension/mark-episode`, {
+                chat_id: chatId,
+                user_id: userId,
+                kp_id: kpId,
+                film_id: filmId,
+                season: targetSeason,
+                episode: targetEpisode,
+                online_link: info.url || undefined
+              });
+              if (r.data && r.data.success) {
+                markBtn.textContent = '✅ Отмечено!';
+                markBtn.style.background = '#28a745';
+                setTimeout(async () => {
+                  try {
+                    const filmUrl = `${API_BASE_URL}/api/extension/film-info?kp_id=${kpId}&chat_id=${chatId}&user_id=${userId}&season=${info.season}&episode=${info.episode}`;
+                    const filmRes = await streamingApiRequest('GET', filmUrl);
+                    if (filmRes.data && filmRes.data.current_episode_watched) {
+                      const newNextS = filmRes.data.next_unwatched_season ?? filmRes.data.film?.next_unwatched_season;
+                      const newNextE = filmRes.data.next_unwatched_episode ?? filmRes.data.film?.next_unwatched_episode;
+                      const nextBtn = markBtn.nextElementSibling;
+                      markBtn.remove();
+                      if (nextBtn && nextBtn.textContent.includes('все предыдущие')) nextBtn.remove();
+                      const statusText = document.createElement('div');
+                      statusText.style.cssText = 'font-size: 12px; color: #666; margin-bottom: 8px;';
+                      const nextS = (newNextS != null && newNextE != null) ? newNextS : (info.season != null && info.episode != null ? info.season : null);
+                      const nextE = (newNextS != null && newNextE != null) ? newNextE : (info.season != null && info.episode != null ? (info.episode || 0) + 1 : null);
+                      statusText.innerHTML = 'Текущая серия отмечена.' + (nextS != null && nextE != null ? `<br>Ближайшая непросмотренная серия — ${nextS}×${nextE}` : '');
+                      actionsEl.insertBefore(statusText, actionsEl.firstChild);
+                    } else {
+                      markBtn.textContent = `Отметить серию ${targetSeason}×${targetEpisode}`;
                       markBtn.style.background = '';
                       markBtn.disabled = false;
-                    } else {
-                      markBtn.textContent = '✅ Все серии просмотрены!';
-                      markBtn.disabled = true;
                     }
+                  } catch (e) {
+                    console.error('Ошибка обновления данных:', e);
                   }
-                } catch (e) {
-                  console.error('Ошибка обновления данных:', e);
-                }
-              }, 1000);
-            } else {
+                }, 1000);
+              } else {
+                markBtn.textContent = '❌ Ошибка';
+                markBtn.disabled = false;
+              }
+            } catch (e) {
+              console.error('Ошибка отметки серии:', e);
               markBtn.textContent = '❌ Ошибка';
               markBtn.disabled = false;
             }
-          } catch (e) {
-            console.error('Ошибка отметки серии:', e);
-            markBtn.textContent = '❌ Ошибка';
-            markBtn.disabled = false;
-          }
-        });
-        actionsEl.appendChild(markBtn);
-        
-        // Кнопка "Отметить все предыдущие" - только если есть непросмотренные серии ДО целевой
-        // Используем targetSeason/targetEpisode для определения, есть ли серии до целевой
-        const hasUnwatchedBefore = filmJson.has_unwatched_before && 
-          (targetSeason > 1 || targetEpisode > 1);
-        
-        if (hasUnwatchedBefore) {
-          const markAllBtn = document.createElement('button');
-          markAllBtn.textContent = 'Отметить все предыдущие';
-          markAllBtn.className = 'btn btn-secondary';
-          markAllBtn.style.marginTop = '4px';
-          markAllBtn.addEventListener('click', async () => {
+          });
+          actionsEl.appendChild(markBtn);
+          
+          // Кнопка "Отметить все предыдущие" - только если есть непросмотренные серии ДО целевой
+          const hasUnwatchedBefore = filmJson.has_unwatched_before && 
+            (targetSeason > 1 || targetEpisode > 1);
+          
+          if (hasUnwatchedBefore) {
+            const markAllBtn = document.createElement('button');
+            markAllBtn.textContent = 'Отметить все предыдущие';
+            markAllBtn.className = 'btn btn-secondary';
+            markAllBtn.style.marginTop = '4px';
+            markAllBtn.addEventListener('click', async () => {
             markAllBtn.disabled = true;
             markAllBtn.textContent = '⏳ Отмечаем...';
             try {
@@ -1054,14 +1067,14 @@ async function loadFromStreamingPage(info) {
                 // Обновляем данные
                 setTimeout(async () => {
                   try {
-                    const filmUrl = `${API_BASE_URL}/api/extension/film-info?kp_id=${kpId}&chat_id=${chatId}&user_id=${userId}`;
+                    const filmUrl = `${API_BASE_URL}/api/extension/film-info?kp_id=${kpId}&chat_id=${chatId}&user_id=${userId}&season=${info.season ?? targetSeason}&episode=${info.episode ?? targetEpisode}`;
                     const filmRes = await streamingApiRequest('GET', filmUrl);
                     if (filmRes.data && filmRes.data.film) {
-                      const newNextSeason = filmRes.data.film.next_unwatched_season;
-                      const newNextEpisode = filmRes.data.film.next_unwatched_episode;
-                      if (newNextSeason && newNextEpisode) {
+                      const newNextSeason = filmRes.data.next_unwatched_season ?? filmRes.data.film?.next_unwatched_season;
+                      const newNextEpisode = filmRes.data.next_unwatched_episode ?? filmRes.data.film?.next_unwatched_episode;
+                      if (newNextSeason != null && newNextEpisode != null) {
                         markBtn.textContent = `Отметить серию ${newNextSeason}×${newNextEpisode}`;
-                        if (filmRes.data.film.has_unwatched_before && (newNextSeason > 1 || newNextEpisode > 1)) {
+                        if ((filmRes.data.has_unwatched_before ?? filmRes.data.film?.has_unwatched_before) && (newNextSeason > 1 || newNextEpisode > 1)) {
                           markAllBtn.textContent = 'Отметить все предыдущие';
                           markAllBtn.style.background = '';
                           markAllBtn.disabled = false;
@@ -1069,9 +1082,14 @@ async function loadFromStreamingPage(info) {
                           markAllBtn.remove();
                         }
                       } else {
-                        markBtn.textContent = '✅ Все серии просмотрены!';
-                        markBtn.disabled = true;
+                        markBtn.remove();
                         markAllBtn.remove();
+                        const statusText = document.createElement('div');
+                        statusText.style.cssText = 'font-size: 12px; color: #666; margin-bottom: 8px;';
+                        const fallbackS = info.season ?? targetSeason;
+                        const fallbackE = (info.episode ?? targetEpisode ?? 0) + 1;
+                        statusText.innerHTML = 'Текущая серия отмечена.<br>Ближайшая непросмотренная серия — ' + (fallbackS != null && fallbackE != null ? `${fallbackS}×${fallbackE}` : 'откройте следующую серию');
+                        actionsEl.insertBefore(statusText, actionsEl.firstChild);
                       }
                     }
                   } catch (e) {
@@ -1089,6 +1107,7 @@ async function loadFromStreamingPage(info) {
             }
           });
           actionsEl.appendChild(markAllBtn);
+        }
         }
       } else if (info.isSeries) {
         // Сериал без определенных сезона/серии - показываем самую раннюю непросмотренную серию
@@ -1127,15 +1146,15 @@ async function loadFromStreamingPage(info) {
                   const filmUrl = `${API_BASE_URL}/api/extension/film-info?kp_id=${kpId}&chat_id=${chatId}&user_id=${userId}`;
                   const filmRes = await streamingApiRequest('GET', filmUrl);
                   if (filmRes.data && filmRes.data.film) {
-                    const newNextSeason = filmRes.data.film.next_unwatched_season;
-                    const newNextEpisode = filmRes.data.film.next_unwatched_episode;
-                    if (newNextSeason && newNextEpisode) {
+                    const newNextSeason = filmRes.data.next_unwatched_season ?? filmRes.data.film?.next_unwatched_season;
+                    const newNextEpisode = filmRes.data.next_unwatched_episode ?? filmRes.data.film?.next_unwatched_episode;
+                    if (newNextSeason != null && newNextEpisode != null) {
                       helpText.textContent = `Следующая непросмотренная: ${newNextSeason}×${newNextEpisode}`;
                       markNextBtn.textContent = `Отметить серию ${newNextSeason}×${newNextEpisode}`;
                       markNextBtn.style.background = '';
                       markNextBtn.disabled = false;
                     } else {
-                      helpText.textContent = 'Все серии просмотрены!';
+                      helpText.innerHTML = 'Текущая серия отмечена.<br>Ближайшая непросмотренная — откройте следующую серию для обновления.';
                       markNextBtn.remove();
                     }
                   }
@@ -1184,12 +1203,12 @@ async function loadFromStreamingPage(info) {
                     const filmUrl = `${API_BASE_URL}/api/extension/film-info?kp_id=${kpId}&chat_id=${chatId}&user_id=${userId}`;
                     const filmRes = await streamingApiRequest('GET', filmUrl);
                     if (filmRes.data && filmRes.data.film) {
-                      const newNextSeason = filmRes.data.film.next_unwatched_season;
-                      const newNextEpisode = filmRes.data.film.next_unwatched_episode;
-                      if (newNextSeason && newNextEpisode) {
+                      const newNextSeason = filmRes.data.next_unwatched_season ?? filmRes.data.film?.next_unwatched_season;
+                      const newNextEpisode = filmRes.data.next_unwatched_episode ?? filmRes.data.film?.next_unwatched_episode;
+                      if (newNextSeason != null && newNextEpisode != null) {
                         helpText.textContent = `Следующая непросмотренная: ${newNextSeason}×${newNextEpisode}`;
                         markNextBtn.textContent = `Отметить серию ${newNextSeason}×${newNextEpisode}`;
-                        if (filmRes.data.film.has_unwatched_before && (newNextSeason > 1 || newNextEpisode > 1)) {
+                        if ((filmRes.data.has_unwatched_before ?? filmRes.data.film?.has_unwatched_before) && (newNextSeason > 1 || newNextEpisode > 1)) {
                           markAllBtn.textContent = 'Отметить все предыдущие';
                           markAllBtn.style.background = '';
                           markAllBtn.disabled = false;
@@ -1197,7 +1216,7 @@ async function loadFromStreamingPage(info) {
                           markAllBtn.remove();
                         }
                       } else {
-                        helpText.textContent = 'Все серии просмотрены!';
+                        helpText.innerHTML = 'Текущая серия отмечена.<br>Ближайшая непросмотренная — откройте следующую серию для обновления.';
                         markNextBtn.remove();
                         markAllBtn.remove();
                       }

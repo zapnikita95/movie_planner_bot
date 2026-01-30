@@ -1751,6 +1751,8 @@ def create_web_app(bot):
             logger.info(f"[EXTENSION API] Проверка наличия в БД: chat_id={chat_id}, kp_id={kp_id}")
             
             current_episode_watched = False
+            next_unwatched_season = None
+            next_unwatched_episode = None
             
             with db_lock:
                 cursor.execute("""
@@ -1831,7 +1833,10 @@ def create_web_app(bot):
                                 else:
                                     unwatched_count = int(unwatched_result[0] or 0)
                                 has_unwatched_before = unwatched_count > 0
-                            logger.info(f"[EXTENSION API] Серии: film_id={film_id}, s={current_season}, e={current_episode}, current_watched={current_episode_watched}, has_unwatched_before={has_unwatched_before}")
+                            # Следующая непросмотренная: если текущая отмечена — следующая по счёту, иначе — текущая
+                            next_unwatched_season = current_season
+                            next_unwatched_episode = (current_episode + 1) if current_episode_watched else current_episode
+                            logger.info(f"[EXTENSION API] Серии: film_id={film_id}, s={current_season}, e={current_episode}, current_watched={current_episode_watched}, has_unwatched_before={has_unwatched_before}, next_unwatched={next_unwatched_season}x{next_unwatched_episode}")
                         except Exception as unw_err:
                             logger.warning(f"[EXTENSION API] Ошибка проверки unwatched_before: {unw_err}")
             
@@ -1854,6 +1859,8 @@ def create_web_app(bot):
                 "rated": rated,
                 "has_unwatched_before": has_unwatched_before,
                 "current_episode_watched": current_episode_watched,
+                "next_unwatched_season": next_unwatched_season,
+                "next_unwatched_episode": next_unwatched_episode,
                 "has_plan": has_plan,
                 "plan_type": plan_type,
                 "plan_id": plan_id

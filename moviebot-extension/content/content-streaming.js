@@ -1629,14 +1629,25 @@
           // Определяем целевую серию: если текущая просмотрена, показываем следующую непросмотренную
           let targetSeason = info.season;
           let targetEpisode = info.episode;
-          
-          if (filmData.current_episode_watched && filmData.next_unwatched_season && filmData.next_unwatched_episode) {
-            targetSeason = filmData.next_unwatched_season;
-            targetEpisode = filmData.next_unwatched_episode;
-            console.log('[STREAMING] Текущая серия просмотрена, показываем следующую:', targetSeason, targetEpisode);
+          if (filmData.current_episode_watched) {
+            if (filmData.next_unwatched_season != null && filmData.next_unwatched_episode != null) {
+              targetSeason = filmData.next_unwatched_season;
+              targetEpisode = filmData.next_unwatched_episode;
+              console.log('[STREAMING] Текущая серия просмотрена, показываем следующую:', targetSeason, targetEpisode);
+            } else if (info.season != null && info.episode != null) {
+              targetSeason = info.season;
+              targetEpisode = (info.episode || 0) + 1;
+              console.log('[STREAMING] Текущая серия просмотрена, fallback следующая:', targetSeason, targetEpisode);
+            }
           }
           
-          if (targetSeason && targetEpisode) {
+          // Если открытая серия уже отмечена — только текст, без кнопок
+          if (filmData.current_episode_watched && targetSeason != null && targetEpisode != null) {
+            const statusEl = document.createElement('div');
+            statusEl.style.cssText = 'font-size: 12px; opacity: 0.95; margin-bottom: 8px;';
+            statusEl.textContent = `Ближайшая непросмотренная серия — ${targetSeason}×${targetEpisode}`;
+            container.appendChild(statusEl);
+          } else if (targetSeason && targetEpisode) {
             const markCurrentBtn = document.createElement('button');
             markCurrentBtn.textContent = `✅ Отметить серию ${targetSeason}×${targetEpisode}`;
             markCurrentBtn.style.cssText = `
@@ -1657,44 +1668,40 @@
               min-height: 44px !important;
               line-height: 1.2 !important;
             `;
-            // Создаем копию info с целевыми сезоном/серией для обработчика
             const targetInfo = { ...info, season: targetSeason, episode: targetEpisode };
             markCurrentBtn.addEventListener('click', () => handleMarkEpisode(targetInfo, filmData, false));
             container.appendChild(markCurrentBtn);
-          }
-          
-          // Показываем кнопку "Отметить все предыдущие" только если есть непросмотренные до целевой.
-          // Не показываем, если целевая серия = текущая страница и текущая не отмечена (значит это следующая непросмотренная — все предыдущие уже отмечены).
-          const isTargetCurrentPage = (targetSeason === info.season && targetEpisode === info.episode);
-          const hasUnwatchedBefore = filmData.has_unwatched_before &&
-            (targetSeason > 1 || targetEpisode > 1) &&
-            !(isTargetCurrentPage && !filmData.current_episode_watched);
-          
-          if (hasUnwatchedBefore && targetSeason && targetEpisode) {
-            const markAllBtn = document.createElement('button');
-            markAllBtn.textContent = '✅ Отметить все предыдущие';
-            markAllBtn.style.cssText = `
-              width: 100% !important;
-              padding: 10px 16px !important;
-              background: rgba(255,255,255,0.2) !important;
-              color: white !important;
-              border: 1px solid rgba(255,255,255,0.3) !important;
-              border-radius: 8px !important;
-              font-weight: 600 !important;
-              cursor: pointer !important;
-              font-size: 13px !important;
-              box-sizing: border-box !important;
-              text-align: center !important;
-              display: flex !important;
-              align-items: center !important;
-              justify-content: center !important;
-              min-height: 40px !important;
-              line-height: 1.2 !important;
-            `;
-            // Создаем копию info с целевыми сезоном/серией для обработчика
-            const targetInfo = { ...info, season: targetSeason, episode: targetEpisode };
-            markAllBtn.addEventListener('click', () => handleMarkEpisode(targetInfo, filmData, true));
-            container.appendChild(markAllBtn);
+            
+            const isTargetCurrentPage = (targetSeason === info.season && targetEpisode === info.episode);
+            const hasUnwatchedBefore = filmData.has_unwatched_before &&
+              (targetSeason > 1 || targetEpisode > 1) &&
+              !(isTargetCurrentPage && !filmData.current_episode_watched);
+            
+            if (hasUnwatchedBefore) {
+              const markAllBtn = document.createElement('button');
+              markAllBtn.textContent = '✅ Отметить все предыдущие';
+              markAllBtn.style.cssText = `
+                width: 100% !important;
+                padding: 10px 16px !important;
+                background: rgba(255,255,255,0.2) !important;
+                color: white !important;
+                border: 1px solid rgba(255,255,255,0.3) !important;
+                border-radius: 8px !important;
+                font-weight: 600 !important;
+                cursor: pointer !important;
+                font-size: 13px !important;
+                box-sizing: border-box !important;
+                text-align: center !important;
+                display: flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                min-height: 40px !important;
+                line-height: 1.2 !important;
+              `;
+              const targetInfoAll = { ...info, season: targetSeason, episode: targetEpisode };
+              markAllBtn.addEventListener('click', () => handleMarkEpisode(targetInfoAll, filmData, true));
+              container.appendChild(markAllBtn);
+            }
           }
         }
       }
@@ -1737,14 +1744,25 @@
           // Определяем целевую серию: если текущая просмотрена, показываем следующую непросмотренную
           let targetSeason = info.season;
           let targetEpisode = info.episode;
-          
-          if (filmData.current_episode_watched && filmData.next_unwatched_season && filmData.next_unwatched_episode) {
-            targetSeason = filmData.next_unwatched_season;
-            targetEpisode = filmData.next_unwatched_episode;
-            console.log('[STREAMING] Текущая серия просмотрена, показываем следующую:', targetSeason, targetEpisode);
+          if (filmData.current_episode_watched) {
+            if (filmData.next_unwatched_season != null && filmData.next_unwatched_episode != null) {
+              targetSeason = filmData.next_unwatched_season;
+              targetEpisode = filmData.next_unwatched_episode;
+              console.log('[STREAMING] Текущая серия просмотрена, показываем следующую:', targetSeason, targetEpisode);
+            } else if (info.season != null && info.episode != null) {
+              targetSeason = info.season;
+              targetEpisode = (info.episode || 0) + 1;
+              console.log('[STREAMING] Текущая серия просмотрена, fallback следующая:', targetSeason, targetEpisode);
+            }
           }
           
-          if (targetSeason && targetEpisode) {
+          // Если открытая серия уже отмечена — только текст, без кнопок
+          if (filmData.current_episode_watched && targetSeason != null && targetEpisode != null) {
+            const statusEl = document.createElement('div');
+            statusEl.style.cssText = 'font-size: 12px; opacity: 0.95; margin-bottom: 8px;';
+            statusEl.textContent = `Ближайшая непросмотренная серия — ${targetSeason}×${targetEpisode}`;
+            container.appendChild(statusEl);
+          } else if (targetSeason && targetEpisode) {
             const markCurrentBtn = document.createElement('button');
             markCurrentBtn.textContent = `✅ Отметить серию ${targetSeason}×${targetEpisode}`;
             markCurrentBtn.style.cssText = `
@@ -1765,44 +1783,40 @@
               min-height: 44px !important;
               line-height: 1.2 !important;
             `;
-            // Создаем копию info с целевыми сезоном/серией для обработчика
             const targetInfo = { ...info, season: targetSeason, episode: targetEpisode };
             markCurrentBtn.addEventListener('click', () => handleMarkEpisode(targetInfo, filmData, false));
             container.appendChild(markCurrentBtn);
-          }
-          
-          // Показываем кнопку "Отметить все предыдущие" только если есть непросмотренные до целевой.
-          // Не показываем, если целевая = текущая страница и текущая не отмечена (все предыдущие уже отмечены).
-          const isTargetCurrentPage = (targetSeason === info.season && targetEpisode === info.episode);
-          const hasUnwatchedBefore = filmData.has_unwatched_before &&
-            (targetSeason > 1 || targetEpisode > 1) &&
-            !(isTargetCurrentPage && !filmData.current_episode_watched);
-          
-          if (hasUnwatchedBefore && targetSeason && targetEpisode) {
-            const markAllBtn = document.createElement('button');
-            markAllBtn.textContent = '✅ Отметить все предыдущие';
-            markAllBtn.style.cssText = `
-              width: 100% !important;
-              padding: 10px 16px !important;
-              background: rgba(255,255,255,0.2) !important;
-              color: white !important;
-              border: 1px solid rgba(255,255,255,0.3) !important;
-              border-radius: 8px !important;
-              font-weight: 600 !important;
-              cursor: pointer !important;
-              font-size: 13px !important;
-              box-sizing: border-box !important;
-              text-align: center !important;
-              display: flex !important;
-              align-items: center !important;
-              justify-content: center !important;
-              min-height: 40px !important;
-              line-height: 1.2 !important;
-            `;
-            // Создаем копию info с целевыми сезоном/серией для обработчика
-            const targetInfo = { ...info, season: targetSeason, episode: targetEpisode };
-            markAllBtn.addEventListener('click', () => handleMarkEpisode(targetInfo, filmData, true));
-            container.appendChild(markAllBtn);
+            
+            const isTargetCurrentPage = (targetSeason === info.season && targetEpisode === info.episode);
+            const hasUnwatchedBefore = filmData.has_unwatched_before &&
+              (targetSeason > 1 || targetEpisode > 1) &&
+              !(isTargetCurrentPage && !filmData.current_episode_watched);
+            
+            if (hasUnwatchedBefore) {
+              const markAllBtn = document.createElement('button');
+              markAllBtn.textContent = '✅ Отметить все предыдущие';
+              markAllBtn.style.cssText = `
+                width: 100% !important;
+                padding: 10px 16px !important;
+                background: rgba(255,255,255,0.2) !important;
+                color: white !important;
+                border: 1px solid rgba(255,255,255,0.3) !important;
+                border-radius: 8px !important;
+                font-weight: 600 !important;
+                cursor: pointer !important;
+                font-size: 13px !important;
+                box-sizing: border-box !important;
+                text-align: center !important;
+                display: flex !important;
+                align-items: center !important;
+                justify-content: center !important;
+                min-height: 40px !important;
+                line-height: 1.2 !important;
+              `;
+              const targetInfoAll = { ...info, season: targetSeason, episode: targetEpisode };
+              markAllBtn.addEventListener('click', () => handleMarkEpisode(targetInfoAll, filmData, true));
+              container.appendChild(markAllBtn);
+            }
           }
         }
       } else {
@@ -2346,6 +2360,12 @@
               } else {
                 // ВАЖНО: film_id может быть 0 или null, проверяем явно
                 const filmId = (result.film_id !== undefined && result.film_id !== null) ? result.film_id : null;
+                let nextS = result.next_unwatched_season;
+                let nextE = result.next_unwatched_episode;
+                if (result.current_episode_watched && (nextS == null || nextE == null) && info.season != null && info.episode != null) {
+                  nextS = info.season;
+                  nextE = (info.episode || 0) + 1;
+                }
                 filmData = {
                   kp_id: kpId,
                   film_id: filmId,
@@ -2353,6 +2373,8 @@
                   rated: result.rated || false,
                   has_unwatched_before: result.has_unwatched_before || false,
                   current_episode_watched: result.current_episode_watched || false,
+                  next_unwatched_season: nextS,
+                  next_unwatched_episode: nextE,
                   is_series: !!result.film?.is_series
                 };
                 console.log('[STREAMING] filmData после парсинга:', filmData);
@@ -2384,6 +2406,12 @@
                     kpId = null;
                   } else {
                     const filmId = (retryResult.film_id !== undefined && retryResult.film_id !== null) ? retryResult.film_id : null;
+                    let retryNextS = retryResult.next_unwatched_season;
+                    let retryNextE = retryResult.next_unwatched_episode;
+                    if (retryResult.current_episode_watched && (retryNextS == null || retryNextE == null) && info.season != null && info.episode != null) {
+                      retryNextS = info.season;
+                      retryNextE = (info.episode || 0) + 1;
+                    }
                     filmData = {
                       kp_id: kpId,
                       film_id: filmId,
@@ -2391,6 +2419,8 @@
                       rated: retryResult.rated || false,
                       has_unwatched_before: retryResult.has_unwatched_before || false,
                       current_episode_watched: retryResult.current_episode_watched || false,
+                      next_unwatched_season: retryNextS,
+                      next_unwatched_episode: retryNextE,
                       is_series: !!retryResult.film?.is_series
                     };
                     console.log('[STREAMING] Повторный запрос успешен, film_id:', filmId);
@@ -2447,6 +2477,12 @@
         function buildFilmData(sr, fr) {
           const fid = (fr?.film_id != null) ? fr.film_id : null;
           const isSer = !!(fr?.film?.is_series ?? sr?.film?.is_series);
+          let nextS = fr?.next_unwatched_season;
+          let nextE = fr?.next_unwatched_episode;
+          if (fr?.current_episode_watched && (nextS == null || nextE == null) && info.season != null && info.episode != null) {
+            nextS = info.season;
+            nextE = (info.episode || 0) + 1;
+          }
           return {
             kp_id: kpId,
             film_id: fid,
@@ -2454,6 +2490,8 @@
             rated: fr?.rated || false,
             has_unwatched_before: fr?.has_unwatched_before || false,
             current_episode_watched: fr?.current_episode_watched || false,
+            next_unwatched_season: nextS,
+            next_unwatched_episode: nextE,
             is_series: isSer
           };
         }
