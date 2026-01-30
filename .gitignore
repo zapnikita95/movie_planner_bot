@@ -31,3 +31,6 @@ __pycache__/
 *.pyc
 .env
 heavy_check_venv/
+
+# Вложенный репозиторий — не добавлять (при git add . попадёт как submodule, без содержимого)
+movie_planner_site/
