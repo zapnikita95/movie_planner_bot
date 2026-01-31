@@ -828,8 +828,10 @@ def register_stats_handlers(bot):
             text += "🔗 <b>Переходы по ссылкам подборок:</b>\n"
             text += f"   • Всего добавлений: {tag_add_total}\n"
             if tag_add_stats:
+                from moviebot.bot.handlers.tags import strip_html_tags
                 for i, r in enumerate(tag_add_stats[:15], 1):
                     name = r.get('name', '') if isinstance(r, dict) else (r[1] if len(r) > 1 else '')
+                    name = strip_html_tags(str(name))  # только текст, без <a href> и прочих тегов
                     cnt = r.get('add_count', 0) if isinstance(r, dict) else (r[3] if len(r) > 3 else 0)
                     name_short = (name[:35] + '…') if len(name) > 35 else name
                     name_escaped = html_module.escape(name_short)

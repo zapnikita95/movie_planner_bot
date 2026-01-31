@@ -3263,8 +3263,9 @@ def check_onboarding_24h():
                 bot_username = bot.get_me().username
             except Exception:
                 bot_username = None
+            from moviebot.bot.handlers.tags import strip_html_tags as _strip_tag_name
             for tag in get_latest_tags(3):
-                name = (tag.get('name') or '')[:40]
+                name = _strip_tag_name(tag.get('name') or '')[:40]
                 short = tag.get('short_code') or ''
                 if bot_username and short:
                     markup.add(InlineKeyboardButton(name, url=f"https://t.me/{bot_username}?start=tag_{short}"))
@@ -3355,8 +3356,9 @@ def check_onboarding_plan_reminder():
                 bot_username = bot.get_me().username
             except Exception:
                 bot_username = None
+            from moviebot.bot.handlers.tags import strip_html_tags as _strip_tag_name
             for tag in get_latest_tags(3):
-                name = (tag.get('name') or '')[:40]
+                name = _strip_tag_name(tag.get('name') or '')[:40]
                 short = tag.get('short_code') or ''
                 if bot_username and short:
                     markup.add(InlineKeyboardButton(name, url=f"https://t.me/{bot_username}?start=tag_{short}"))
