@@ -913,6 +913,136 @@ def check_and_send_plan_notifications():
                 pass
 
 
+def check_and_send_rate_reminders():
+    """Через 3 часа после времени запланированного просмотра (только фильмы, не сериалы)
+    отправляет сообщение «Как вам фильм X? Оцените и посмотрите факты» с кнопками Оценить и Факты.
+    Не отправляет, если фильм уже оценён хотя бы одним пользователем в чате."""
+    import html as html_module
+    from moviebot.database.db_connection import get_db_connection, get_db_cursor
+
+    now_utc = datetime.now(pytz.utc)
+    window_start = now_utc - timedelta(hours=3, minutes=20)
+    window_end = now_utc - timedelta(hours=3) + timedelta(minutes=20)
+
+    conn_local = get_db_connection()
+    cursor_local = get_db_cursor()
+    try:
+        with db_lock:
+            cursor_local.execute('''
+                SELECT p.id AS plan_id, p.chat_id, p.film_id, COALESCE(p.custom_title, m.title, 'Фильм') AS title, m.kp_id
+                FROM plans p
+                JOIN movies m ON p.film_id = m.id AND p.chat_id = m.chat_id
+                WHERE p.plan_datetime >= %s AND p.plan_datetime <= %s
+                  AND p.film_id IS NOT NULL
+                  AND (m.is_series = 0 OR m.is_series IS NULL)
+                  AND (p.rate_reminder_sent IS NULL OR p.rate_reminder_sent = FALSE)
+            ''', (window_start, window_end))
+            rows = cursor_local.fetchall()
+    except Exception as e:
+        logger.error(f"[RATE REMINDER] Ошибка запроса планов: {e}", exc_info=True)
+        return
+    finally:
+        try:
+            cursor_local.close()
+        except Exception:
+            pass
+        try:
+            conn_local.close()
+        except Exception:
+            pass
+
+    for r in rows:
+        if isinstance(r, dict):
+            plan_id = r.get('plan_id')
+            chat_id = r.get('chat_id')
+            film_id = r.get('film_id')
+            title = (r.get('title') or 'Фильм').strip()
+            kp_id = r.get('kp_id')
+        else:
+            plan_id = r[0]
+            chat_id = r[1]
+            film_id = r[2]
+            title = (r[3] if len(r) > 3 else 'Фильм') or 'Фильм'
+            title = (title or 'Фильм').strip()
+            kp_id = r[4] if len(r) > 4 else None
+
+        if not kp_id:
+            _mark_rate_reminder_sent(plan_id, chat_id)
+            continue
+
+        conn_check = get_db_connection()
+        cursor_check = get_db_cursor()
+        has_rating = False
+        try:
+            with db_lock:
+                cursor_check.execute('''
+                    SELECT 1 FROM ratings
+                    WHERE chat_id = %s AND film_id = %s
+                      AND (is_imported = FALSE OR is_imported IS NULL)
+                    LIMIT 1
+                ''', (chat_id, film_id))
+                has_rating = cursor_check.fetchone() is not None
+        except Exception as e:
+            logger.warning(f"[RATE REMINDER] Ошибка проверки оценок plan_id={plan_id}: {e}")
+        finally:
+            try:
+                cursor_check.close()
+            except Exception:
+                pass
+            try:
+                conn_check.close()
+            except Exception:
+                pass
+
+        if has_rating:
+            _mark_rate_reminder_sent(plan_id, chat_id)
+            continue
+
+        title_esc = html_module.escape(str(title)[:200])
+        text = f"Как вам фильм <b>{title_esc}</b>? Оцените его и посмотрите интересные факты!"
+        markup = InlineKeyboardMarkup(row_width=1)
+        try:
+            kp_int = int(kp_id)
+            markup.row(
+                InlineKeyboardButton("🤔 Факты", callback_data=f"show_facts:{kp_int}"),
+                InlineKeyboardButton("💬 Оценить", callback_data=f"rate_film:{kp_int}")
+            )
+        except (ValueError, TypeError):
+            _mark_rate_reminder_sent(plan_id, chat_id)
+            continue
+
+        try:
+            bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup)
+            logger.info(f"[RATE REMINDER] Отправлено напоминание об оценке для «{title[:50]}» в чат {chat_id}")
+        except Exception as e:
+            logger.error(f"[RATE REMINDER] Ошибка отправки в чат {chat_id}: {e}", exc_info=True)
+        _mark_rate_reminder_sent(plan_id, chat_id)
+
+
+def _mark_rate_reminder_sent(plan_id, chat_id):
+    """Отмечает план как «напоминание об оценке отправлено»."""
+    from moviebot.database.db_connection import get_db_connection, get_db_cursor
+    conn_up = get_db_connection()
+    cursor_up = get_db_cursor()
+    try:
+        with db_lock:
+            cursor_up.execute(
+                'UPDATE plans SET rate_reminder_sent = TRUE WHERE id = %s AND chat_id = %s',
+                (plan_id, chat_id)
+            )
+            conn_up.commit()
+    except Exception as e:
+        logger.warning(f"[RATE REMINDER] Не удалось обновить rate_reminder_sent plan_id={plan_id}: {e}")
+    finally:
+        try:
+            cursor_up.close()
+        except Exception:
+            pass
+        try:
+            conn_up.close()
+        except Exception:
+            pass
+
 
 # Настройка периодического вывода статистики
 # Вызовы scheduler.add_job должны быть в moviebot.py после импорта модуля

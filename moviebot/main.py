@@ -141,6 +141,7 @@ logger.info("[MAIN] Добавлена фоновая задача обновл�
 from moviebot.scheduler import (
     hourly_stats,
     check_and_send_plan_notifications,
+    check_and_send_rate_reminders,
     clean_home_plans,
     clean_cinema_plans,
     check_subscription_payments,
@@ -159,6 +160,8 @@ from moviebot.config import PLANS_TZ
 
 # Периодическая проверка планов и отправка пропущенных уведомлений (каждые 5 минут)
 scheduler.add_job(check_and_send_plan_notifications, 'interval', minutes=5, id='check_plan_notifications')
+# Напоминание об оценке фильма через 3 часа после времени просмотра (только фильмы, не сериалы)
+scheduler.add_job(check_and_send_rate_reminders, 'interval', minutes=15, id='check_rate_reminders')
 
 # Проверка подписок и отправка уведомлений за день до списания (каждый день в 9:00 МСК)
 scheduler.add_job(check_subscription_payments, 'cron', hour=9, minute=0, timezone=PLANS_TZ, id='check_subscription_payments')

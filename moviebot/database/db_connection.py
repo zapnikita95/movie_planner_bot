@@ -466,6 +466,15 @@ def init_database():
         logger.warning(f"Ошибка при добавлении поля notification_sent: {e}")
         conn.rollback()
     
+    # Миграция: напоминание об оценке фильма через 3 часа после просмотра (только фильмы, не сериалы)
+    try:
+        cursor.execute("ALTER TABLE plans ADD COLUMN IF NOT EXISTS rate_reminder_sent BOOLEAN DEFAULT FALSE")
+        conn.commit()
+        logger.info("Поле rate_reminder_sent добавлено в таблицу plans")
+    except Exception as e:
+        logger.warning(f"Ошибка при добавлении поля rate_reminder_sent: {e}")
+        conn.rollback()
+    
 # Миграция: добавление полей для онлайн-кинотеатров
     try:
         cursor.execute("ALTER TABLE plans ADD COLUMN IF NOT EXISTS streaming_service TEXT")
