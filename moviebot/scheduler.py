@@ -3192,9 +3192,12 @@ def _get_first_start_per_user(cursor_local, since_hours=80):
 
 
 def _onboarding_set_sent(chat_id, key):
-    from moviebot.database.db_connection import get_db_connection, get_db_cursor
-    conn = get_db_connection()
-    cur = get_db_cursor()
+    """Использует отдельное соединение, чтобы не закрывать глобальное (и не ломать курсор в цикле onboarding)."""
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+    from moviebot.config import DATABASE_URL
+    conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+    cur = conn.cursor()
     try:
         with db_lock:
             cur.execute("""

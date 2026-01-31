@@ -1,4 +1,4 @@
-from moviebot.bot.bot_init import bot
+from moviebot.bot.bot_init import bot, BOT_ID
 """
 Обработчики команды /rate
 """
@@ -581,7 +581,11 @@ def handle_rating_internal(message, rating):
                                     avg_row = cursor_rec.fetchone()
                                     avg_rating = avg_row.get('avg') if avg_row else None
 
-                                    cursor_rec.execute('SELECT COUNT(DISTINCT user_id) FROM stats WHERE chat_id = %s AND user_id IS NOT NULL', (chat_id,))
+                                    # Участники чата за вычетом бота (бот не голосует)
+                                    if BOT_ID is not None:
+                                        cursor_rec.execute('SELECT COUNT(DISTINCT user_id) FROM stats WHERE chat_id = %s AND user_id IS NOT NULL AND user_id != %s', (chat_id, BOT_ID))
+                                    else:
+                                        cursor_rec.execute('SELECT COUNT(DISTINCT user_id) FROM stats WHERE chat_id = %s AND user_id IS NOT NULL', (chat_id,))
                                     active_count_row = cursor_rec.fetchone()
                                     active_count = active_count_row.get('count', 0) if isinstance(active_count_row, dict) else (active_count_row[0] if active_count_row else 0)
 

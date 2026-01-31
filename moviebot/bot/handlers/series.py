@@ -882,6 +882,8 @@ def show_film_info_with_buttons(
                         ''', (chat_id,))
                         active_users_rows = cursor_ratings2.fetchall()
                         active_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in active_users_rows if row}
+                        if BOT_ID is not None and BOT_ID in active_users:
+                            active_users = active_users - {BOT_ID}
                         
                         cursor_ratings2.execute('''
                             SELECT DISTINCT user_id FROM ratings

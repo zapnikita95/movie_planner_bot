@@ -1770,11 +1770,13 @@ def handle_rate_list_reply(message):
                 
                 results.append((kp_id, title, rating))
                 
-                # Проверка, все ли оценили
+                # Проверка, все ли оценили (бот не считается участником)
                 cursor.execute('''
                     SELECT DISTINCT user_id FROM stats WHERE chat_id = %s AND user_id IS NOT NULL
                 ''', (chat_id,))
                 active_users = {row.get('user_id') if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
+                if BOT_ID is not None and BOT_ID in active_users:
+                    active_users = active_users - {BOT_ID}
                 
                 cursor.execute('''
                     SELECT DISTINCT user_id FROM ratings
