@@ -575,7 +575,7 @@
       }
     },
     
-    'lordfilm': {
+    'lordfilm,lordserial': {
       isSeries: () => {
         // Проверяем хлебные крошки: если второй элемент = "Сериалы", то это сериал
         const breadcrumb = document.querySelector('#dle-speedbar');
@@ -1001,6 +1001,7 @@
   let checkInterval = null;
   let lastUrl = location.href;
   let lastContentHash = '';
+  let hasTriggeredForCurrent = false; // один показ после 80% видео на серию
   
   // Кэш локальных данных (последние 100 просмотров)
   const CACHE_KEY = 'movieplanner_streaming_cache';
@@ -2671,15 +2672,36 @@
       }, true);
     }
     
-    // Отслеживание переключения серий внутри плеера на rezka/hdrezka
-    if (hostname.includes('rezka') || hostname.includes('hdrezka') || hostname.includes('lordfilm')) {
+    // Отслеживание переключения серий внутри плеера (rezka/hdrezka/lordfilm/lordserial/allserial/boxserial)
+    const playerTrackingHosts = hostname.includes('rezka') || hostname.includes('hdrezka') || hostname.includes('lordfilm') || hostname.includes('lordserial') || hostname.includes('allserial') || hostname.includes('boxserial');
+    if (playerTrackingHosts) {
+      // Селекторы контейнеров плеера для MutationObserver (один контейнер мог не ловить все сайты)
+      const playerSelectors = [
+        '#player-container',
+        '#player',
+        '.video_9Xh',
+        '#player-container > iframe',
+        '#allplay',
+        '.controls_11s',
+        '.list_5Wf',
+        '.jq-selectbox__select',
+        '#controls-root',
+        '.player-video-bar',
+        '.qsv-poster',
+        '#raichuContainerWithPlayer',
+        '[data-player]',
+        '.video-player-wrapper',
+        '.video-js',
+        '.plyr'
+      ];
+
       // Отслеживаем клик на кнопку следующей серии
       document.addEventListener('click', (e) => {
         const nextBtn = e.target.closest('.episode-next, button.episode-next, [class*="episode-next"]');
         const episodeItem = e.target.closest('.item_2mH, [class*="item"], .menu_2sa .item');
         if (nextBtn || episodeItem) {
           console.log('[STREAMING] Переключение серии в плеере');
-          // Ждем обновления DOM и показываем виджет
+          hasTriggeredForCurrent = false;
           setTimeout(() => {
             const info = getContentInfo();
             if (info && info.title) {
@@ -2688,16 +2710,18 @@
                 console.log('[STREAMING] Обнаружено изменение серии (hash изменился):', currentHash);
                 lastContentHash = currentHash;
                 const key = getContentKey(info);
-                lastShown[key] = 0; // Сбрасываем кулдаун
+                lastShown[key] = 0;
                 checkAndShowOverlay();
+                window.dispatchEvent(new CustomEvent('movieplanner:content-detected', { detail: info }));
               }
             }
           }, 2000);
         }
       }, true);
-      
-      // Также отслеживаем изменения в плеере через MutationObserver
+
+      // MutationObserver на всех контейнерах плеера
       const playerObserver = new MutationObserver(() => {
+        hasTriggeredForCurrent = false;
         const info = getContentInfo();
         if (info && info.title) {
           const currentHash = getContentHash(info);
@@ -2707,18 +2731,62 @@
             const key = getContentKey(info);
             lastShown[key] = 0;
             checkAndShowOverlay();
+            window.dispatchEvent(new CustomEvent('movieplanner:content-detected', { detail: info }));
           }
         }
       });
-      
-      // Наблюдаем за изменениями в контейнере плеера
-      const playerContainer = document.querySelector('#player, .player, [class*="player"]');
-      if (playerContainer) {
-        playerObserver.observe(playerContainer, {
-          childList: true,
-          subtree: true,
-          characterData: true
+
+      const observedNodes = new Set();
+      playerSelectors.forEach((sel) => {
+        const node = document.querySelector(sel);
+        if (node && !observedNodes.has(node)) {
+          observedNodes.add(node);
+          try {
+            playerObserver.observe(node, {
+              childList: true,
+              subtree: true,
+              attributes: true,
+              characterData: true
+            });
+          } catch (err) {
+            // узел уже отключён или не поддерживается
+          }
+        }
+      });
+
+      // Video: при 80% просмотра — один показ на текущую серию
+      const videoEl = document.querySelector('video');
+      if (videoEl) {
+        videoEl.addEventListener('timeupdate', () => {
+          if (videoEl.duration <= 0) return;
+          if (videoEl.currentTime >= videoEl.duration * 0.8 && !hasTriggeredForCurrent) {
+            hasTriggeredForCurrent = true;
+            const info = getContentInfo();
+            if (info) {
+              checkAndShowOverlay();
+              window.dispatchEvent(new CustomEvent('movieplanner:content-detected', { detail: info }));
+            }
+          }
         });
+      } else {
+        const videoWaiter = new MutationObserver(() => {
+          const v = document.querySelector('video');
+          if (v) {
+            videoWaiter.disconnect();
+            v.addEventListener('timeupdate', () => {
+              if (v.duration <= 0) return;
+              if (v.currentTime >= v.duration * 0.8 && !hasTriggeredForCurrent) {
+                hasTriggeredForCurrent = true;
+                const info = getContentInfo();
+                if (info) {
+                  checkAndShowOverlay();
+                  window.dispatchEvent(new CustomEvent('movieplanner:content-detected', { detail: info }));
+                }
+              }
+            });
+          }
+        });
+        videoWaiter.observe(document.body, { childList: true, subtree: true });
       }
     }
     
