@@ -3011,7 +3011,7 @@ def create_web_app(bot):
         cur = get_db_cursor()
         with db_lock:
             cur.execute("""
-                SELECT id, kp_id, title, year, is_series FROM movies
+                SELECT id, kp_id, title, year, is_series, online_link FROM movies
                 WHERE chat_id = %s AND watched = 0
                 ORDER BY id DESC
                 LIMIT 200
@@ -3019,12 +3019,14 @@ def create_web_app(bot):
             rows = cur.fetchall()
         items = []
         for r in rows:
+            online_link = r.get('online_link') if isinstance(r, dict) else (r[5] if len(r) > 5 else None)
             items.append({
                 "film_id": r.get('id') if isinstance(r, dict) else r[0],
                 "kp_id": str(r.get('kp_id') if isinstance(r, dict) else r[1]),
                 "title": r.get('title') if isinstance(r, dict) else r[2],
                 "year": r.get('year') if isinstance(r, dict) else r[3],
                 "is_series": bool(r.get('is_series') if isinstance(r, dict) else (r[4] if len(r) > 4 else 0)),
+                "online_link": (online_link or '').strip() or None,
                 "description": None,
                 "rating_kp": None,
             })
@@ -3050,21 +3052,22 @@ def create_web_app(bot):
                         m.title,
                         COALESCE(m.is_ongoing, FALSE) AS is_ongoing,
                         COUNT(st.id) AS watched_episodes_count,
-                        BOOL_OR(ss.subscribed = TRUE) AS has_subscription
+                        BOOL_OR(ss.subscribed = TRUE) AS has_subscription,
+                        m.online_link
                     FROM movies m
                     LEFT JOIN series_tracking st 
                         ON st.film_id = m.id AND st.chat_id = %s AND st.user_id = %s AND st.watched = TRUE
                     LEFT JOIN series_subscriptions ss 
                         ON ss.film_id = m.id AND ss.chat_id = %s AND ss.user_id = %s AND ss.subscribed = TRUE
                     WHERE m.chat_id = %s AND m.is_series = 1
-                    GROUP BY m.id, m.kp_id, m.title, m.is_ongoing
+                    GROUP BY m.id, m.kp_id, m.title, m.is_ongoing, m.online_link
                     LIMIT 100
                 """, (chat_id, user_id_for_series, chat_id, user_id_for_series, chat_id))
                 rows = cur.fetchall()
             except Exception as e:
                 if 'is_ongoing' in str(e).lower() or 'column' in str(e).lower():
                     cur.execute("""
-                        SELECT m.id, m.kp_id, m.title FROM movies m
+                        SELECT m.id, m.kp_id, m.title, m.online_link FROM movies m
                         WHERE m.chat_id = %s AND m.is_series = 1
                         ORDER BY m.title LIMIT 100
                     """, (chat_id,))
@@ -3086,7 +3089,11 @@ def create_web_app(bot):
                             s = last.get('season_number') if isinstance(last, dict) else last[0]
                             e = last.get('episode_number') if isinstance(last, dict) else last[1]
                             progress = f"S{s} • E{e}"
-                        series_list.append({"film_id": film_id, "kp_id": kp_id, "title": title, "progress": progress})
+                        online_link = (r.get('online_link') if isinstance(r, dict) else (r[3] if len(r) > 3 else None)) or ''
+                        series_list.append({
+                            "film_id": film_id, "kp_id": kp_id, "title": title, "progress": progress,
+                            "online_link": (online_link or '').strip() or None
+                        })
                     return jsonify({"success": True, "items": series_list})
                 raise
         series_list = []
@@ -3109,6 +3116,7 @@ def create_web_app(bot):
                 s = last.get('season_number') if isinstance(last, dict) else last[0]
                 e = last.get('episode_number') if isinstance(last, dict) else last[1]
                 progress = f"S{s} • E{e}"
+            online_link_raw = r.get('online_link') if isinstance(r, dict) else (r[6] if len(r) > 6 else None)
             series_list.append({
                 "film_id": film_id,
                 "kp_id": kp_id,
@@ -3117,6 +3125,7 @@ def create_web_app(bot):
                 "is_ongoing": is_ongoing,
                 "watched_count": int(watched_count or 0),
                 "has_subscription": has_subscription,
+                "online_link": (online_link_raw or '').strip() or None,
             })
         def get_sort_priority(item):
             io = item.get('is_ongoing') or False
@@ -3151,7 +3160,7 @@ def create_web_app(bot):
                     (SELECT s.username FROM stats s
                      WHERE s.chat_id = r.chat_id AND s.user_id = r.user_id
                        AND s.username IS NOT NULL AND s.username != ''
-                     ORDER BY s.timestamp DESC NULLS LAST LIMIT 1) as rater_username
+                     ORDER BY s.id DESC LIMIT 1) as rater_username
                 FROM ratings r
                 JOIN movies m ON r.film_id = m.id AND r.chat_id = m.chat_id
                 WHERE r.chat_id = %s
