@@ -533,39 +533,122 @@ def register_start_handlers(bot):
                     pass
             return
         
-        # Deep link: ?start=view_film_{kp_id} или view_series_{kp_id} — открыть карточку фильма
-        if start_param and (start_param.startswith('view_film_') or start_param.startswith('view_series_')):
+        # Deep link: ?start=g{group_chat_id}_{film_id} — открыть карточку фильма в группе
+        if start_param and start_param.startswith('g') and '_' in start_param:
             try:
-                kp_id_str = start_param.replace('view_film_', '').replace('view_series_', '').strip()
-                if kp_id_str.isdigit():
+                rest = start_param[1:].strip()
+                parts = rest.split('_', 1)
+                if len(parts) == 2 and parts[0].lstrip('-').isdigit() and parts[1].isdigit():
+                    group_chat_id = int(parts[0])
+                    film_id = int(parts[1])
                     from moviebot.bot.handlers.series import show_film_info_with_buttons
                     from moviebot.api.kinopoisk_api import extract_movie_info
                     from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-                    kp_id_int = int(kp_id_str)
-                    is_series = start_param.startswith('view_series_')
-                    link = f"https://www.kinopoisk.ru/series/{kp_id_int}/" if is_series else f"https://www.kinopoisk.ru/film/{kp_id_int}/"
+                    try:
+                        bot.get_chat_member(group_chat_id, user_id)
+                    except Exception:
+                        bot.reply_to(message, "❌ Вас нет в этой группе или бот не добавлен туда.")
+                        return
+                    conn = get_db_connection()
+                    cur = get_db_cursor()
+                    with db_lock:
+                        cur.execute(
+                            "SELECT id, kp_id, link, is_series, title, watched FROM movies WHERE chat_id = %s AND id = %s",
+                            (group_chat_id, film_id)
+                        )
+                        row = cur.fetchone()
+                    if not row:
+                        bot.reply_to(message, "❌ Фильм не найден в этой группе.")
+                        return
+                    fid = row.get('id') if isinstance(row, dict) else row[0]
+                    kp_id_str = str(row.get('kp_id') if isinstance(row, dict) else row[1])
+                    link = (row.get('link') or '').strip() if isinstance(row, dict) else (row[2] or '').strip()
+                    is_series = bool(row.get('is_series') if isinstance(row, dict) else (row[3] if len(row) > 3 else False))
+                    title_db = row.get('title') if isinstance(row, dict) else row[4]
+                    watched = bool(row.get('watched') if isinstance(row, dict) else (row[5] if len(row) > 5 else False))
+                    if not link:
+                        link = f"https://www.kinopoisk.ru/series/{kp_id_str}/" if is_series else f"https://www.kinopoisk.ru/film/{kp_id_str}/"
                     info = extract_movie_info(link)
                     if info:
                         info['is_series'] = is_series
-                        conn = get_db_connection()
-                        cur = get_db_cursor()
-                        existing = None
-                        with db_lock:
-                            cur.execute(
-                                "SELECT id, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s",
-                                (chat_id, kp_id_str)
-                            )
-                            row = cur.fetchone()
-                        if row:
-                            fid = row.get('id') if isinstance(row, dict) else row[0]
-                            title_db = row.get('title') if isinstance(row, dict) else row[1]
-                            watched = bool(row.get('watched') if isinstance(row, dict) else row[2])
-                            existing = (fid, title_db, watched)
-                        show_film_info_with_buttons(chat_id, user_id, info, link, kp_id_int, existing=existing, message_id=None, message_thread_id=None)
+                        existing = (fid, title_db, watched)
+                        show_film_info_with_buttons(group_chat_id, user_id, info, link, int(kp_id_str), existing=existing, message_id=None, message_thread_id=None)
+                        try:
+                            bot.reply_to(message, "✅ Карточка открыта в группе.")
+                        except Exception:
+                            pass
                     else:
                         bot.reply_to(message, "❌ Не удалось загрузить описание фильма.")
                 else:
+                    bot.reply_to(message, "Неверная ссылка.")
+            except Exception as e:
+                logger.error(f"[START G GROUP] Ошибка: {e}", exc_info=True)
+                try:
+                    bot.reply_to(message, "❌ Ошибка при открытии фильма в группе.")
+                except Exception:
+                    pass
+            return
+
+        # Deep link: ?start=view_film_{film_id или kp_id} — открыть карточку в личном чате
+        if start_param and start_param.startswith('view_film_'):
+            try:
+                value_str = start_param.replace('view_film_', '').strip()
+                if not value_str.isdigit():
                     bot.reply_to(message, "Неверная ссылка на фильм.")
+                    return
+                value_int = int(value_str)
+                from moviebot.bot.handlers.series import show_film_info_with_buttons
+                from moviebot.api.kinopoisk_api import extract_movie_info
+                from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+                conn = get_db_connection()
+                cur = get_db_cursor()
+                existing = None
+                link = None
+                kp_id_int = None
+                is_series = False
+                with db_lock:
+                    cur.execute(
+                        "SELECT id, kp_id, link, is_series, title, watched FROM movies WHERE chat_id = %s AND id = %s",
+                        (chat_id, value_int)
+                    )
+                    row = cur.fetchone()
+                if row:
+                    fid = row.get('id') if isinstance(row, dict) else row[0]
+                    kp_id_int = int(row.get('kp_id') if isinstance(row, dict) else row[1])
+                    link = (row.get('link') or '').strip() if isinstance(row, dict) else (row[2] or '').strip()
+                    is_series = bool(row.get('is_series') if isinstance(row, dict) else (row[3] if len(row) > 3 else False))
+                    title_db = row.get('title') if isinstance(row, dict) else row[4]
+                    watched = bool(row.get('watched') if isinstance(row, dict) else row[5])
+                    existing = (fid, title_db, watched)
+                    if not link:
+                        link = f"https://www.kinopoisk.ru/series/{kp_id_int}/" if is_series else f"https://www.kinopoisk.ru/film/{kp_id_int}/"
+                else:
+                    with db_lock:
+                        cur.execute(
+                            "SELECT id, kp_id, link, is_series, title, watched FROM movies WHERE chat_id = %s AND kp_id = %s",
+                            (chat_id, value_str)
+                        )
+                        row = cur.fetchone()
+                    if row:
+                        fid = row.get('id') if isinstance(row, dict) else row[0]
+                        kp_id_int = int(row.get('kp_id') if isinstance(row, dict) else row[1])
+                        link = (row.get('link') or '').strip() if isinstance(row, dict) else (row[2] or '').strip()
+                        is_series = bool(row.get('is_series') if isinstance(row, dict) else (row[3] if len(row) > 3 else False))
+                        title_db = row.get('title') if isinstance(row, dict) else row[4]
+                        watched = bool(row.get('watched') if isinstance(row, dict) else row[5])
+                        existing = (fid, title_db, watched)
+                        if not link:
+                            link = f"https://www.kinopoisk.ru/series/{kp_id_int}/" if is_series else f"https://www.kinopoisk.ru/film/{kp_id_int}/"
+                    else:
+                        kp_id_int = value_int
+                        is_series = False
+                        link = f"https://www.kinopoisk.ru/film/{kp_id_int}/"
+                info = extract_movie_info(link)
+                if info:
+                    info['is_series'] = is_series
+                    show_film_info_with_buttons(chat_id, user_id, info, link, kp_id_int, existing=existing, message_id=None, message_thread_id=None)
+                else:
+                    bot.reply_to(message, "❌ Не удалось загрузить описание фильма.")
             except Exception as e:
                 logger.error(f"[START VIEW FILM] Ошибка: {e}", exc_info=True)
                 try:
