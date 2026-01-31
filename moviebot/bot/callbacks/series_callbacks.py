@@ -539,6 +539,7 @@ def series_subscribe_callback(call):
         from moviebot.database.db_connection import get_db_connection, get_db_cursor
         conn_local = get_db_connection()
         cursor_local = get_db_cursor()
+        was_inserted = False  # True только если сериал только что добавили в базу
         
         # Получение film_id и title из БД (добавляем в базу, если нет)
         with db_lock:
@@ -591,42 +592,58 @@ def series_subscribe_callback(call):
                 
                 title = movie_data.get('title', 'Сериал')
                 logger.info(f"[SERIES SUBSCRIBE] Сериал добавлен/найден в БД: film_id={film_id}, title={title}, was_inserted={was_inserted}")
-                
-                # Если сериал был добавлен, отправляем уведомление
-                if was_inserted:
-                    bot.send_message(chat_id, f"✅ Сериал добавлен в базу!")
-                    logger.info(f"[SERIES SUBSCRIBE] Уведомление об добавлении отправлено")
+                # Уведомление «добавлен в базу» отправим после успешной подписки (одним сообщением)
         
-        # Добавление подписки
+        # Добавление подписки — отдельное соединение (ensure_movie_in_database мог закрыть глобальный cursor)
         logger.info(f"[SERIES SUBSCRIBE] Добавляю подписку в БД: chat_id={chat_id}, film_id={film_id}, kp_id={kp_id}, user_id={user_id}")
-        with db_lock:
-            try:
-                cursor_local.execute('''
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+        from moviebot.config import DATABASE_URL
+        conn_sub = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+        cursor_sub = conn_sub.cursor()
+        subscription_ok = False
+        try:
+            with db_lock:
+                cursor_sub.execute('''
                     INSERT INTO series_subscriptions (chat_id, film_id, kp_id, user_id, subscribed)
                     VALUES (%s, %s, %s, %s, TRUE)
                     ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET subscribed = TRUE
                 ''', (chat_id, film_id, kp_id, user_id))
-                conn_local.commit()
+                conn_sub.commit()
                 logger.info(f"[SERIES SUBSCRIBE] Подписка добавлена в БД успешно")
-                
-                # Проверяем, что подписка действительно установлена
-                cursor_local.execute('''
+                cursor_sub.execute('''
                     SELECT subscribed FROM series_subscriptions 
                     WHERE chat_id = %s AND film_id = %s AND user_id = %s
                 ''', (chat_id, film_id, user_id))
-                check_row = cursor_local.fetchone()
-            except Exception as db_e:
-                logger.error(f"[SERIES SUBSCRIBE] Ошибка работы с БД: {db_e}", exc_info=True)
-                try:
-                    conn_local.rollback()
-                except:
-                    pass
-                check_row = None
-            if check_row:
-                subscribed_status = bool(check_row.get('subscribed') if isinstance(check_row, dict) else check_row[0])
-                logger.info(f"[SERIES SUBSCRIBE] ✅ ПОДТВЕРЖДЕНО: Пользователь {user_id} успешно подписан на сериал {title} (kp_id={kp_id}, film_id={film_id}, subscribed={subscribed_status})")
-            else:
-                logger.warning(f"[SERIES SUBSCRIBE] ⚠️ Предупреждение: Подписка не найдена после вставки для user_id={user_id}, film_id={film_id}")
+                check_row = cursor_sub.fetchone()
+                if check_row:
+                    subscription_ok = bool(check_row.get('subscribed') if isinstance(check_row, dict) else check_row[0])
+                    logger.info(f"[SERIES SUBSCRIBE] ✅ ПОДТВЕРЖДЕНО: Пользователь {user_id} успешно подписан на сериал {title} (kp_id={kp_id}, film_id={film_id}, subscribed={subscription_ok})")
+                else:
+                    logger.warning(f"[SERIES SUBSCRIBE] ⚠️ Предупреждение: Подписка не найдена после вставки для user_id={user_id}, film_id={film_id}")
+        except Exception as db_e:
+            logger.error(f"[SERIES SUBSCRIBE] Ошибка работы с БД: {db_e}", exc_info=True)
+            try:
+                conn_sub.rollback()
+            except Exception:
+                pass
+        finally:
+            try:
+                cursor_sub.close()
+            except Exception:
+                pass
+            try:
+                conn_sub.close()
+            except Exception:
+                pass
+        
+        # Одно сообщение: добавлен в базу + подписка (если сериал только что добавили и подписка прошла)
+        if was_inserted and subscription_ok:
+            bot.send_message(chat_id, "✅ Сериал добавлен в базу. Вы подписаны на уведомления о новых сериях.")
+            logger.info("[SERIES SUBSCRIBE] Уведомление об добавлении и подписке отправлено")
+        elif was_inserted and not subscription_ok:
+            bot.send_message(chat_id, "✅ Сериал добавлен в базу!")
+            logger.info("[SERIES SUBSCRIBE] Уведомление об добавлении отправлено")
         
         # Получение данных о сезонах (с try)
         logger.info(f"[SERIES SUBSCRIBE] Получение данных о сезонах для kp_id={kp_id}")
