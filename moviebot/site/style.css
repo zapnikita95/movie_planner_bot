@@ -855,26 +855,23 @@ section {
   .card.series-card {
     position: relative;
   }
-  .card.film-card .film-buttons .btn-small,
-  .card.series-card .film-buttons .btn-small {
-    position: static;
-    inset: auto;
-    display: inline-block;
-    width: auto;
-    height: auto;
-    padding: 8px 18px;
+  .card.film-card .btn-small,
+  .card.series-card .btn-small {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    display: block;
+    width: 100%;
+    height: 100%;
+    padding: 0;
     margin: 0;
-    font-size: 14px;
-    line-height: 1.4;
-    color: inherit;
+    font-size: 0;
+    line-height: 0;
+    color: transparent;
     background: transparent;
-    border: 1px solid var(--primary-color);
-    border-radius: 8px;
-  }
-  .card.film-card .film-buttons .btn-primary {
-    background: var(--primary-color);
-    color: white;
-    border-color: var(--primary-color);
+    border: none;
+    border-radius: 0;
+    min-width: 0;
   }
 }
 
@@ -975,40 +972,16 @@ section {
   border: 1px solid var(--border-color);
 }
 a.card.film-card,
-a.card.series-card,
-.card.film-card,
-.card.series-card {
+a.card.series-card {
   text-decoration: none;
   color: inherit;
   cursor: pointer;
   transition: box-shadow 0.2s ease, border-color 0.2s ease;
 }
 a.card.film-card:hover,
-a.card.series-card:hover,
-.card.film-card:hover,
-.card.series-card:hover {
+a.card.series-card:hover {
   box-shadow: var(--shadow-hover);
   border-color: rgba(102, 126, 234, 0.35);
-}
-.film-card-main {
-  display: flex;
-  align-items: flex-start;
-  gap: 16px;
-  flex: 1;
-  min-width: 0;
-  text-decoration: none;
-  color: inherit;
-}
-.film-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 8px;
-}
-.film-buttons .btn-small {
-  flex: 1;
-  min-width: 0;
-  text-align: center;
 }
 .card-poster-wrap {
   flex-shrink: 0;

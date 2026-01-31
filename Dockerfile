@@ -13,6 +13,7 @@ WORKDIR /app
 # Копируем requirements.txt отдельно для лучшего кэширования
 COPY requirements.txt .
 
+# Устанавливаем зависимости с оптимизацией для больших пакетов
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
