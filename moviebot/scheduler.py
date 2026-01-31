@@ -406,7 +406,13 @@ def send_plan_notification_combined(chat_id, date_str, user_id=None):
     p0 = plans[0]
     if single:
         plan_type_text = "дома" if p0['plan_type'] == 'home' else "в кино"
-        text = f"🔔 Напоминание: сегодня запланирован просмотр {plan_type_text}!\n\n"
+        dt0 = p0['plan_datetime']
+        if hasattr(dt0, 'astimezone'):
+            dt0_local = dt0.astimezone(user_tz) if dt0.tzinfo else user_tz.localize(dt0.replace(tzinfo=None))
+        else:
+            dt0_local = datetime.fromisoformat(str(dt0).replace('Z', '+00:00')).astimezone(user_tz)
+        time_only = dt0_local.strftime('%H:%M')
+        text = f"🔔 Напоминание: сегодня запланирован просмотр {plan_type_text} в {time_only}!\n\n"
     else:
         text = "🔔 На сегодня запланированы просмотры:\n\n"
 
