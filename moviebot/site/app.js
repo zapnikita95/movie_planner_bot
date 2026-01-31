@@ -489,6 +489,7 @@
             const ratingKpStr = r.rating_kp != null ? ' · КП: ' + Number(r.rating_kp).toFixed(1) : '';
             const desc = (r.description || '').trim();
             const descHtml = desc ? '<div class="film-description">' + escapeHtml(desc.slice(0, 200)) + (desc.length > 200 ? '…' : '') + '</div>' : '';
+            const raterStr = (r.rater_username && r.rater_username.trim()) ? ' · ' + escapeHtml(r.rater_username.trim()) : '';
             return `
               <a href="${link}" target="_blank" rel="noopener" class="card film-card">
                 <div class="card-poster-wrap">
@@ -498,7 +499,7 @@
                 <div class="film-info">
                   <div class="film-title">${escapeHtml(r.title)}${year}${ratingKpStr}</div>
                   ${descHtml}
-                  <div class="film-status">⭐ ${r.rating}</div>
+                  <div class="film-status">⭐ ${r.rating}${raterStr}</div>
                   <span class="btn btn-small btn-primary">Продолжить в Telegram</span>
                 </div>
               </a>`;

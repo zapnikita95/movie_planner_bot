@@ -3147,7 +3147,11 @@ def create_web_app(bot):
         cur = get_db_cursor()
         with db_lock:
             cur.execute("""
-                SELECT r.rating, COALESCE(r.kp_id, m.kp_id) as kp_id, m.title, m.year, m.id as film_id
+                SELECT r.rating, COALESCE(r.kp_id, m.kp_id) as kp_id, m.title, m.year, m.id as film_id,
+                    (SELECT s.username FROM stats s
+                     WHERE s.chat_id = r.chat_id AND s.user_id = r.user_id
+                       AND s.username IS NOT NULL AND s.username != ''
+                     ORDER BY s.timestamp DESC NULLS LAST LIMIT 1) as rater_username
                 FROM ratings r
                 JOIN movies m ON r.film_id = m.id AND r.chat_id = m.chat_id
                 WHERE r.chat_id = %s
@@ -3157,12 +3161,16 @@ def create_web_app(bot):
             rows = cur.fetchall()
         items = []
         for r in rows:
+            rater_username = r.get('rater_username') if isinstance(r, dict) else (r[5] if len(r) > 5 else None)
+            if rater_username and not rater_username.startswith('@'):
+                rater_username = '@' + rater_username
             items.append({
                 "rating": r.get('rating') if isinstance(r, dict) else r[0],
                 "kp_id": str(r.get('kp_id') or '') if isinstance(r, dict) else str(r[1] or ''),
                 "title": r.get('title') if isinstance(r, dict) else r[2],
                 "year": r.get('year') if isinstance(r, dict) else r[3],
                 "film_id": r.get('film_id') if isinstance(r, dict) else r[4],
+                "rater_username": rater_username or None,
                 "description": None,
                 "rating_kp": None,
             })
