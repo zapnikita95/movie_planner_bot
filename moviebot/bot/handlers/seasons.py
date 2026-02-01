@@ -584,59 +584,8 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
         title = item['title']
         year = item['year']
         watched = item['watched_count']
-
-        # Обновление кэша (оставляем как есть)
-        # Исправление: используем UTC для сравнения с last_api_update из БД
-        from moviebot.config import PLANS_TZ
-        import pytz
-        now_utc = datetime.now(pytz.utc)
-        last_update = item['last_api_update']
-        # Если last_api_update не имеет timezone, добавляем UTC
-        if last_update and last_update.tzinfo is None:
-            last_update = pytz.utc.localize(last_update)
-        elif last_update and last_update.tzinfo:
-            # Если уже с timezone, конвертируем в UTC для сравнения
-            last_update = last_update.astimezone(pytz.utc)
-        
-        need_update = (
-            last_update is None or
-            (now_utc - last_update) > timedelta(days=1)
-        )
-        if need_update:
-            is_airing, next_ep = get_series_airing_status(kp_id)
-            seasons_data = get_seasons_data(kp_id)
-            seasons_count = len(seasons_data) if seasons_data else 0
-
-            def default_serializer(o):
-                if isinstance(o, (datetime, date)):
-                    return o.isoformat()
-                raise TypeError("not serializable")
-
-            next_ep_json = json.dumps(next_ep, default=default_serializer) if next_ep else None
-
-            conn_local = get_db_connection()
-            cursor_local = get_db_cursor()
-            try:
-                with db_lock:
-                    cursor_local.execute("""
-                        UPDATE movies 
-                        SET is_ongoing = %s, seasons_count = %s, next_episode = %s, last_api_update = NOW()
-                        WHERE chat_id = %s AND kp_id = %s
-                    """, (is_airing, seasons_count, next_ep_json, chat_id, kp_id))
-                    conn_local.commit()
-            finally:
-                try:
-                    cursor_local.close()
-                except:
-                    pass
-                try:
-                    conn_local.close()
-                except:
-                    pass
-
-            item['is_ongoing'] = is_airing
-            item['seasons_count'] = seasons_count
-            item['next_episode'] = next_ep
+        # Используем данные из БД (is_ongoing, has_subscription уже в item) — без API-вызовов.
+        # Обновление кэша делает scheduler (update_series_status_cache раз в 24ч).
 
         # Строгий порядок эмодзи
         emojis = ""

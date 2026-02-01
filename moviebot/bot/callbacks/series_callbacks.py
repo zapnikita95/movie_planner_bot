@@ -33,6 +33,55 @@ logger = logging.getLogger(__name__)
 # Константа для пагинации сезонов
 SEASONS_PER_PAGE = 10
 
+
+def _handle_series_mark_episode(call):
+    """Общая логика «Отметить серию» — вызывается из ticket_callbacks (ранний) и series_mark_episode_callback."""
+    try:
+        parts = call.data.split(":")
+        if len(parts) < 2:
+            bot.answer_callback_query(call.id, "Ошибка формата", show_alert=True)
+            return
+        kp_id = str(int(parts[1].strip()))
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        desc_msg_id = call.message.message_id
+        message_thread_id = getattr(call.message, 'message_thread_id', None)
+        film_id, _ = ensure_movie_in_database(chat_id, kp_id, f"https://www.kinopoisk.ru/series/{kp_id}/", extract_movie_info(f"https://www.kinopoisk.ru/series/{kp_id}/"), user_id)
+        if not film_id:
+            bot.answer_callback_query(call.id, "❌ Сериал не найден", show_alert=True)
+            return
+        if not has_series_features_access(chat_id, user_id, film_id):
+            bot.answer_callback_query(call.id, "🔒 Функционал можно подключить через /payment", show_alert=True)
+            return
+        from moviebot.bot.handlers.seasons import get_next_unwatched_episode
+        next_ep = get_next_unwatched_episode(chat_id, film_id, user_id, kp_id)
+        if not next_ep:
+            try:
+                bot.answer_callback_query(call.id, "✅ Все серии просмотрены!", show_alert=True)
+            except Exception:
+                pass
+            return
+        bot.answer_callback_query(call.id)
+        season_num, ep_num = next_ep
+        ep_text = f"<b>{season_num} сезон {ep_num} серия</b>"
+        confirm_text = f"Отметить серию {ep_text} как просмотренную?"
+        markup = InlineKeyboardMarkup()
+        markup.row(
+            InlineKeyboardButton("✅ Отметить", callback_data=f"series_mark_ep_yes:{kp_id}:{season_num}:{ep_num}:{desc_msg_id}"),
+            InlineKeyboardButton("❌ Отмена", callback_data="series_mark_ep_no")
+        )
+        send_kw = {'chat_id': chat_id, 'text': confirm_text, 'parse_mode': 'HTML', 'reply_markup': markup}
+        if message_thread_id is not None:
+            send_kw['message_thread_id'] = message_thread_id
+        bot.send_message(**send_kw)
+    except Exception as e:
+        logger.error(f"[SERIES MARK EPISODE] Ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+        except Exception:
+            pass
+
+
 def register_series_callbacks(bot):
     """Регистрирует callback handlers для сериалов"""
     logger.info("=" * 80)
@@ -977,51 +1026,9 @@ def series_subscribe_callback(call):
 
     @bot.callback_query_handler(func=lambda call: call.data.startswith("series_mark_episode:"))
     def series_mark_episode_callback(call):
-        """Кнопка «Отметить серию» — показать подтверждение для последней непросмотренной серии"""
-        logger.info(f"[SERIES MARK EPISODE] Вызван callback: {call.data}")
-        try:
-            parts = call.data.split(":")
-            if len(parts) < 2:
-                bot.answer_callback_query(call.id, "Ошибка формата", show_alert=True)
-                return
-            kp_id = str(int(parts[1].strip()))
-            chat_id = call.message.chat.id
-            user_id = call.from_user.id
-            desc_msg_id = call.message.message_id
-            message_thread_id = getattr(call.message, 'message_thread_id', None)
-            film_id, _ = ensure_movie_in_database(chat_id, kp_id, f"https://www.kinopoisk.ru/series/{kp_id}/", extract_movie_info(f"https://www.kinopoisk.ru/series/{kp_id}/"), user_id)
-            if not film_id:
-                bot.answer_callback_query(call.id, "❌ Сериал не найден", show_alert=True)
-                return
-            if not has_series_features_access(chat_id, user_id, film_id):
-                bot.answer_callback_query(call.id, "🔒 Функционал можно подключить через /payment", show_alert=True)
-                return
-            from moviebot.bot.handlers.seasons import get_next_unwatched_episode
-            next_ep = get_next_unwatched_episode(chat_id, film_id, user_id, kp_id)
-            if not next_ep:
-                try:
-                    bot.answer_callback_query(call.id, "✅ Все серии просмотрены!", show_alert=True)
-                except Exception:
-                    pass
-                return
-            season_num, ep_num = next_ep
-            ep_text = f"<b>{season_num} сезон {ep_num} серия</b>"
-            confirm_text = f"Отметить серию {ep_text} как просмотренную?"
-            markup = InlineKeyboardMarkup()
-            markup.row(
-                InlineKeyboardButton("✅ Отметить", callback_data=f"series_mark_ep_yes:{kp_id}:{season_num}:{ep_num}:{desc_msg_id}"),
-                InlineKeyboardButton("❌ Отмена", callback_data="series_mark_ep_no")
-            )
-            send_kw = {'chat_id': chat_id, 'text': confirm_text, 'parse_mode': 'HTML', 'reply_markup': markup}
-            if message_thread_id is not None:
-                send_kw['message_thread_id'] = message_thread_id
-            bot.send_message(**send_kw)
-        except Exception as e:
-            logger.error(f"[SERIES MARK EPISODE] Ошибка: {e}", exc_info=True)
-            try:
-                bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
-            except Exception:
-                pass
+        """Кнопка «Отметить серию» — fallback если ticket_callbacks не сработал."""
+        logger.info(f"[SERIES MARK EPISODE] Вызван fallback callback: {call.data}")
+        _handle_series_mark_episode(call)
 
     @bot.callback_query_handler(func=lambda call: call.data == "series_mark_ep_no")
     def series_mark_ep_no_callback(call):
