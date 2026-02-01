@@ -1626,7 +1626,7 @@
         if (!hasSeriesFeaturesAccess && !showSeriesButtonsAlways) {
           const noAccessMsg = document.createElement('div');
           noAccessMsg.style.cssText = 'padding: 12px; background: rgba(255,255,255,0.1); border-radius: 6px; text-align: center; font-size: 13px; margin-bottom: 8px;';
-          noAccessMsg.innerHTML = '🔒 Для отметки серий нужна подписка "Уведомления" или "Пакетная"<br><small style="opacity: 0.8;">Доступно только добавление в базу</small>';
+          noAccessMsg.innerHTML = '🔒 Для отметки серий нужна подписка 💎 Movie Planner PRO<br><small style="opacity: 0.8;">Доступно только добавление в базу</small>';
           container.appendChild(noAccessMsg);
         } else {
           // Определяем целевую серию: если текущая просмотрена, показываем следующую непросмотренную
@@ -1740,7 +1740,7 @@
         if (!hasSeriesFeaturesAccess && !showSeriesButtonsAlways) {
           const noAccessMsg = document.createElement('div');
           noAccessMsg.style.cssText = 'padding: 12px; background: rgba(255,255,255,0.1); border-radius: 6px; text-align: center; font-size: 13px; margin-bottom: 8px;';
-          noAccessMsg.innerHTML = '🔒 Для отметки серий нужна подписка "Уведомления" или "Пакетная"<br><small style="opacity: 0.8;">Доступно только добавление в базу</small>';
+          noAccessMsg.innerHTML = '🔒 Для отметки серий нужна подписка 💎 Movie Planner PRO<br><small style="opacity: 0.8;">Доступно только добавление в базу</small>';
           container.appendChild(noAccessMsg);
         } else {
           // Определяем целевую серию: если текущая просмотрена, показываем следующую непросмотренную
@@ -1827,7 +1827,7 @@
           // Нет подписки - показываем только информацию
           const noAccessMsg = document.createElement('div');
           noAccessMsg.style.cssText = 'padding: 12px !important; background: rgba(255,255,255,0.1) !important; border-radius: 8px !important; text-align: center !important; font-size: 13px !important;';
-          noAccessMsg.innerHTML = '🔒 Для отметки фильмов нужна подписка "Уведомления" или "Пакетная"<br><small style="opacity: 0.8;">Доступно только добавление в базу</small>';
+          noAccessMsg.innerHTML = '🔒 Для отметки фильмов нужна подписка 💎 Movie Planner PRO<br><small style="opacity: 0.8;">Доступно только добавление в базу</small>';
           container.appendChild(noAccessMsg);
         } else {
           // Есть подписка - показываем кнопки

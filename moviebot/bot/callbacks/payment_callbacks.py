@@ -3584,22 +3584,12 @@ def register_payment_callbacks(bot_instance):
                     
                     markup = InlineKeyboardMarkup(row_width=1)
                     
-                    if 'notifications' not in existing_plan_types:
-                        markup.add(InlineKeyboardButton("🔔 Уведомления о сериалах", callback_data="payment:subscribe:personal:notifications:month"))
-                    if 'recommendations' not in existing_plan_types:
-                        markup.add(InlineKeyboardButton("🎯 Персональные рекомендации", callback_data="payment:subscribe:personal:recommendations:month"))
-                    if 'tickets' not in existing_plan_types:
-                        markup.add(InlineKeyboardButton("🎫 Билеты в кино", callback_data="payment:subscribe:personal:tickets:month"))
                     if 'all' not in existing_plan_types:
                         markup.add(InlineKeyboardButton("💎 Movie Planner PRO", callback_data="payment:subscribe:personal:all:month"))
                     
-                    if len(existing_plan_types) >= 3 or 'all' in existing_plan_types:
+                    if 'all' in existing_plan_types:
                         text = "✏️ <b>Изменить подписку</b>\n\n"
-                        if 'all' in existing_plan_types:
-                            text += "У вас уже подключена подписка 💎 Movie Planner PRO, которая включает все функции.\n\n"
-                        else:
-                            text += "У вас уже подключены все доступные подписки.\n\n"
-                        text += "Вы можете отменить одну из подписок, чтобы добавить другую."
+                        text += "У вас уже подключена подписка 💎 Movie Planner PRO, которая включает все функции.\n\n"
                     
                     markup.add(InlineKeyboardButton("◀️ Назад", callback_data="payment:active:personal"))
                     
@@ -4234,16 +4224,9 @@ def register_payment_callbacks(bot_instance):
                             text += expansion_text + "\n\n"
                             text += "💡 <b>Доступные варианты расширения:</b>\n\n"
                         
-                            # Предлагаем варианты расширения
+                            # Предлагаем только PRO
                             expansion_options = []
-                            if not has_notifications:
-                                expansion_options.append(("🔔 Уведомления о сериалах", "payment:subscribe:personal:notifications:month"))
-                            if not has_recommendations:
-                                expansion_options.append(("🎯 Персональные рекомендации", "payment:subscribe:personal:recommendations:month"))
-                            if not has_tickets:
-                                expansion_options.append(("🎫 Билеты в кино", "payment:subscribe:personal:tickets:month"))
-                            if not (has_notifications and has_recommendations and has_tickets):
-                                expansion_options.append(("💎 Movie Planner PRO", "payment:subscribe:personal:all:month"))
+                            expansion_options.append(("💎 Movie Planner PRO", "payment:subscribe:personal:all:month"))
                         
                             markup = InlineKeyboardMarkup(row_width=1)
                             for option_text, callback_data in expansion_options:
@@ -7318,26 +7301,8 @@ def register_payment_callbacks(bot_instance):
                 current_price = float(sub.get('price', 0))
                 subscription_type = sub.get('subscription_type', sub_type)
             
-                # Находим более дешевые варианты подписки
+                # Только PRO — нет более дешёвых вариантов
                 cheaper_options = []
-                if subscription_type == 'personal':
-                    if plan_type == 'all':
-                        if current_price > SUBSCRIPTION_PRICES['personal']['notifications']['month']:
-                            cheaper_options.append(('🔔 Уведомления', SUBSCRIPTION_PRICES['personal']['notifications']['month'], f"payment:subscribe:personal:notifications:month"))
-                        if current_price > SUBSCRIPTION_PRICES['personal']['recommendations']['month']:
-                            cheaper_options.append(('🎯 Рекомендации', SUBSCRIPTION_PRICES['personal']['recommendations']['month'], f"payment:subscribe:personal:recommendations:month"))
-                        if current_price > SUBSCRIPTION_PRICES['personal']['tickets']['month']:
-                            cheaper_options.append(('🎫 Билеты', SUBSCRIPTION_PRICES['personal']['tickets']['month'], f"payment:subscribe:personal:tickets:month"))
-                elif subscription_type == 'group':
-                    group_size = sub.get('group_size', 2)
-                    group_size_str = str(group_size)
-                    if plan_type == 'all':
-                        if current_price > SUBSCRIPTION_PRICES['group'][group_size_str]['notifications']['month']:
-                            cheaper_options.append(('🔔 Уведомления', SUBSCRIPTION_PRICES['group'][group_size_str]['notifications']['month'], f"payment:subscribe:group:{group_size}:notifications:month"))
-                        if current_price > SUBSCRIPTION_PRICES['group'][group_size_str]['recommendations']['month']:
-                            cheaper_options.append(('🎯 Рекомендации', SUBSCRIPTION_PRICES['group'][group_size_str]['recommendations']['month'], f"payment:subscribe:group:{group_size}:recommendations:month"))
-                        if current_price > SUBSCRIPTION_PRICES['group'][group_size_str]['tickets']['month']:
-                            cheaper_options.append(('🎫 Билеты', SUBSCRIPTION_PRICES['group'][group_size_str]['tickets']['month'], f"payment:subscribe:group:{group_size}:tickets:month"))
             
                 # Сортируем по цене
                 cheaper_options.sort(key=lambda x: x[1])

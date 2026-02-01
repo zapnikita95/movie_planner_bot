@@ -151,7 +151,6 @@ def maybe_send_series_limit_message(bot, chat_id, user_id, message_thread_id=Non
             "Выберите вариант подписки:"
         )
         markup = InlineKeyboardMarkup(row_width=1)
-        markup.add(InlineKeyboardButton("🔔 Уведомления о сериалах", callback_data="payment:subscribe:personal:notifications:month"))
         markup.add(InlineKeyboardButton("💎 Movie Planner PRO", callback_data="payment:tariffs:personal"))
         markup.add(InlineKeyboardButton("💰 Все тарифы", callback_data="payment:tariffs"))
         kw = {'chat_id': chat_id, 'text': text, 'parse_mode': 'HTML', 'reply_markup': markup}
@@ -259,8 +258,6 @@ def maybe_send_ticket_limit_message(bot, chat_id, user_id, message_thread_id=Non
     )
     from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
     markup = InlineKeyboardMarkup(row_width=1)
-    markup.add(InlineKeyboardButton("🔔 Уведомления о сериалах", callback_data="payment:subscribe:personal:notifications:month"))
-    markup.add(InlineKeyboardButton("🎟 Билеты в кино", callback_data="payment:subscribe:personal:tickets:month"))
     markup.add(InlineKeyboardButton("💎 Movie Planner PRO", callback_data="payment:tariffs:personal"))
     markup.add(InlineKeyboardButton("💰 Все тарифы", callback_data="payment:tariffs"))
     kw = {'chat_id': chat_id, 'text': text, 'parse_mode': 'HTML', 'reply_markup': markup}
