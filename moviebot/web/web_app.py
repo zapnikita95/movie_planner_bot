@@ -1740,6 +1740,11 @@ def create_web_app(bot):
             # Проверяем наличие в базе (без db_lock)
             conn = get_db_connection()
             cursor = get_db_cursor()
+            # Сбрасываем любую «залипшую» транзакцию, чтобы видеть актуальные данные после mark-episode
+            try:
+                conn.rollback()
+            except Exception as rb_err:
+                logger.warning(f"[EXTENSION API] rollback перед чтением: {rb_err}")
             film_in_db = False
             film_id = None
             watched = False
@@ -2702,6 +2707,26 @@ def create_web_app(bot):
                     cursor.execute("UPDATE movies SET online_link = %s WHERE id = %s AND chat_id = %s", (online_link, film_id, chat_id))
                     conn.commit()
 
+            # Проверяем, была ли серия уже отмечена — чтобы не слать дубли в бота
+            already_marked = False
+            with db_lock:
+                if mark_all_previous:
+                    cursor.execute("""
+                        SELECT COUNT(*) AS cnt FROM series_tracking
+                        WHERE chat_id = %s AND film_id = %s AND user_id = %s
+                        AND season_number = %s AND episode_number <= %s AND watched = TRUE
+                    """, (chat_id, film_id, user_id, season, episode))
+                    row = cursor.fetchone()
+                    cnt = int(row.get('cnt', row.get('count', 0) or 0) if isinstance(row, dict) else int(row[0] or 0)
+                    already_marked = (cnt >= episode)
+                else:
+                    cursor.execute("""
+                        SELECT 1 FROM series_tracking
+                        WHERE chat_id = %s AND film_id = %s AND user_id = %s
+                        AND season_number = %s AND episode_number = %s AND watched = TRUE
+                    """, (chat_id, film_id, user_id, season, episode))
+                    already_marked = cursor.fetchone() is not None
+
             with db_lock:
                 if mark_all_previous:
                     for ep_num in range(1, episode + 1):
@@ -2720,11 +2745,12 @@ def create_web_app(bot):
                     """, (chat_id, film_id, user_id, season, episode))
                 conn.commit()
 
-            try:
-                from moviebot.bot.handlers.series import send_episode_marked_message
-                send_episode_marked_message(bot, chat_id, user_id, kp_id, film_id, season, episode, mark_all_previous)
-            except Exception as e:
-                logger.error(f"[EXTENSION API] Ошибка отправки сообщения в бота: {e}", exc_info=True)
+            if not already_marked:
+                try:
+                    from moviebot.bot.handlers.series import send_episode_marked_message
+                    send_episode_marked_message(bot, chat_id, user_id, kp_id, film_id, season, episode, mark_all_previous)
+                except Exception as e:
+                    logger.error(f"[EXTENSION API] Ошибка отправки сообщения в бота: {e}", exc_info=True)
 
             return jsonify({"success": True})
         except Exception as e:

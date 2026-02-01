@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Movie Planner",
   "description": "Добавляй фильмы в базу Movie Planner. Автоопределение фильма и сериала на странице просмотра российских стримингов.",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "author": "Nikita Zaporozhets",
   "permissions": [
     "storage",

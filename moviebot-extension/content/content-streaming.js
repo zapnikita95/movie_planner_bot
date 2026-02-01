@@ -1746,11 +1746,13 @@
             }
           }
           
-          // Если открытая серия уже отмечена — только текст, без кнопок
+          // Если открытая серия уже отмечена — только текст, без кнопки «Отметить эту же серию»
           if (filmData.current_episode_watched && targetSeason != null && targetEpisode != null) {
             const statusEl = document.createElement('div');
             statusEl.style.cssText = 'font-size: 12px; opacity: 0.95; margin-bottom: 8px;';
-            statusEl.textContent = `Ближайшая непросмотренная серия — ${targetSeason}×${targetEpisode}`;
+            const currentS = info.season != null ? info.season : targetSeason;
+            const currentE = info.episode != null ? info.episode : targetEpisode;
+            statusEl.innerHTML = `✅ Серия ${currentS}×${currentE} уже отмечена.<br><span style="opacity:0.9;">Ближайшая непросмотренная — ${targetSeason}×${targetEpisode}</span>`;
             container.appendChild(statusEl);
           } else if (targetSeason && targetEpisode) {
             const markCurrentBtn = document.createElement('button');
@@ -1856,11 +1858,13 @@
             }
           }
           
-          // Если открытая серия уже отмечена — только текст, без кнопок
+          // Если открытая серия уже отмечена — только текст, без кнопки «Отметить эту же серию»
           if (filmData.current_episode_watched && targetSeason != null && targetEpisode != null) {
             const statusEl = document.createElement('div');
             statusEl.style.cssText = 'font-size: 12px; opacity: 0.95; margin-bottom: 8px;';
-            statusEl.textContent = `Ближайшая непросмотренная серия — ${targetSeason}×${targetEpisode}`;
+            const currentS = info.season != null ? info.season : targetSeason;
+            const currentE = info.episode != null ? info.episode : targetEpisode;
+            statusEl.innerHTML = `✅ Серия ${currentS}×${currentE} уже отмечена.<br><span style="opacity:0.9;">Ближайшая непросмотренная — ${targetSeason}×${targetEpisode}</span>`;
             container.appendChild(statusEl);
           } else if (targetSeason && targetEpisode) {
             const markCurrentBtn = document.createElement('button');
