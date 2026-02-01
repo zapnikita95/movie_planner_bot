@@ -1122,7 +1122,7 @@ def handle_seasons_command(message):
         bot=bot
     )
 
-def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: int = 5):
+def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: int = 10):
     """Возвращает страницу сериалов пользователя с пагинацией"""
     items = []
     total_count = 0

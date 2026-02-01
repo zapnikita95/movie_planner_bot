@@ -885,8 +885,12 @@ def register_start_handlers(bot):
                 return
 
             if action == 'seasons':
-                bot.answer_callback_query(call.id, "⏳ Загружаем сериалы и сезоны...")
-                # show_seasons_list редактирует существующее сообщение, не удаляем его
+                # Сразу показываем отклик — редактируем сообщение в «Загружаю...», затем подгружаем список
+                try:
+                    edit_kw = {'chat_id': chat_id, 'message_id': message_id, 'text': '⏳ Загружаю список сериалов...', 'parse_mode': 'HTML'}
+                    bot.edit_message_text(**edit_kw)
+                except Exception:
+                    pass
                 show_seasons_list(
                     chat_id=chat_id,
                     user_id=user_id,

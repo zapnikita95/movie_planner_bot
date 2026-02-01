@@ -978,6 +978,7 @@ def series_subscribe_callback(call):
     @bot.callback_query_handler(func=lambda call: call.data.startswith("series_mark_episode:"))
     def series_mark_episode_callback(call):
         """Кнопка «Отметить серию» — показать подтверждение для последней непросмотренной серии"""
+        logger.info(f"[SERIES MARK EPISODE] Вызван callback: {call.data}")
         try:
             parts = call.data.split(":")
             if len(parts) < 2:
@@ -998,9 +999,11 @@ def series_subscribe_callback(call):
             from moviebot.bot.handlers.seasons import get_next_unwatched_episode
             next_ep = get_next_unwatched_episode(chat_id, film_id, user_id, kp_id)
             if not next_ep:
-                bot.answer_callback_query(call.id, "✅ Все серии просмотрены!", show_alert=True)
+                try:
+                    bot.answer_callback_query(call.id, "✅ Все серии просмотрены!", show_alert=True)
+                except Exception:
+                    pass
                 return
-            bot.answer_callback_query(call.id)
             season_num, ep_num = next_ep
             ep_text = f"<b>{season_num} сезон {ep_num} серия</b>"
             confirm_text = f"Отметить серию {ep_text} как просмотренную?"

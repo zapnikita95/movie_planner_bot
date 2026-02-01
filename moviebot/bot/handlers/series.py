@@ -846,9 +846,9 @@ def show_film_info_with_buttons(
             rating_text = "💬 Оценить"
 
             try:
-                # Используем свежий курсор через get_db_connection
+                # Используем локальный курсор (не get_db_cursor — глобальный курсор может быть закрыт другим хендлером)
                 conn_ratings = get_db_connection()
-                cursor_ratings = get_db_cursor()
+                cursor_ratings = conn_ratings.cursor()
                 try:
                     with db_lock:
                         cursor_ratings.execute('''
@@ -863,16 +863,11 @@ def show_film_info_with_buttons(
                 finally:
                     try:
                         cursor_ratings.close()
-                    except:
-                        pass
-                    try:
-                        conn_ratings.close()
-                    except:
+                    except Exception:
                         pass
                 
-                # Получаем активных пользователей и тех, кто оценил
-                conn_ratings2 = get_db_connection()
-                cursor_ratings2 = get_db_cursor()
+                # Получаем активных пользователей и тех, кто оценил — свой курсор
+                cursor_ratings2 = conn_ratings.cursor()
                 try:
                     with db_lock:
                         cursor_ratings2.execute('''
@@ -895,11 +890,7 @@ def show_film_info_with_buttons(
                 finally:
                     try:
                         cursor_ratings2.close()
-                    except:
-                        pass
-                    try:
-                        conn_ratings2.close()
-                    except:
+                    except Exception:
                         pass
                 
                 # Формируем текст кнопки
