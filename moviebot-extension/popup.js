@@ -519,8 +519,8 @@ async function detectAndLoadFilm(url, urlChanged = true) {
             });
           });
           if (info && info.title) {
-            const keyword = [info.title, info.year].filter(Boolean).join(' ');
-            await loadFilmByKeyword(keyword, info.year || null, 'kinorium', info.isSeries);
+            // Точно как Letterboxd: keyword = только название, year отдельно
+            await loadFilmByKeyword(info.title, info.year || null, 'kinorium');
             return;
           }
         }
@@ -883,49 +883,61 @@ async function tryFallbackSearch(imdbId, source) {
 }
 
 async function loadFilmByKeyword(keyword, year, source, isSeries = null) {
+  const titleEl = document.getElementById('film-title');
+  const yearEl = document.getElementById('film-year');
+  if (titleEl) titleEl.textContent = 'Ищем фильм по названию...';
+  if (yearEl) yearEl.textContent = '';
+
+  const applyFilmByKpId = async (kpId) => {
+    const filmResponse = await fetch(`${API_BASE_URL}/api/extension/film-info?kp_id=${kpId}&chat_id=${chatId}`);
+    if (filmResponse.ok) {
+      const filmJson = await filmResponse.json();
+      if (filmJson.success) {
+        fallbackFilmData = { film: filmJson.film, data: filmJson, source: source };
+        displayFilmInfo(filmJson.film, filmJson, true);
+        return true;
+      }
+    }
+    return false;
+  };
+
   try {
-    const titleEl = document.getElementById('film-title');
-    const yearEl = document.getElementById('film-year');
-    if (titleEl) titleEl.textContent = 'Ищем фильм по названию...';
-    if (yearEl) yearEl.textContent = '';
-    
-    // Бэкенд может не поддерживать type — без него поиск не даёт 404
+    // 1) Пробуем search-film-by-keyword (как Letterboxd)
     const searchUrl = `${API_BASE_URL}/api/extension/search-film-by-keyword?keyword=${encodeURIComponent(keyword)}${year ? `&year=${year}` : ''}`;
     const response = await fetch(searchUrl);
-    
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+
+    if (response.ok) {
+      const json = await response.json();
+      if (json.success && json.kp_id) {
+        await applyFilmByKpId(json.kp_id);
+        return;
+      }
     }
-    
-    const json = await response.json();
-    
-    if (json.success && json.kp_id) {
-      // Загружаем информацию о фильме по найденному kp_id
-      const filmResponse = await fetch(`${API_BASE_URL}/api/extension/film-info?kp_id=${json.kp_id}&chat_id=${chatId}`);
-      if (filmResponse.ok) {
-        const filmJson = await filmResponse.json();
-        if (filmJson.success) {
-          // Сохраняем данные для подтверждения
-          fallbackFilmData = {
-            film: filmJson.film,
-            data: filmJson,
-            source: source
-          };
-          displayFilmInfo(filmJson.film, filmJson, true); // true = показать подтверждение
+
+    // 2) При 404 или ошибке — fallback на /api/extension/search (как ручной поиск в popup)
+    const needFallback = !response.ok;
+    if (needFallback) {
+      const query = year ? `${keyword} ${year}`.trim() : keyword;
+      const searchFallback = await fetch(`${API_BASE_URL}/api/extension/search?query=${encodeURIComponent(query)}&page=1`);
+      if (searchFallback.ok) {
+        const fallbackJson = await searchFallback.json();
+        if (fallbackJson.success && fallbackJson.results && fallbackJson.results.length > 0) {
+          const first = fallbackJson.results[0];
+          if (first.kp_id && (await applyFilmByKpId(first.kp_id))) return;
         }
       }
-    } else {
-      const titleEl = document.getElementById('film-title');
-      const yearEl = document.getElementById('film-year');
-      if (titleEl) titleEl.textContent = 'Фильм не найден';
-      if (yearEl) yearEl.textContent = 'Попробуйте другую ссылку';
     }
+
+    const tEl = document.getElementById('film-title');
+    const yEl = document.getElementById('film-year');
+    if (tEl) tEl.textContent = 'Фильм не найден';
+    if (yEl) yEl.textContent = 'Попробуйте другую ссылку';
   } catch (err) {
     console.error('Ошибка поиска по keyword:', err);
-    const titleEl = document.getElementById('film-title');
-    const yearEl = document.getElementById('film-year');
-    if (titleEl) titleEl.textContent = 'Ошибка поиска';
-    if (yearEl) yearEl.textContent = 'Проверьте подключение к интернету';
+    const tEl = document.getElementById('film-title');
+    const yEl = document.getElementById('film-year');
+    if (tEl) tEl.textContent = 'Ошибка поиска';
+    if (yEl) yEl.textContent = 'Проверьте подключение к интернету';
   }
 }
 
