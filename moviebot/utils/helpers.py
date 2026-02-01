@@ -8,6 +8,7 @@ import pytz
 logger = logging.getLogger(__name__)
 
 FREE_SERIES_LIMIT = 3  # первые N сериалов — полный функционал бесплатно
+FREE_TICKET_PLANS_LIMIT = 3  # первые N планов с билетами — полный функционал бесплатно
 
 
 def _get_first_series_film_ids(chat_id):
@@ -166,6 +167,110 @@ def maybe_send_series_limit_message(bot, chat_id, user_id, message_thread_id=Non
                 cur.close()
             except Exception:
                 pass
+
+
+def _has_ticket_subscription(chat_id, user_id):
+    """Есть подписка 'tickets' или 'all' (для полного доступа к билетам)"""
+    from moviebot.database.db_operations import get_user_personal_subscriptions
+    personal_subs = get_user_personal_subscriptions(user_id)
+    if personal_subs:
+        for sub in personal_subs:
+            plan_type = sub.get('plan_type')
+            expires_at = sub.get('expires_at')
+            if plan_type in ['tickets', 'all']:
+                if expires_at is None:
+                    return True
+                try:
+                    now = datetime.now(pytz.UTC)
+                    if isinstance(expires_at, datetime):
+                        if expires_at.tzinfo is None:
+                            expires_at = pytz.UTC.localize(expires_at)
+                        if expires_at > now:
+                            return True
+                    elif isinstance(expires_at, str):
+                        expires_dt = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+                        if expires_dt.tzinfo is None:
+                            expires_dt = pytz.UTC.localize(expires_dt)
+                        if expires_dt > now:
+                            return True
+                except Exception:
+                    pass
+    if chat_id < 0:
+        from moviebot.database.db_operations import get_active_group_subscription_by_chat_id, get_subscription_members
+        group_sub = get_active_group_subscription_by_chat_id(chat_id)
+        if group_sub and group_sub.get('plan_type') in ['tickets', 'all']:
+            exp = group_sub.get('expires_at')
+            if exp is not None:
+                try:
+                    now = datetime.now(pytz.UTC)
+                    if isinstance(exp, str):
+                        exp = datetime.fromisoformat(exp.replace('Z', '+00:00'))
+                    if exp.tzinfo is None:
+                        exp = pytz.UTC.localize(exp)
+                    if exp <= now:
+                        return False
+                except Exception:
+                    return False
+            group_size = group_sub.get('group_size')
+            sub_id = group_sub.get('id')
+            if group_size and sub_id:
+                try:
+                    members = get_subscription_members(sub_id)
+                    return bool(members and user_id in members)
+                except Exception:
+                    return False
+            return True
+    return False
+
+
+def has_ticket_features_access(chat_id, user_id):
+    """
+    Доступ к добавлению билетов и напоминаниям.
+    True если: подписка tickets/all ИЛИ планов с билетами < FREE_TICKET_PLANS_LIMIT.
+    """
+    if _has_ticket_subscription(chat_id, user_id):
+        return True
+    from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+    conn = get_db_connection()
+    cur = None
+    try:
+        with db_lock:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT COUNT(*) as cnt FROM plans WHERE chat_id = %s AND ticket_file_id IS NOT NULL",
+                (chat_id,)
+            )
+            row = cur.fetchone()
+        cnt = (row.get('cnt') if isinstance(row, dict) else row[0]) or 0
+        return cnt < FREE_TICKET_PLANS_LIMIT
+    finally:
+        if cur:
+            try:
+                cur.close()
+            except Exception:
+                pass
+
+
+def maybe_send_ticket_limit_message(bot, chat_id, user_id, message_thread_id=None):
+    """Сообщение о лимите билетов с кнопками тарифов."""
+    text = (
+        "Вы уже запланировали 3 похода в кино с билетами — круто! 🎟️\n\n"
+        "Полный доступ к напоминаниям и билетам для всех планов — по подписке. Продолжить?"
+    )
+    from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+    markup = InlineKeyboardMarkup(row_width=1)
+    markup.add(InlineKeyboardButton("🔔 Уведомления о сериалах", callback_data="payment:subscribe:personal:notifications:month"))
+    markup.add(InlineKeyboardButton("🎟 Билеты в кино", callback_data="payment:subscribe:personal:tickets:month"))
+    markup.add(InlineKeyboardButton("💎 Movie Planner PRO", callback_data="payment:tariffs:personal"))
+    markup.add(InlineKeyboardButton("💰 Все тарифы", callback_data="payment:tariffs"))
+    kw = {'chat_id': chat_id, 'text': text, 'parse_mode': 'HTML', 'reply_markup': markup}
+    if message_thread_id is not None:
+        kw['message_thread_id'] = message_thread_id
+    try:
+        bot.send_message(**kw)
+        logger.info(f"[TICKET LIMIT] Отправлено сообщение о лимите для chat_id={chat_id}")
+    except Exception as e:
+        logger.error(f"[TICKET LIMIT] Ошибка отправки: {e}", exc_info=True)
 
 
 def has_tickets_access(chat_id, user_id):

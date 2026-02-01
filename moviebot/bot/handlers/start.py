@@ -10,7 +10,7 @@ from moviebot.database.db_operations import (
     get_user_personal_subscriptions,
     log_request
 )
-from moviebot.utils.helpers import has_tickets_access, has_recommendations_access
+from moviebot.utils.helpers import has_recommendations_access
 from moviebot.states import user_plan_state
 
 from moviebot.bot.bot_init import safe_answer_callback_query
@@ -203,33 +203,9 @@ def start_menu_callback(call):
             show_schedule(msg)
 
         elif action == 'tickets':
-            if not has_tickets_access(chat_id, user_id):
-                text = "🎫 <b>Билеты в кино</b>\n\nВ групповых чатах загрузка билетов доступна с подпиской <b>💎 Movie Planner PRO</b>.\n\nИспользуйте /payment для оформления подписки."
-                markup = InlineKeyboardMarkup()
-                markup.add(InlineKeyboardButton("💎 Movie Planner PRO", callback_data="payment:tariffs:personal"))
-                markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-                try:
-                    bot.edit_message_text(
-                        text=text,
-                        chat_id=chat_id,
-                        message_id=message_id,
-                        reply_markup=markup,
-                        parse_mode='HTML'
-                    )
-                except:
-                    bot.send_message(
-                        chat_id=chat_id,
-                        text=text,
-                        reply_markup=markup,
-                        parse_mode='HTML',
-                        message_thread_id=message_thread_id
-                    )
-                return
-            else:
-                # Показываем список событий
-                from moviebot.bot.handlers.series import show_cinema_sessions
-                show_cinema_sessions(chat_id, user_id, None)
-                return
+            from moviebot.bot.handlers.series import show_cinema_sessions
+            show_cinema_sessions(chat_id, user_id, None)
+            return
 
         elif action == 'payment':
             msg = call.message
@@ -433,12 +409,6 @@ def back_to_start_menu_callback(call):
 
         markup = InlineKeyboardMarkup()
 
-        try:
-            has_tickets = has_tickets_access(chat_id, user_id)
-        except Exception as tickets_error:
-            logger.error(f"[BACK TO MENU] Ошибка проверки доступа к билетам: {tickets_error}", exc_info=True)
-            has_tickets = False
-
         # Строка 1: Сериалы / Премьеры
         markup.row(
             InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"),
@@ -452,8 +422,8 @@ def back_to_start_menu_callback(call):
             InlineKeyboardButton("🗓️ Расписание", callback_data="start_menu:schedule")
         )
         # Строка 4: Что посмотреть? (слева) / Билеты (справа); в личке билеты для всех
-        tickets_text = "🎫 Билеты" if has_tickets else "🔒 Билеты"
-        tickets_callback = "start_menu:tickets" if has_tickets else "start_menu:tickets_locked"
+        tickets_text = "🎫 Билеты"
+        tickets_callback = "start_menu:tickets"
         markup.row(
             InlineKeyboardButton("🤔 Что посмотреть?", callback_data="start_menu:what_to_watch"),
             InlineKeyboardButton(tickets_text, callback_data=tickets_callback)
@@ -744,12 +714,6 @@ def register_start_handlers(bot):
         try:
             markup = InlineKeyboardMarkup()
 
-            try:
-                has_tickets = has_tickets_access(chat_id, user_id)
-            except Exception as tickets_error:
-                logger.error(f"[BACK TO MENU] Ошибка проверки доступа к билетам: {tickets_error}", exc_info=True)
-                has_tickets = False
-
             # Строка 1: Сериалы / Премьеры
             markup.row(
                 InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"),
@@ -760,8 +724,8 @@ def register_start_handlers(bot):
                 InlineKeyboardButton("🗄️ База", callback_data="start_menu:database"),
                 InlineKeyboardButton("🗓️ Расписание", callback_data="start_menu:schedule")
             )
-            tickets_text = "🎫 Билеты" if has_tickets else "🔒 Билеты"
-            tickets_callback = "start_menu:tickets" if has_tickets else "start_menu:tickets_locked"
+            tickets_text = "🎫 Билеты"
+            tickets_callback = "start_menu:tickets"
             markup.row(
                 InlineKeyboardButton("🤔 Что посмотреть?", callback_data="start_menu:what_to_watch"),
                 InlineKeyboardButton(tickets_text, callback_data=tickets_callback)
@@ -954,28 +918,6 @@ def register_start_handlers(bot):
                 show_schedule(msg)
 
             elif action == 'tickets':
-                if not has_tickets_access(chat_id, user_id):
-                    text = "🎫 <b>Билеты в кино</b>\n\nВ групповых чатах загрузка билетов доступна с подпиской <b>💎 Movie Planner PRO</b>.\n\nИспользуйте /payment для оформления подписки."
-                    markup = InlineKeyboardMarkup()
-                    markup.add(InlineKeyboardButton("💎 Movie Planner PRO", callback_data="payment:tariffs:personal"))
-                    markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-                    try:
-                        bot.edit_message_text(
-                            text=text,
-                            chat_id=chat_id,
-                            message_id=message_id,
-                            reply_markup=markup,
-                            parse_mode='HTML'
-                        )
-                    except:
-                        bot.send_message(
-                            chat_id=chat_id,
-                            text=text,
-                            reply_markup=markup,
-                            parse_mode='HTML',
-                            message_thread_id=message_thread_id
-                        )
-                    return
                 from moviebot.bot.handlers.series import show_cinema_sessions
                 show_cinema_sessions(chat_id, user_id, None)
                 return
@@ -1067,12 +1009,6 @@ def register_start_handlers(bot):
 
             markup = InlineKeyboardMarkup()
 
-            try:
-                has_tickets = has_tickets_access(chat_id, user_id)
-            except Exception as tickets_error:
-                logger.error(f"[BACK TO MENU] Ошибка проверки доступа к билетам: {tickets_error}", exc_info=True)
-                has_tickets = False
-
             markup.row(
                 InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"),
                 InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres")
@@ -1082,8 +1018,8 @@ def register_start_handlers(bot):
                 InlineKeyboardButton("🗄️ База", callback_data="start_menu:database"),
                 InlineKeyboardButton("🗓️ Расписание", callback_data="start_menu:schedule")
             )
-            tickets_text = "🎫 Билеты" if has_tickets else "🔒 Билеты"
-            tickets_callback = "start_menu:tickets" if has_tickets else "start_menu:tickets_locked"
+            tickets_text = "🎫 Билеты"
+            tickets_callback = "start_menu:tickets"
             markup.row(
                 InlineKeyboardButton("🤔 Что посмотреть?", callback_data="start_menu:what_to_watch"),
                 InlineKeyboardButton(tickets_text, callback_data=tickets_callback)

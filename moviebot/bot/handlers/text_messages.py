@@ -2276,6 +2276,9 @@ def main_file_handler(message):
 
             total_tickets = len(existing_tickets)
             was_first = total_tickets == 1
+            if was_first:
+                from moviebot.utils.helpers import maybe_send_ticket_limit_message
+                maybe_send_ticket_limit_message(bot, chat_id, user_id, getattr(message, 'message_thread_id', None))
             logger.info(f"[TICKET UPLOAD] Всего билетов: {total_tickets}, первый билет: {was_first}")
 
             if was_first:
@@ -2355,6 +2358,10 @@ def main_file_handler(message):
                     
                     cursor.execute("UPDATE plans SET ticket_file_id = %s WHERE id = %s", (tickets_json, plan_id))
                     conn.commit()
+                was_first_for_plan = len(existing_tickets) == 1
+                if was_first_for_plan:
+                    from moviebot.utils.helpers import maybe_send_ticket_limit_message
+                    maybe_send_ticket_limit_message(bot, message.chat.id, message.from_user.id, getattr(message, 'message_thread_id', None))
                 logger.info(f"[TICKET FILE] Билет сохранен в БД для plan_id={plan_id}, file_id={file_id}, всего билетов: {len(existing_tickets)}")
                 
                 # Добавляем кнопки после сохранения билета

@@ -2287,11 +2287,13 @@ def create_web_app(bot):
                         markup = InlineKeyboardMarkup()
                         markup.add(InlineKeyboardButton("📖 К описанию", callback_data=f"show_film:{kp_id_plan}"))
                         
-                        # Если план "в кино", добавляем кнопку "Добавить билеты"
+                        # Если план "в кино", добавляем кнопку "Добавить билеты" (первые 3 плана с билетами бесплатно)
                         if plan_type == 'cinema':
-                            from moviebot.utils.helpers import has_tickets_access
-                            if has_tickets_access(chat_id, user_id):
+                            from moviebot.utils.helpers import has_ticket_features_access
+                            if has_ticket_features_access(chat_id, user_id):
                                 markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
+                            else:
+                                markup.add(InlineKeyboardButton("🔒 Добавить билеты", callback_data=f"ticket_locked:{plan_id}"))
                         
                         bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup)
                         logger.info(f"[EXTENSION API] Сообщение о создании/обновлении плана отправлено в chat_id={chat_id}")
@@ -2386,15 +2388,15 @@ def create_web_app(bot):
             return resp, 400
         
         try:
-            from moviebot.utils.helpers import has_tickets_access
             from moviebot.states import user_ticket_state
             from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
             from moviebot.bot.bot_init import bot
             
-            # Проверяем подписку
-            if not has_tickets_access(chat_id, user_id):
-                resp = jsonify({"success": False, "error": "Нет доступа к билетам. Нужна подписка 'Билеты'."})
-                return resp, 403
+            from moviebot.utils.helpers import has_ticket_features_access, maybe_send_ticket_limit_message
+            if not has_ticket_features_access(chat_id, user_id):
+                maybe_send_ticket_limit_message(bot, chat_id, user_id, None)
+                resp = jsonify({"success": True, "limit_message_sent": True})
+                return resp
             
             # Устанавливаем состояние для загрузки билетов
             user_ticket_state[user_id] = {
@@ -2670,12 +2672,13 @@ def create_web_app(bot):
             if not film_id:
                 return jsonify({"success": False, "error": "film not found"}), 404
 
-            from moviebot.utils.helpers import has_series_features_access
+            from moviebot.utils.helpers import has_series_features_access, maybe_send_series_limit_message
             if not has_series_features_access(chat_id, user_id, film_id):
+                maybe_send_series_limit_message(bot, chat_id, user_id, None)
                 return jsonify({
                     "success": False,
                     "error": "series_limit",
-                    "message": "Уведомления и отметка серий доступны для первых 3 сериалов. Подключите подписку через /payment"
+                    "message": "❌ Ошибка отметки, проверьте подписку"
                 }), 403
 
             if online_link:

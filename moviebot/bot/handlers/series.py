@@ -23,7 +23,7 @@ from moviebot.database.db_connection import get_db_connection, get_db_cursor, db
 from moviebot.database.db_operations import get_user_timezone_or_default, get_user_films_count
 from moviebot.utils.helpers import extract_film_info_from_existing
 from moviebot.api.kinopoisk_api import search_films, extract_movie_info, get_premieres_for_period, get_seasons_data, search_films_by_filters, get_film_distribution, search_persons, get_staff
-from moviebot.utils.helpers import has_tickets_access, has_recommendations_access, has_notifications_access, has_pro_access, has_series_features_access
+from moviebot.utils.helpers import has_recommendations_access, has_notifications_access, has_pro_access, has_series_features_access
 from moviebot.utils.parsing import parse_plan_date_text
 from moviebot.bot.handlers.seasons import get_series_airing_status, count_episodes_for_watch_check
 
@@ -783,10 +783,10 @@ def show_film_info_with_buttons(
             else:
                 markup.add(InlineKeyboardButton("✏️ Изменить в расписании", callback_data="edit:plan"))  # фоллбек на общее меню
 
-            # Кнопка билетов для планов в кино
+            # Кнопка билетов для планов в кино (первые 3 плана с билетами бесплатно)
             if plan_info and plan_info.get('type') == 'cinema':
-                from moviebot.utils.helpers import has_tickets_access
-                if has_tickets_access(chat_id, user_id):
+                from moviebot.utils.helpers import has_ticket_features_access
+                if has_ticket_features_access(chat_id, user_id):
                     if has_tickets:
                         markup.add(InlineKeyboardButton("🎟️ Билеты", callback_data=f"show_ticket:{plan_info['id']}"))
                     else:
@@ -1302,8 +1302,6 @@ def ticket_session_callback(call):
     logger.info(f"[TICKET SESSION] ===== START: callback_id={call.id}, data={call.data}, user_id={call.from_user.id}")
     logger.info(f"[TICKET SESSION] Обработчик вызван! call.data={call.data}")
     try:
-        from moviebot.utils.helpers import has_tickets_access
-        
         bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         chat_id = call.message.chat.id
@@ -1313,18 +1311,6 @@ def ticket_session_callback(call):
         plan_id = int(parts[1])
         file_id = parts[2] if len(parts) > 2 else None
         logger.info(f"[TICKET SESSION] Парсинг: plan_id={plan_id}, file_id={file_id}")
-        
-        # Проверяем доступ к функциям билетов
-        if not has_tickets_access(chat_id, user_id):
-            bot.edit_message_text(
-                "🎫 <b>Билеты в кино</b>\n\n"
-                "Вы можете загружать билеты и получать их в боте прямо перед мероприятием с подпиской <b>\"Билеты\"</b>.\n\n"
-                "Используйте /payment для оформления подписки.",
-                chat_id,
-                call.message.message_id,
-                parse_mode='HTML'
-            )
-            return
         
         # Получаем информацию о сеансе (включая мероприятия без film_id)
         conn_local = get_db_connection()
@@ -1520,20 +1506,10 @@ def show_ticket_callback(call):
     logger.info(f"[SHOW TICKET] ===== START: callback_id={call.id}, data={call.data}, user_id={call.from_user.id}")
     logger.info(f"[SHOW TICKET] Обработчик вызван! call.data={call.data}")
     try:
-        from moviebot.utils.helpers import has_tickets_access
-        
         bot.answer_callback_query(call.id)
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         plan_id = int(call.data.split(":")[1])
-        
-        if not has_tickets_access(chat_id, user_id):
-            bot.answer_callback_query(
-                call.id,
-                "🎫 Билеты доступны с подпиской 💎 Movie Planner PRO. Подключите через /payment",
-                show_alert=True
-            )
-            return
         
         import json
         conn_local = get_db_connection()
@@ -2419,23 +2395,6 @@ def ticket_command(message):
         log_request(user_id, username, '/ticket', chat_id)
         logger.info(f"[TICKET COMMAND] log_request выполнен")
         
-        # Проверяем доступ к функциям билетов
-        logger.info(f"[TICKET COMMAND] Проверка доступа к билетам")
-        if not has_tickets_access(chat_id, user_id):
-            logger.info(f"[TICKET COMMAND] Нет доступа, отправка сообщения о подписке")
-            text = "🎫 <b>Билеты в кино</b>\n\n"
-            text += "В групповых чатах загрузка билетов доступна с подпиской <b>💎 Movie Planner PRO</b>.\n\n"
-            text += "Используйте /payment для оформления подписки."
-            
-            markup = InlineKeyboardMarkup()
-            markup.add(InlineKeyboardButton("💎 Movie Planner PRO", callback_data="payment:tariffs:personal"))
-            markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-            
-            logger.info(f"[TICKET COMMAND] Вызов reply_to для сообщения о подписке")
-            bot.reply_to(message, text, reply_markup=markup, parse_mode='HTML')
-            logger.info(f"[TICKET COMMAND] Сообщение о подписке отправлено")
-            return
-        
         # Проверяем, есть ли файл в сообщении
         logger.info(f"[TICKET COMMAND] Проверка наличия файла")
         has_photo = message.photo is not None and len(message.photo) > 0
@@ -2443,6 +2402,11 @@ def ticket_command(message):
         logger.info(f"[TICKET COMMAND] has_photo={has_photo}, has_document={has_document}")
         
         if has_photo or has_document:
+            from moviebot.utils.helpers import has_ticket_features_access, maybe_send_ticket_limit_message
+            if not has_ticket_features_access(chat_id, user_id):
+                logger.info(f"[TICKET COMMAND] Лимит достигнут при добавлении билета")
+                maybe_send_ticket_limit_message(bot, chat_id, user_id, getattr(message, 'message_thread_id', None))
+                return
             # Сохраняем file_id для последующей обработки
             if has_photo:
                 file_id = message.photo[-1].file_id  # Берем самое большое фото

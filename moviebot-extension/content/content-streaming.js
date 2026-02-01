@@ -1427,6 +1427,7 @@
     const storageData = st ? await st.get(['has_notifications_access']) : {};
     const hasNotificationsAccess = storageData.has_notifications_access || false;
     const hasSeriesFeaturesAccess = filmData?.has_series_features_access ?? hasNotificationsAccess;
+    const showSeriesButtonsAlways = true;
     
     // Если сериал без определенной серии - показываем простой UI
     if (showSeriesUi && noEpisodeDetected) {
@@ -1460,8 +1461,8 @@
         const nextSeason = filmData?.next_unwatched_season || 1;
         const nextEpisode = filmData?.next_unwatched_episode || 1;
         
-        if (hasSeriesFeaturesAccess) {
-          // Информация о следующей серии
+        if (showSeriesButtonsAlways || hasSeriesFeaturesAccess) {
+          // Информация о следующей серии (кнопки всегда видны, при лимите покажем toast при ошибке)
           const nextEpInfo = document.createElement('div');
           nextEpInfo.style.cssText = 'padding: 12px !important; background: rgba(255,255,255,0.15) !important; border-radius: 8px !important; text-align: center !important; margin-bottom: 10px !important;';
           nextEpInfo.innerHTML = `<span style="font-size: 12px; opacity: 0.9;">Следующая серия:</span><br><b style="font-size: 16px;">${nextSeason} сезон, ${nextEpisode} серия</b>`;
@@ -1622,7 +1623,7 @@
     
     if (isUnknown && filmData?.kp_id) {
       if (showSeriesUi) {
-        if (!hasSeriesFeaturesAccess) {
+        if (!hasSeriesFeaturesAccess && !showSeriesButtonsAlways) {
           const noAccessMsg = document.createElement('div');
           noAccessMsg.style.cssText = 'padding: 12px; background: rgba(255,255,255,0.1); border-radius: 6px; text-align: center; font-size: 13px; margin-bottom: 8px;';
           noAccessMsg.innerHTML = '🔒 Для отметки серий нужна подписка "Уведомления" или "Пакетная"<br><small style="opacity: 0.8;">Доступно только добавление в базу</small>';
@@ -1736,8 +1737,7 @@
       container.appendChild(addBtn);
     } else {
       if (showSeriesUi) {
-        if (!hasSeriesFeaturesAccess) {
-          // Нет доступа - показываем только информацию (первые 3 сериала бесплатно)
+        if (!hasSeriesFeaturesAccess && !showSeriesButtonsAlways) {
           const noAccessMsg = document.createElement('div');
           noAccessMsg.style.cssText = 'padding: 12px; background: rgba(255,255,255,0.1); border-radius: 6px; text-align: center; font-size: 13px; margin-bottom: 8px;';
           noAccessMsg.innerHTML = '🔒 Для отметки серий нужна подписка "Уведомления" или "Пакетная"<br><small style="opacity: 0.8;">Доступно только добавление в базу</small>';
@@ -2063,10 +2063,14 @@
             showToast('✅ Серия отмечена!');
             removeOverlay();
           } else {
-            showToast('❌ ' + (result.error || 'Ошибка'), 3000);
+            const errMsg = result.message || result.error || 'Ошибка';
+            showToast('❌ ' + errMsg, 3000);
           }
         } else {
-          showToast('❌ Ошибка сервера: ' + response.status, 3000);
+          let result = {};
+          try { result = await response.json(); } catch (_) {}
+          const isLimit = response.status === 403 && result.error === 'series_limit';
+          showToast(isLimit ? '❌ Ошибка отметки, проверьте подписку' : ('❌ ' + (result.message || 'Ошибка сервера')), 3000);
         }
       } catch (fetchError) {
         if (isContextInvalidated(fetchError)) { alertReloadPage(); return; }

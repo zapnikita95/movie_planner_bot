@@ -3,7 +3,7 @@
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import time
 from moviebot.states import user_ticket_state
-from moviebot.utils.helpers import has_tickets_access, has_pro_access
+from moviebot.utils.helpers import has_ticket_features_access, has_pro_access, maybe_send_ticket_limit_message
 from moviebot.bot.bot_init import bot
 import logging
 
@@ -40,16 +40,9 @@ def add_ticket_from_plan_callback(call):
                 pass
             return
 
-        if not has_tickets_access(chat_id, user_id):
-            logger.warning(f"[TICKET CALLBACK] У пользователя {user_id} нет доступа к билетам")
-            try:
-                bot.answer_callback_query(
-                    call.id,
-                    "🎫 В групповых чатах загрузка билетов доступна с подпиской 💎 Movie Planner PRO. Подключите через /payment",
-                    show_alert=True
-                )
-            except:
-                pass
+        if not has_ticket_features_access(chat_id, user_id):
+            bot.answer_callback_query(call.id)
+            maybe_send_ticket_limit_message(bot, chat_id, user_id, message_thread_id)
             return
 
         # Состояние (TTL 15 мин)
@@ -197,20 +190,6 @@ def ticket_new_callback(call):
         user_id = call.from_user.id
         chat_id = call.message.chat.id
         
-        if not has_tickets_access(chat_id, user_id):
-            try:
-                bot.edit_message_text(
-                    "🎫 <b>Билеты в кино</b>\n\n"
-                    "В групповых чатах загрузка билетов доступна с подпиской <b>💎 Movie Planner PRO</b>.\n\n"
-                    "Используйте /payment для оформления подписки.",
-                    chat_id,
-                    call.message.message_id,
-                    parse_mode='HTML'
-                )
-            except:
-                pass
-            return
-        
         # Парсим file_id, если есть (формат: ticket_new:file_id)
         parts = call.data.split(":")
         file_id = parts[1] if len(parts) > 1 else None
@@ -238,14 +217,14 @@ def ticket_new_callback(call):
             pass
 
 
-# 4. Заблокированная кнопка
+# 4. Заблокированная кнопка (лимит 3 плана с билетами или группа без PRO)
 @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("ticket_locked:"))
 def handle_ticket_locked(call):
-    bot.answer_callback_query(
-        call.id,
-        "🎫 В групповых чатах загрузка билетов доступна с подпиской 💎 Movie Planner PRO. Подключите через /payment",
-        show_alert=True
-    )
+    bot.answer_callback_query(call.id)
+    chat_id = call.message.chat.id
+    user_id = call.from_user.id
+    message_thread_id = getattr(call.message, 'message_thread_id', None)
+    maybe_send_ticket_limit_message(bot, chat_id, user_id, message_thread_id)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("cancel_ticket_upload:"))
 def cancel_ticket_upload(call):

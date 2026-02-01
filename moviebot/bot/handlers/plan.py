@@ -186,13 +186,13 @@ def process_plan(bot, user_id, chat_id, link, plan_type, day_or_date, message_da
     date_str = plan_dt_local.strftime('%d.%m %H:%M')
     type_text = "дома" if plan_type == 'home' else "в кино"
     
-    # Проверяем доступ к билетам для кнопки "Добавить билеты" (только для планов в кино)
-    from moviebot.utils.helpers import has_tickets_access
+    # Проверяем доступ к билетам для кнопки "Добавить билеты" (первые 3 плана с билетами бесплатно)
+    from moviebot.utils.helpers import has_ticket_features_access
     markup = InlineKeyboardMarkup()
     sources = None  # Инициализируем переменную для источников
     
     if plan_type == 'cinema' and plan_id:
-        if has_tickets_access(chat_id, user_id):
+        if has_ticket_features_access(chat_id, user_id):
             markup.add(InlineKeyboardButton("🎟️ Добавить билеты", callback_data=f"add_ticket:{plan_id}"))
         else:
             markup.add(InlineKeyboardButton("🔒 Добавить билеты", callback_data=f"ticket_locked:{plan_id}"))
@@ -833,7 +833,7 @@ def show_schedule(message):
                 get_active_subscription,
                 get_active_group_subscription_by_chat_id
             )
-            from moviebot.utils.helpers import has_recommendations_access, has_tickets_access
+            from moviebot.utils.helpers import has_recommendations_access
             
             user_id = call.from_user.id
             
@@ -866,8 +866,6 @@ def show_schedule(message):
             
             markup = InlineKeyboardMarkup()
             
-            has_tickets = has_tickets_access(chat_id, user_id)
-            
             markup.row(
                 InlineKeyboardButton("📺 Сериалы", callback_data="start_menu:seasons"),
                 InlineKeyboardButton("📅 Премьеры", callback_data="start_menu:premieres")
@@ -877,8 +875,8 @@ def show_schedule(message):
                 InlineKeyboardButton("🗄️ База", callback_data="start_menu:database"),
                 InlineKeyboardButton("🗓️ Расписание", callback_data="start_menu:schedule")
             )
-            tickets_text = "🎫 Билеты" if has_tickets else "🔒 Билеты"
-            tickets_callback = "start_menu:tickets" if has_tickets else "start_menu:tickets_locked"
+            tickets_text = "🎫 Билеты"
+            tickets_callback = "start_menu:tickets"
             markup.row(
                 InlineKeyboardButton("🤔 Что посмотреть?", callback_data="start_menu:what_to_watch"),
                 InlineKeyboardButton(tickets_text, callback_data=tickets_callback)
