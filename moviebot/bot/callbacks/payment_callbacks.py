@@ -883,7 +883,7 @@ def register_payment_callbacks(bot_instance):
                 except:
                     pass
             
-                from moviebot.database.db_operations import get_subscription_members, get_active_group_users, get_user_group_subscriptions
+                from moviebot.database.db_operations import get_subscription_members, get_active_group_users, get_user_group_subscriptions, get_active_group_subscription_by_chat_id
                 
                 # Если пользователь в личном чате, получаем chat_id группы из подписки
                 if is_private:
@@ -897,8 +897,8 @@ def register_payment_callbacks(bot_instance):
                     else:
                         sub = None
                 else:
-                    # Если пользователь в группе, используем chat_id группы
-                    sub = get_active_subscription(chat_id, user_id, 'group')
+                    # В группе: подписка одна на чат — показываем её любому участнику (и плательщику, и участникам из списка)
+                    sub = get_active_group_subscription_by_chat_id(chat_id)
             
                 logger.info(f"[PAYMENT] Проверка подписки для группы {chat_id}, user_id={user_id}, sub={sub}")
             
