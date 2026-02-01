@@ -984,6 +984,121 @@ def series_subscribe_callback(call):
         except Exception as e:
             logger.error(f"[SERIES LOCKED] Ошибка: {e}", exc_info=True)
 
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("series_mark_episode:"))
+    def series_mark_episode_callback(call):
+        """Кнопка «Отметить серию» — показать подтверждение для последней непросмотренной серии"""
+        try:
+            parts = call.data.split(":")
+            if len(parts) < 2:
+                bot.answer_callback_query(call.id, "Ошибка формата", show_alert=True)
+                return
+            kp_id = str(int(parts[1].strip()))
+            chat_id = call.message.chat.id
+            user_id = call.from_user.id
+            desc_msg_id = call.message.message_id
+            message_thread_id = getattr(call.message, 'message_thread_id', None)
+            if not has_notifications_access(chat_id, user_id):
+                bot.answer_callback_query(call.id, "🔒 Функционал можно подключить через /payment", show_alert=True)
+                return
+            film_id, _ = ensure_movie_in_database(chat_id, kp_id, f"https://www.kinopoisk.ru/series/{kp_id}/", extract_movie_info(f"https://www.kinopoisk.ru/series/{kp_id}/"), user_id)
+            if not film_id:
+                bot.answer_callback_query(call.id, "❌ Сериал не найден", show_alert=True)
+                return
+            from moviebot.bot.handlers.seasons import get_next_unwatched_episode
+            next_ep = get_next_unwatched_episode(chat_id, film_id, user_id, kp_id)
+            if not next_ep:
+                bot.answer_callback_query(call.id, "✅ Все серии просмотрены!", show_alert=True)
+                return
+            bot.answer_callback_query(call.id)
+            season_num, ep_num = next_ep
+            ep_text = f"<b>{season_num} сезон {ep_num} серия</b>"
+            confirm_text = f"Отметить серию {ep_text} как просмотренную?"
+            markup = InlineKeyboardMarkup()
+            markup.row(
+                InlineKeyboardButton("✅ Отметить", callback_data=f"series_mark_ep_yes:{kp_id}:{season_num}:{ep_num}:{desc_msg_id}"),
+                InlineKeyboardButton("❌ Отмена", callback_data="series_mark_ep_no")
+            )
+            send_kw = {'chat_id': chat_id, 'text': confirm_text, 'parse_mode': 'HTML', 'reply_markup': markup}
+            if message_thread_id is not None:
+                send_kw['message_thread_id'] = message_thread_id
+            bot.send_message(**send_kw)
+        except Exception as e:
+            logger.error(f"[SERIES MARK EPISODE] Ошибка: {e}", exc_info=True)
+            try:
+                bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+            except Exception:
+                pass
+
+    @bot.callback_query_handler(func=lambda call: call.data == "series_mark_ep_no")
+    def series_mark_ep_no_callback(call):
+        """Отмена отметки серии — удалить сообщение подтверждения"""
+        try:
+            bot.answer_callback_query(call.id)
+            bot.delete_message(call.message.chat.id, call.message.message_id)
+        except Exception as e:
+            logger.warning(f"[SERIES MARK EP NO] Ошибка удаления: {e}")
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("series_mark_ep_yes:"))
+    def series_mark_ep_yes_callback(call):
+        """Подтверждение отметки серии — отметить и обновить описание"""
+        parts = call.data.split(":")
+        if len(parts) < 5:
+            try:
+                bot.answer_callback_query(call.id, "Ошибка формата", show_alert=True)
+            except Exception:
+                pass
+            return
+        kp_id = str(int(parts[1].strip()))
+        season_num = str(parts[2].strip())
+        ep_num = str(parts[3].strip())
+        desc_msg_id = int(parts[4].strip())
+        chat_id = call.message.chat.id
+        user_id = call.from_user.id
+        message_thread_id = getattr(call.message, 'message_thread_id', None)
+        try:
+            bot.answer_callback_query(call.id, "✅ Серия отмечена")
+        except Exception:
+            pass
+        try:
+            bot.delete_message(chat_id, call.message.message_id)
+        except Exception:
+            pass
+        conn = get_db_connection()
+        cursor = None
+        try:
+            with db_lock:
+                cursor = conn.cursor()
+                cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+                row = cursor.fetchone()
+                if not row:
+                    return
+                film_id = row.get('id') if isinstance(row, dict) else row[0]
+                cursor.execute('''
+                    INSERT INTO series_tracking (chat_id, film_id, user_id, season_number, episode_number, watched)
+                    VALUES (%s, %s, %s, %s, %s, TRUE)
+                    ON CONFLICT (chat_id, film_id, user_id, season_number, episode_number)
+                    DO UPDATE SET watched = TRUE
+                ''', (chat_id, film_id, user_id, season_num, ep_num))
+                conn.commit()
+            from moviebot.bot.handlers.series import show_film_info_with_buttons, get_film_current_state
+            link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+            info = extract_movie_info(link)
+            if info:
+                current_state = get_film_current_state(chat_id, int(kp_id), user_id)
+                existing = current_state['existing']
+                show_film_info_with_buttons(
+                    chat_id, user_id, info, link, kp_id,
+                    existing=existing, message_id=desc_msg_id, message_thread_id=message_thread_id
+                )
+        except Exception as e:
+            logger.error(f"[SERIES MARK EP YES] Ошибка: {e}", exc_info=True)
+        finally:
+            if cursor:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
+
     @bot.callback_query_handler(func=lambda call: call.data.startswith("series_episode_cancel_auto:"))
     def handle_episode_cancel_auto(call):
         """Обработчик отмены автоотметки эпизодов"""

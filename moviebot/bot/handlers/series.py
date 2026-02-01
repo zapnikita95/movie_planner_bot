@@ -949,11 +949,17 @@ def show_film_info_with_buttons(
                 else:
                     logger.info(f"[SHOW FILM INFO] 🔒 Кнопки сериала ЗАБЛОКИРОВАНЫ (нет подписки Уведомления или пакетной)")
             
-            # Отметка серий
+            # Отметка серий: два ряда — "Сезоны" и "Отметить серию" (короткий путь)
             if has_access:
-                markup.add(InlineKeyboardButton("✅ Отметить просмотренные серии", callback_data=f"series_track:{int(kp_id)}"))
+                markup.row(
+                    InlineKeyboardButton("📺 Сезоны", callback_data=f"series_track:{int(kp_id)}"),
+                    InlineKeyboardButton("✅ Отметить серию", callback_data=f"series_mark_episode:{int(kp_id)}")
+                )
             else:
-                markup.add(InlineKeyboardButton("🔒 Отметить просмотренные серии", callback_data=f"series_locked:{int(kp_id)}"))
+                markup.row(
+                    InlineKeyboardButton("🔒 Сезоны", callback_data=f"series_locked:{int(kp_id)}"),
+                    InlineKeyboardButton("🔒 Отметить серию", callback_data=f"series_locked:{int(kp_id)}")
+                )
 
             # Подписка/отписка — используем данные из current_state
             if has_access:

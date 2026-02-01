@@ -109,6 +109,64 @@ def count_episodes_for_watch_check(seasons_data, is_airing, watched_set, chat_id
     return total_episodes, watched_episodes
 
 
+def get_next_unwatched_episode(chat_id, film_id, user_id, kp_id):
+    """
+    Возвращает (season_num, episode_num) первой непросмотренной серии или None, если все просмотрены.
+    Учитывает is_airing: будущие эпизоды не считаются.
+    """
+    seasons_data = get_seasons_data(kp_id)
+    if not seasons_data:
+        return None
+    is_airing, _ = get_series_airing_status(kp_id)
+    watched_set = set()
+    conn_w = get_db_connection()
+    cursor_w = None
+    try:
+        with db_lock:
+            cursor_w = conn_w.cursor()
+            cursor_w.execute('''
+                SELECT season_number, episode_number FROM series_tracking
+                WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+            ''', (chat_id, film_id, user_id))
+            for w_row in cursor_w.fetchall():
+                s_num = str(w_row.get('season_number') if isinstance(w_row, dict) else w_row[0])
+                e_num = str(w_row.get('episode_number') if isinstance(w_row, dict) else w_row[1])
+                watched_set.add((s_num, e_num))
+    finally:
+        if cursor_w:
+            try:
+                cursor_w.close()
+            except Exception:
+                pass
+    now = datetime.now()
+    seasons_sorted = sorted(seasons_data, key=lambda s: int(s.get('number', 0)) if str(s.get('number', '')).isdigit() else 0)
+    for season in seasons_sorted:
+        season_num = str(season.get('number', ''))
+        episodes = sorted(season.get('episodes', []), key=lambda e: int(e.get('episodeNumber', 0)) if str(e.get('episodeNumber', '')).isdigit() else 0)
+        for ep in episodes:
+            ep_num = str(ep.get('episodeNumber', ''))
+            should_count = False
+            if is_airing:
+                release_str = ep.get('releaseDate', '')
+                if release_str and release_str != '—':
+                    try:
+                        for fmt in ['%Y-%m-%d', '%d.%m.%Y', '%Y-%m-%dT%H:%M:%S']:
+                            try:
+                                release_date = datetime.strptime(release_str.split('T')[0], fmt)
+                                if release_date <= now:
+                                    should_count = True
+                                break
+                            except Exception:
+                                continue
+                    except Exception:
+                        pass
+            else:
+                should_count = True
+            if should_count and (season_num, ep_num) not in watched_set:
+                return (season_num, ep_num)
+    return None
+
+
 def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=None, message_thread_id=None, bot=None):
     """Показывает страницу эпизодов сезона с пагинацией.
 
