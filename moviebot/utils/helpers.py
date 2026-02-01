@@ -129,7 +129,10 @@ def maybe_send_series_limit_message(bot, chat_id, user_id, message_thread_id=Non
     """
     Если в чате ровно 4 сериала — отправить сообщение о лимите с кнопками подписок.
     Вызывать после добавления сериала (ensure_movie_in_database вернул was_inserted=True).
+    Не отправлять, если у пользователя уже есть подписка PRO.
     """
+    if has_pro_access(chat_id, user_id):
+        return
     from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
     from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
     conn = get_db_connection()
@@ -251,7 +254,9 @@ def has_ticket_features_access(chat_id, user_id):
 
 
 def maybe_send_ticket_limit_message(bot, chat_id, user_id, message_thread_id=None):
-    """Сообщение о лимите билетов с кнопками тарифов."""
+    """Сообщение о лимите билетов с кнопками тарифов. Не отправлять, если у пользователя уже есть подписка PRO."""
+    if has_pro_access(chat_id, user_id):
+        return
     text = (
         "Вы уже запланировали 3 похода в кино с билетами — круто! 🎟️\n\n"
         "Полный доступ к напоминаниям и билетам для всех планов — по подписке. Продолжить?"
