@@ -1747,8 +1747,12 @@ def create_web_app(bot):
             rated = False
             has_unwatched_before = False
             user_id = request.args.get('user_id', type=int)
+            # В личных чатах Telegram chat_id == user_id; если расширение не передало user_id — подставляем chat_id
+            if user_id is None and chat_id and int(chat_id) > 0:
+                user_id = int(chat_id)
+                logger.info(f"[EXTENSION API] user_id не передан, используем chat_id для личного чата: user_id={user_id}")
             
-            logger.info(f"[EXTENSION API] Проверка наличия в БД: chat_id={chat_id}, kp_id={kp_id}")
+            logger.info(f"[EXTENSION API] Проверка наличия в БД: chat_id={chat_id}, kp_id={kp_id}, user_id={user_id}")
             
             current_episode_watched = False
             next_unwatched_season = None
@@ -1796,8 +1800,19 @@ def create_web_app(bot):
                 if is_series and user_id:
                     current_season = request.args.get('season', type=int)
                     current_episode = request.args.get('episode', type=int)
-                    
-                    if current_season and current_episode:
+                    # Поддержка строковых season/episode из query (расширение может передать как строки)
+                    if current_season is None and request.args.get('season'):
+                        try:
+                            current_season = int(request.args.get('season'))
+                        except (ValueError, TypeError):
+                            pass
+                    if current_episode is None and request.args.get('episode'):
+                        try:
+                            current_episode = int(request.args.get('episode'))
+                        except (ValueError, TypeError):
+                            pass
+                    logger.info(f"[EXTENSION API] Серии: season={current_season}, episode={current_episode} (film_id={film_id}, user_id={user_id})")
+                    if current_season is not None and current_episode is not None:
                         try:
                             with db_lock:
                                 cursor.execute("""
@@ -1807,6 +1822,7 @@ def create_web_app(bot):
                                 """, (chat_id, film_id, user_id, current_season, current_episode))
                                 cur_ep_row = cursor.fetchone()
                             current_episode_watched = cur_ep_row is not None
+                            logger.info(f"[EXTENSION API] current_episode_watched={current_episode_watched} (s{current_season}e{current_episode})")
                         except Exception as unw_err:
                             logger.warning(f"[EXTENSION API] Ошибка проверки current_episode_watched: {unw_err}")
                         
