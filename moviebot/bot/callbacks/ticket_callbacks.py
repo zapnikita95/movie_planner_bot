@@ -10,14 +10,6 @@ import logging
 logger = logging.getLogger(__name__)
 
 # 1. Основной хэндлер — нажатие "Добавить билеты" после планирования
-@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("series_mark_episode:"))
-def series_mark_episode_early_callback(call):
-    """Ранний обработчик «Отметить серию» — ticket_callbacks грузится первым, чтобы callback не терялся."""
-    logger.info(f"[SERIES MARK EPISODE EARLY] Вызван callback: {call.data}")
-    from moviebot.bot.callbacks.series_callbacks import _handle_series_mark_episode
-    _handle_series_mark_episode(call)
-
-
 @bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("add_ticket:"))
 def add_ticket_from_plan_callback(call):
     logger.info(f"[TICKET CALLBACK] 🔥 add_ticket сработал: data='{call.data}', user_id={call.from_user.id}, chat_id={call.message.chat.id}")

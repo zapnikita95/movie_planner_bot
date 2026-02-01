@@ -1026,8 +1026,8 @@ def series_subscribe_callback(call):
 
     @bot.callback_query_handler(func=lambda call: call.data.startswith("series_mark_episode:"))
     def series_mark_episode_callback(call):
-        """Кнопка «Отметить серию» — fallback если ticket_callbacks не сработал."""
-        logger.info(f"[SERIES MARK EPISODE] Вызван fallback callback: {call.data}")
+        """Кнопка «Отметить серию» — показать подтверждение для последней непросмотренной серии."""
+        logger.info(f"[SERIES MARK EPISODE] Вызван callback: {call.data}")
         _handle_series_mark_episode(call)
 
     @bot.callback_query_handler(func=lambda call: call.data == "series_mark_ep_no")
