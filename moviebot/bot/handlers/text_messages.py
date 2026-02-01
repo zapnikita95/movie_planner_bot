@@ -1177,6 +1177,11 @@ def expect_text_from_user(user_id: int, chat_id: int, expected_for: str = 'searc
 # ==================== ОБЩАЯ ФУНКЦИЯ ДЛЯ ОБРАБОТКИ ПОИСКА ====================
 def process_search_query(message, query, reply_to_message=None):
     """Единая логика поиска и отправки результатов. Поддерживает фильмы, сериалы, людей."""
+    # /search не должен быть частью запроса
+    query = re.sub(r'^/search(@\w+)?\s*', '', (query or '').strip(), flags=re.IGNORECASE).strip()
+    if not query:
+        bot.reply_to(message, "❌ Введите поисковый запрос.") if reply_to_message else bot.send_message(message.chat.id, "❌ Введите поисковый запрос.")
+        return
     from moviebot.bot.handlers.series import search_films_with_type
     from moviebot.api.kinopoisk_api import search_persons
     

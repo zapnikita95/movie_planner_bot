@@ -7,6 +7,7 @@ from moviebot.bot.bot_init import bot
 - Обработки ошибок с кнопками
 """
 import logging
+import re
 import sys
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
@@ -966,6 +967,10 @@ def handle_search(message):
         
         try:
             query = text.strip()
+            # /search не должен быть частью запроса — убираем в начале
+            query = re.sub(r'^/search(@\w+)?\s*', '', query, flags=re.IGNORECASE).strip()
+            if not query:
+                return
             search_type = state.get('search_type', 'mixed')
             
             logger.info(f"[SEARCH HANDLER] Поиск по запросу '{query}' от пользователя {user_id}, тип: {search_type}")

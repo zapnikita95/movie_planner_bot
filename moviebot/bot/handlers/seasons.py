@@ -1122,49 +1122,63 @@ def handle_seasons_command(message):
         bot=bot
     )
 
-def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: int = 10):
-    """Возвращает страницу сериалов пользователя с пагинацией"""
+def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: int = 5):
+    """Возвращает страницу сериалов пользователя с пагинацией. Грузит ТОЛЬКО данные текущей страницы из БД."""
     items = []
     total_count = 0
     total_pages = 1
 
     conn_local = get_db_connection()
-    cursor_local = get_db_cursor()
+    cursor_local = conn_local.cursor()
 
     try:
         with db_lock:
-            # Используем локальное соединение
-            # Основной большой запрос
+            # Сначала считаем общее количество непросмотренных сериалов
             cursor_local.execute("""
-                SELECT 
-                    m.id AS film_id,
-                    m.kp_id,
-                    m.title,
-                    m.year,
-                    COALESCE(m.poster_url, '') AS poster_url,
-                    m.link,
-                    COALESCE(m.is_ongoing, FALSE) AS is_ongoing,
-                    COALESCE(m.seasons_count, 0) AS seasons_count,
-                    m.next_episode,
-                    m.last_api_update,
-                    COUNT(st.id) AS watched_episodes_count,
-                    BOOL_OR(ss.subscribed = TRUE) AS has_subscription,
-                    (COALESCE(m.watched, 0) = 1) AS all_watched
+                SELECT COUNT(*) AS cnt
                 FROM movies m
-                LEFT JOIN series_tracking st 
-                    ON st.film_id = m.id 
-                    AND st.chat_id = %s 
-                    AND st.user_id = %s
-                    AND st.watched = TRUE
-                LEFT JOIN series_subscriptions ss 
-                    ON ss.film_id = m.id 
-                    AND ss.chat_id = %s 
-                    AND ss.user_id = %s
-                    AND ss.subscribed = TRUE
-                WHERE m.chat_id = %s AND m.is_series = 1
-                GROUP BY m.id
-                ORDER BY m.id DESC
-            """, (chat_id, user_id, chat_id, user_id, chat_id))
+                WHERE m.chat_id = %s AND m.is_series = 1 AND (COALESCE(m.watched, 0) = 0)
+            """, (chat_id,))
+            total_row = cursor_local.fetchone()
+            total_count = total_row.get('cnt', 0) if isinstance(total_row, dict) else (total_row[0] if total_row else 0)
+            total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
+            offset = (page - 1) * page_size
+
+            # Загружаем ТОЛЬКО сериалы текущей страницы — с сортировкой и LIMIT/OFFSET в SQL
+            cursor_local.execute("""
+                WITH ranked AS (
+                    SELECT 
+                        m.id AS film_id,
+                        m.kp_id,
+                        m.title,
+                        m.year,
+                        COALESCE(m.poster_url, '') AS poster_url,
+                        m.link,
+                        COALESCE(m.is_ongoing, FALSE) AS is_ongoing,
+                        COALESCE(m.seasons_count, 0) AS seasons_count,
+                        m.next_episode,
+                        m.last_api_update,
+                        COUNT(st.id) AS watched_episodes_count,
+                        BOOL_OR(ss.subscribed = TRUE) AS has_subscription,
+                        (COALESCE(m.watched, 0) = 1) AS all_watched
+                    FROM movies m
+                    LEFT JOIN series_tracking st 
+                        ON st.film_id = m.id AND st.chat_id = %s AND st.user_id = %s AND st.watched = TRUE
+                    LEFT JOIN series_subscriptions ss 
+                        ON ss.film_id = m.id AND ss.chat_id = %s AND ss.user_id = %s AND ss.subscribed = TRUE
+                    WHERE m.chat_id = %s AND m.is_series = 1 AND (COALESCE(m.watched, 0) = 0)
+                    GROUP BY m.id
+                )
+                SELECT * FROM ranked
+                ORDER BY
+                    CASE WHEN watched_episodes_count > 0 THEN 0 ELSE 1 END,
+                    CASE WHEN is_ongoing AND has_subscription THEN 0
+                         WHEN is_ongoing THEN 1
+                         WHEN has_subscription THEN 2
+                         ELSE 3 END,
+                    film_id DESC
+                LIMIT %s OFFSET %s
+            """, (chat_id, user_id, chat_id, user_id, chat_id, page_size, offset))
 
             rows = cursor_local.fetchall()
 
@@ -1207,56 +1221,6 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
                     'has_subscription': has_subscription,
                     'all_watched': all_watched,
                 })
-            
-            # Сортировка по приоритету: ВСЕ начатые сериалы выше не начатых
-            # Среди начатых: с подпиской выше без подписки, выходящие выше не выходящих
-            # Среди не начатых: с подпиской выше без подписки, выходящие выше не выходящих
-            def get_sort_priority(item):
-                is_ongoing = item['is_ongoing'] or False
-                has_subscription = item['has_subscription'] or False
-                watched_count = item['watched_count'] or 0
-                is_started = watched_count > 0  # Начатый = watched_count > 0
-                
-                # НАЧАТЫЕ сериалы (приоритет 1-4) - ВСЕГДА выше не начатых
-                if is_started:
-                    if is_ongoing and has_subscription:
-                        return 1  # Начатые выходящие с подпиской
-                    elif is_ongoing and not has_subscription:
-                        return 2  # Начатые выходящие без подписки
-                    elif not is_ongoing and has_subscription:
-                        return 3  # Начатые не выходящие с подпиской
-                    else:
-                        return 4  # Начатые не выходящие без подписки
-                # НЕ НАЧАТЫЕ сериалы (приоритет 5-8) - ВСЕГДА ниже начатых
-                else:
-                    if is_ongoing and has_subscription:
-                        return 5  # Не начатые выходящие с подпиской
-                    elif is_ongoing and not has_subscription:
-                        return 6  # Не начатые выходящие без подписки
-                    elif not is_ongoing and has_subscription:
-                        return 7  # Не начатые не выходящие с подпиской
-                    else:
-                        return 8  # Не начатые не выходящие без подписки
-            
-            # Разделяем на непросмотренные и просмотренные
-            unwatched_items = [item for item in items if not item.get('all_watched', False)]
-            watched_items = [item for item in items if item.get('all_watched', False)]
-            
-            # Сортируем непросмотренные по приоритету
-            unwatched_items.sort(key=get_sort_priority)
-            # Просмотренные сортируем по названию
-            watched_items.sort(key=lambda x: x.get('title', ''))
-            
-            # Пагинация только для непросмотренных
-            unwatched_count = len(unwatched_items)
-            unwatched_total_pages = math.ceil(unwatched_count / page_size) if unwatched_count > 0 else 1
-            unwatched_offset = (page - 1) * page_size
-            unwatched_page_items = unwatched_items[unwatched_offset:unwatched_offset + page_size]
-            
-            # Просмотренные сериалы НЕ показываются в общем списке - только в разделе "Просмотренные"
-            items = unwatched_page_items
-            total_count = unwatched_count
-            total_pages = unwatched_total_pages
 
     except psycopg2.InterfaceError as e:
         logger.error(f"[GET_USER_SERIES_PAGE] Cursor error: {e}")
@@ -1283,9 +1247,7 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
         except:
             pass
 
-    # Вычисляем unwatched_count если его еще нет (для случая ошибок)
-    if 'unwatched_count' not in locals():
-        unwatched_count = len([i for i in items if not i.get('all_watched', False)]) if items else 0
+    unwatched_count = total_count  # мы считаем только непросмотренные
     
     return {
         'items': items,
