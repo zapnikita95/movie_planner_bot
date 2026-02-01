@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Movie Planner",
   "description": "Добавляй фильмы в базу Movie Planner. Автоопределение фильма и сериала на странице просмотра российских стримингов.",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "author": "Nikita Zaporozhets",
   "permissions": [
     "storage",
@@ -15,6 +15,10 @@
     "*://*.kinopoisk.ru/*",
     "*://*.imdb.com/*",
     "*://letterboxd.com/*",
+    "*://myshows.me/*",
+    "*://*.myshows.me/*",
+    "*://ru.kinorium.com/*",
+    "*://*.kinorium.com/*",
     "*://*.afisha.yandex.ru/*",
     "*://*.afisha.ru/*",
     "*://*.kinoafisha.info/*",
@@ -124,6 +128,16 @@
     {
       "matches": ["*://letterboxd.com/film/*"],
       "js": ["content/content-letterboxd.js"],
+      "run_at": "document_end"
+    },
+    {
+      "matches": ["*://myshows.me/*", "*://*.myshows.me/*"],
+      "js": ["content/content-myshows.js"],
+      "run_at": "document_end"
+    },
+    {
+      "matches": ["*://ru.kinorium.com/*", "*://*.kinorium.com/*"],
+      "js": ["content/content-kinorium.js"],
       "run_at": "document_end"
     },
     {

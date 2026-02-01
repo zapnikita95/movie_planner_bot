@@ -472,6 +472,68 @@ async function detectAndLoadFilm(url, urlChanged = true) {
       return;
     }
 
+    // MyShows.me — kp_id из ссылки или fallback title + year
+    if (url.includes('myshows.me')) {
+      try {
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tabs && tabs[0]) {
+          const info = await new Promise((resolve) => {
+            chrome.tabs.sendMessage(tabs[0].id, { action: 'get_myshows_film_info' }, (r) => {
+              if (chrome.runtime.lastError) {
+                console.log('[POPUP] myshows content script:', chrome.runtime.lastError.message);
+                resolve(null);
+              } else resolve(r || null);
+            });
+          });
+          if (info && (info.kpId || info.title)) {
+            if (info.kpId) {
+              await loadFilmByKpId(info.kpId);
+            } else {
+              const keyword = [info.title, info.year].filter(Boolean).join(' ');
+              await loadFilmByKeyword(keyword, info.year || null, 'myshows', info.isSeries);
+            }
+            return;
+          }
+        }
+      } catch (e) {
+        console.error('Ошибка myshows:', e);
+      }
+      const titleEl = document.getElementById('film-title');
+      const yearEl = document.getElementById('film-year');
+      if (titleEl) titleEl.textContent = 'Не удалось определить фильм';
+      if (yearEl) yearEl.textContent = 'Откройте страницу сериала или фильма на myshows.me';
+      return;
+    }
+
+    // ru.kinorium.com — title + year, поиск как на letterboxd
+    if (url.includes('kinorium.com')) {
+      try {
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tabs && tabs[0]) {
+          const info = await new Promise((resolve) => {
+            chrome.tabs.sendMessage(tabs[0].id, { action: 'get_kinorium_film_info' }, (r) => {
+              if (chrome.runtime.lastError) {
+                console.log('[POPUP] kinorium content script:', chrome.runtime.lastError.message);
+                resolve(null);
+              } else resolve(r || null);
+            });
+          });
+          if (info && info.title) {
+            const keyword = [info.title, info.year].filter(Boolean).join(' ');
+            await loadFilmByKeyword(keyword, info.year || null, 'kinorium', info.isSeries);
+            return;
+          }
+        }
+      } catch (e) {
+        console.error('Ошибка kinorium:', e);
+      }
+      const titleEl = document.getElementById('film-title');
+      const yearEl = document.getElementById('film-year');
+      if (titleEl) titleEl.textContent = 'Не удалось определить фильм';
+      if (yearEl) yearEl.textContent = 'Откройте страницу фильма или сериала на ru.kinorium.com';
+      return;
+    }
+
     const streamingHosts = ['tvoe.live', 'ivi.ru', 'okko.tv', 'kinopoisk.ru', 'hd.kinopoisk.ru', 'premier.one', 'wink.ru', 'start.ru', 'amediateka.ru', 'rezka.ag', 'rezka.ad', 'hdrezka', 'lordfilm', 'allserial', 'boxserial'];
     let hostname = '';
     try {
@@ -820,14 +882,17 @@ async function tryFallbackSearch(imdbId, source) {
   }
 }
 
-async function loadFilmByKeyword(keyword, year, source) {
+async function loadFilmByKeyword(keyword, year, source, isSeries = null) {
   try {
     const titleEl = document.getElementById('film-title');
     const yearEl = document.getElementById('film-year');
     if (titleEl) titleEl.textContent = 'Ищем фильм по названию...';
     if (yearEl) yearEl.textContent = '';
     
-    const response = await fetch(`${API_BASE_URL}/api/extension/search-film-by-keyword?keyword=${encodeURIComponent(keyword)}&year=${year}`);
+    let searchUrl = `${API_BASE_URL}/api/extension/search-film-by-keyword?keyword=${encodeURIComponent(keyword)}${year ? `&year=${year}` : ''}`;
+    if (isSeries === true) searchUrl += '&type=TV_SERIES';
+    else if (isSeries === false) searchUrl += '&type=FILM';
+    const response = await fetch(searchUrl);
     
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`);
