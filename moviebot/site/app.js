@@ -415,7 +415,6 @@
           <div class="film-info">
             <div class="film-title">${escapeHtml(m.title)}${year}${ratingStr}</div>
             ${descHtml}
-            <div class="film-status">Статус: В базе</div>
           </div>
         </a>
         <div class="film-buttons">

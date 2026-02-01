@@ -3077,7 +3077,8 @@ def create_web_app(bot):
                         COALESCE(m.is_ongoing, FALSE) AS is_ongoing,
                         COUNT(st.id) AS watched_episodes_count,
                         BOOL_OR(ss.subscribed = TRUE) AS has_subscription,
-                        m.online_link
+                        m.online_link,
+                        MAX(st.id) AS last_activity_id
                     FROM movies m
                     LEFT JOIN series_tracking st 
                         ON st.film_id = m.id AND st.chat_id = %s AND st.user_id = %s AND st.watched = TRUE
@@ -3104,20 +3105,33 @@ def create_web_app(bot):
                         with db_lock:
                             cur.execute("""
                                 SELECT season_number, episode_number FROM series_tracking
-                                WHERE chat_id = %s AND film_id = %s AND watched = TRUE
+                                WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
                                 ORDER BY season_number DESC, episode_number DESC LIMIT 1
-                            """, (chat_id, film_id))
+                            """, (chat_id, film_id, user_id_for_series))
                             last = cur.fetchone()
+                            cur.execute("""
+                                SELECT COUNT(*), MAX(id) FROM series_tracking
+                                WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                            """, (chat_id, film_id, user_id_for_series))
+                            wc_row = cur.fetchone()
                         progress = None
                         if last:
                             s = last.get('season_number') if isinstance(last, dict) else last[0]
                             e = last.get('episode_number') if isinstance(last, dict) else last[1]
                             progress = f"S{s} • E{e}"
+                        watched_count = 0
+                        last_activity_id = None
+                        if wc_row:
+                            watched_count = int((wc_row[0] if isinstance(wc_row, (list, tuple)) else wc_row.get('count', 0)) or 0)
+                            last_activity_id = (wc_row[1] if isinstance(wc_row, (list, tuple)) else wc_row.get('max')) or None
                         online_link = (r.get('online_link') if isinstance(r, dict) else (r[3] if len(r) > 3 else None)) or ''
                         series_list.append({
                             "film_id": film_id, "kp_id": kp_id, "title": title, "progress": progress,
-                            "online_link": (online_link or '').strip() or None
+                            "online_link": (online_link or '').strip() or None,
+                            "watched_count": int(watched_count or 0),
+                            "last_activity_id": int(last_activity_id) if last_activity_id is not None else None,
                         })
+                    series_list.sort(key=lambda item: (not (item.get("watched_count") or 0), -(item.get("last_activity_id") or 0)))
                     return jsonify({"success": True, "items": series_list})
                 raise
         series_list = []
@@ -3141,6 +3155,7 @@ def create_web_app(bot):
                 e = last.get('episode_number') if isinstance(last, dict) else last[1]
                 progress = f"S{s} • E{e}"
             online_link_raw = r.get('online_link') if isinstance(r, dict) else (r[6] if len(r) > 6 else None)
+            last_activity_id = r.get('last_activity_id') if isinstance(r, dict) else (r[7] if len(r) > 7 else None)
             series_list.append({
                 "film_id": film_id,
                 "kp_id": kp_id,
@@ -3150,22 +3165,14 @@ def create_web_app(bot):
                 "watched_count": int(watched_count or 0),
                 "has_subscription": has_subscription,
                 "online_link": (online_link_raw or '').strip() or None,
+                "last_activity_id": int(last_activity_id) if last_activity_id is not None else None,
             })
-        def get_sort_priority(item):
-            io = item.get('is_ongoing') or False
-            hs = item.get('has_subscription') or False
+        def get_sort_key(item):
             wc = item.get('watched_count') or 0
             started = wc > 0
-            if started:
-                if io and hs: return 1
-                if io and not hs: return 2
-                if not io and hs: return 3
-                return 4
-            if io and hs: return 5
-            if io and not hs: return 6
-            if not io and hs: return 7
-            return 8
-        series_list.sort(key=get_sort_priority)
+            last_id = item.get('last_activity_id') or 0
+            return (not started, -last_id)
+        series_list.sort(key=get_sort_key)
         return jsonify({"success": True, "items": series_list})
 
     @app.route('/api/site/ratings', methods=['GET', 'OPTIONS'])
