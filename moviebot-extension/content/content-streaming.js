@@ -1770,11 +1770,7 @@
             markCurrentBtn.addEventListener('click', () => handleMarkEpisode(targetInfo, filmData, false));
             container.appendChild(markCurrentBtn);
             
-            const isTargetCurrentPage = (targetSeason === info.season && targetEpisode === info.episode);
-            const hasUnwatchedBefore = filmData.has_unwatched_before &&
-              (targetSeason > 1 || targetEpisode > 1) &&
-              !(isTargetCurrentPage && !filmData.current_episode_watched);
-            
+            const hasUnwatchedBefore = filmData.has_unwatched_before && (targetSeason > 1 || targetEpisode > 1);
             if (hasUnwatchedBefore) {
               const markAllBtn = document.createElement('button');
               markAllBtn.textContent = '✅ Отметить все предыдущие';
@@ -1884,11 +1880,7 @@
             markCurrentBtn.addEventListener('click', () => handleMarkEpisode(targetInfo, filmData, false));
             container.appendChild(markCurrentBtn);
             
-            const isTargetCurrentPage = (targetSeason === info.season && targetEpisode === info.episode);
-            const hasUnwatchedBefore = filmData.has_unwatched_before &&
-              (targetSeason > 1 || targetEpisode > 1) &&
-              !(isTargetCurrentPage && !filmData.current_episode_watched);
-            
+            const hasUnwatchedBefore = filmData.has_unwatched_before && (targetSeason > 1 || targetEpisode > 1);
             if (hasUnwatchedBefore) {
               const markAllBtn = document.createElement('button');
               markAllBtn.textContent = '✅ Отметить все предыдущие';
@@ -2156,6 +2148,38 @@
           const result = await response.json();
           if (result.success) {
             showToast('✅ Серия отмечена!');
+            try {
+              const refreshParams = `kp_id=${filmData.kp_id}&chat_id=${data.linked_chat_id}&user_id=${data.linked_user_id}&season=${info.season || ''}&episode=${info.episode || ''}&_=${Date.now()}`;
+              const refreshRes = await apiRequest('GET', `/api/extension/film-info?${refreshParams}`);
+              if (refreshRes.ok) {
+                const refreshResult = await refreshRes.json();
+                if (refreshResult.success) {
+                  let nextS = refreshResult.next_unwatched_season;
+                  let nextE = refreshResult.next_unwatched_episode;
+                  if (refreshResult.current_episode_watched && (nextS == null || nextE == null) && info.season != null && info.episode != null) {
+                    nextS = info.season;
+                    nextE = (info.episode || 0) + 1;
+                  }
+                  const updatedFilmData = {
+                    kp_id: filmData.kp_id,
+                    film_id: (refreshResult.film_id !== undefined && refreshResult.film_id !== null) ? refreshResult.film_id : filmData.film_id,
+                    watched: refreshResult.watched || false,
+                    rated: refreshResult.rated || false,
+                    has_unwatched_before: refreshResult.has_unwatched_before || false,
+                    current_episode_watched: refreshResult.current_episode_watched || false,
+                    next_unwatched_season: nextS,
+                    next_unwatched_episode: nextE,
+                    is_series: !!refreshResult.film?.is_series,
+                    has_series_features_access: !!refreshResult.has_series_features_access
+                  };
+                  currentFilmData = updatedFilmData;
+                  await renderButtons(info, updatedFilmData);
+                  return;
+                }
+              }
+            } catch (refreshErr) {
+              if (isContextInvalidated(refreshErr)) { removeOverlay(); return; }
+            }
             removeOverlay();
           } else {
             const errMsg = result.message || result.error || 'Ошибка';
@@ -2431,20 +2455,15 @@
       if (kpId) {
         // Нашли в кэше - получаем данные о фильме
         try {
-          let url = `${API_BASE_URL}/api/extension/film-info?kp_id=${kpId}&chat_id=${data.linked_chat_id}&user_id=${data.linked_user_id}`;
-          if (info.season && info.episode) {
-            url += `&season=${info.season}&episode=${info.episode}`;
-          }
+          console.log('[STREAMING] Запрос film-info:', { kpId });
+          const filmInfoParams = `kp_id=${kpId}&chat_id=${data.linked_chat_id}&user_id=${data.linked_user_id}${info.season && info.episode ? `&season=${info.season}&episode=${info.episode}` : ''}&_=${Date.now()}`;
+          const response = await apiRequest('GET', `/api/extension/film-info?${filmInfoParams}`);
           
-          console.log('[STREAMING] Запрос film-info из кэша:', { kpId, url });
-          
-          const response = await apiRequest('GET', `/api/extension/film-info?kp_id=${kpId}&chat_id=${data.linked_chat_id}&user_id=${data.linked_user_id}${info.season && info.episode ? `&season=${info.season}&episode=${info.episode}` : ''}`);
-          
-          console.log('[STREAMING] Ответ film-info из кэша:', { status: response.status, ok: response.ok });
+          console.log('[STREAMING] Ответ film-info:', { status: response.status, ok: response.ok });
           
           if (response.ok) {
             const result = await response.json();
-            console.log('[STREAMING] Результат film-info из кэша:', result);
+            console.log('[STREAMING] Результат film-info:', result);
             if (result.success) {
               // Проверяем, совпадает ли название из API с названием на странице
               const apiTitle = result.film?.title || result.film?.nameRu || result.film?.name || result.film?.nameOriginal || '';
@@ -2494,7 +2513,8 @@
             console.log('[STREAMING] Повторная попытка запроса film-info для kp_id:', kpId);
             try {
               // Повторный запрос с таймаутом
-              const retryResponse = await apiRequest('GET', `/api/extension/film-info?kp_id=${kpId}&chat_id=${data.linked_chat_id}&user_id=${data.linked_user_id}${info.season && info.episode ? `&season=${info.season}&episode=${info.episode}` : ''}`);
+              const retryParams = `kp_id=${kpId}&chat_id=${data.linked_chat_id}&user_id=${data.linked_user_id}${info.season && info.episode ? `&season=${info.season}&episode=${info.episode}` : ''}&_=${Date.now()}`;
+              const retryResponse = await apiRequest('GET', `/api/extension/film-info?${retryParams}`);
               if (retryResponse.ok) {
                 const retryResult = await retryResponse.json();
                 if (retryResult.success) {
@@ -2630,7 +2650,8 @@
           kpId = searchResult.kp_id;
           await saveToLocalCache(info, kpId);
           try {
-            const filmResponse = await apiRequest('GET', `/api/extension/film-info?kp_id=${kpId}&chat_id=${data.linked_chat_id}&user_id=${data.linked_user_id}${info.season && info.episode ? `&season=${info.season}&episode=${info.episode}` : ''}`);
+            const filmInfoParams = `kp_id=${kpId}&chat_id=${data.linked_chat_id}&user_id=${data.linked_user_id}${info.season && info.episode ? `&season=${info.season}&episode=${info.episode}` : ''}&_=${Date.now()}`;
+            const filmResponse = await apiRequest('GET', `/api/extension/film-info?${filmInfoParams}`);
             const fr = filmResponse.ok ? await filmResponse.json() : null;
             filmData = buildFilmData(searchResult, fr?.success ? fr : null);
           } catch (e) {

@@ -991,6 +991,7 @@ async function loadFromStreamingPage(info) {
 
     let filmUrl = `${API_BASE_URL}/api/extension/film-info?kp_id=${searchJson.kp_id}&chat_id=${chatId}&user_id=${userId}`;
     if (info.season != null && info.episode != null) filmUrl += `&season=${info.season}&episode=${info.episode}`;
+    filmUrl += `&_=${Date.now()}`;
     console.log('[POPUP] Запрос film-info:', filmUrl);
     let filmRes;
     try {
