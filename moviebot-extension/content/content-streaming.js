@@ -2148,38 +2148,6 @@
           const result = await response.json();
           if (result.success) {
             showToast('✅ Серия отмечена!');
-            try {
-              const refreshParams = `kp_id=${filmData.kp_id}&chat_id=${data.linked_chat_id}&user_id=${data.linked_user_id}&season=${info.season || ''}&episode=${info.episode || ''}&_=${Date.now()}`;
-              const refreshRes = await apiRequest('GET', `/api/extension/film-info?${refreshParams}`);
-              if (refreshRes.ok) {
-                const refreshResult = await refreshRes.json();
-                if (refreshResult.success) {
-                  let nextS = refreshResult.next_unwatched_season;
-                  let nextE = refreshResult.next_unwatched_episode;
-                  if (refreshResult.current_episode_watched && (nextS == null || nextE == null) && info.season != null && info.episode != null) {
-                    nextS = info.season;
-                    nextE = (info.episode || 0) + 1;
-                  }
-                  const updatedFilmData = {
-                    kp_id: filmData.kp_id,
-                    film_id: (refreshResult.film_id !== undefined && refreshResult.film_id !== null) ? refreshResult.film_id : filmData.film_id,
-                    watched: refreshResult.watched || false,
-                    rated: refreshResult.rated || false,
-                    has_unwatched_before: refreshResult.has_unwatched_before || false,
-                    current_episode_watched: refreshResult.current_episode_watched || false,
-                    next_unwatched_season: nextS,
-                    next_unwatched_episode: nextE,
-                    is_series: !!refreshResult.film?.is_series,
-                    has_series_features_access: !!refreshResult.has_series_features_access
-                  };
-                  currentFilmData = updatedFilmData;
-                  await renderButtons(info, updatedFilmData);
-                  return;
-                }
-              }
-            } catch (refreshErr) {
-              if (isContextInvalidated(refreshErr)) { removeOverlay(); return; }
-            }
             removeOverlay();
           } else {
             const errMsg = result.message || result.error || 'Ошибка';
