@@ -118,6 +118,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     await chrome.storage.local.set({ has_tickets_access: ticketsAccess });
     hasTicketsAccess = ticketsAccess;
     
+    // Очищаем состояние предыдущего открытия ДО загрузки фильма (иначе сброс затрёт кнопки после loadCurrentTabFilm)
+    resetExtensionState();
+    
     // Получаем текущую активную вкладку и автоматически загружаем фильм
     // ВАЖНО: Всегда получаем свежий URL при каждом открытии popup (для SPA)
     await loadCurrentTabFilm();
@@ -213,9 +216,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     searchSection.classList.add('hidden');
     searchSection.style.display = 'none';
   }
-  
-  // Очищаем состояние при каждом открытии
-  resetExtensionState();
   
   // Обработчик поиска (добавляем обработчики для поиска)
   const searchBtn = document.getElementById('search-btn');
@@ -889,9 +889,8 @@ async function loadFilmByKeyword(keyword, year, source, isSeries = null) {
     if (titleEl) titleEl.textContent = 'Ищем фильм по названию...';
     if (yearEl) yearEl.textContent = '';
     
-    let searchUrl = `${API_BASE_URL}/api/extension/search-film-by-keyword?keyword=${encodeURIComponent(keyword)}${year ? `&year=${year}` : ''}`;
-    if (isSeries === true) searchUrl += '&type=TV_SERIES';
-    else if (isSeries === false) searchUrl += '&type=FILM';
+    // Бэкенд может не поддерживать type — без него поиск не даёт 404
+    const searchUrl = `${API_BASE_URL}/api/extension/search-film-by-keyword?keyword=${encodeURIComponent(keyword)}${year ? `&year=${year}` : ''}`;
     const response = await fetch(searchUrl);
     
     if (!response.ok) {
