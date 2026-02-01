@@ -35,7 +35,7 @@ SEASONS_PER_PAGE = 10
 
 
 def _handle_series_mark_episode(call):
-    """Общая логика «Отметить серию» — вызывается из ticket_callbacks (ранний) и series_mark_episode_callback."""
+    """Общая логика «Отметить серию»."""
     try:
         parts = call.data.split(":")
         if len(parts) < 2:
@@ -80,6 +80,14 @@ def _handle_series_mark_episode(call):
             bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
         except Exception:
             pass
+
+
+# Регистрируем на уровне модуля — при импорте, до register_series_callbacks.
+# Иначе callback теряется (хендлер регистрируется слишком поздно и не получает callback).
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("series_mark_episode:"))
+def _series_mark_episode_module_handler(call):
+    logger.info(f"[SERIES MARK EPISODE] callback получен: {call.data}")
+    _handle_series_mark_episode(call)
 
 
 def register_series_callbacks(bot):
@@ -1023,12 +1031,6 @@ def series_subscribe_callback(call):
             )
         except Exception as e:
             logger.error(f"[SERIES LOCKED] Ошибка: {e}", exc_info=True)
-
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("series_mark_episode:"))
-    def series_mark_episode_callback(call):
-        """Кнопка «Отметить серию» — показать подтверждение для последней непросмотренной серии."""
-        logger.info(f"[SERIES MARK EPISODE] Вызван callback: {call.data}")
-        _handle_series_mark_episode(call)
 
     @bot.callback_query_handler(func=lambda call: call.data == "series_mark_ep_no")
     def series_mark_ep_no_callback(call):
