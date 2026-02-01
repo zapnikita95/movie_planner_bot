@@ -3075,27 +3075,49 @@ def create_web_app(bot):
         conn = get_db_connection()
         cur = get_db_cursor()
         user_id_for_series = chat_id
+        is_group = isinstance(chat_id, (int, float)) and chat_id < 0
         with db_lock:
             try:
-                cur.execute("""
-                    SELECT 
-                        m.id AS film_id,
-                        m.kp_id,
-                        m.title,
-                        COALESCE(m.is_ongoing, FALSE) AS is_ongoing,
-                        COUNT(st.id) AS watched_episodes_count,
-                        BOOL_OR(ss.subscribed = TRUE) AS has_subscription,
-                        m.online_link,
-                        MAX(st.id) AS last_activity_id
-                    FROM movies m
-                    LEFT JOIN series_tracking st 
-                        ON st.film_id = m.id AND st.chat_id = %s AND st.user_id = %s AND st.watched = TRUE
-                    LEFT JOIN series_subscriptions ss 
-                        ON ss.film_id = m.id AND ss.chat_id = %s AND ss.user_id = %s AND ss.subscribed = TRUE
-                    WHERE m.chat_id = %s AND m.is_series = 1
-                    GROUP BY m.id, m.kp_id, m.title, m.is_ongoing, m.online_link
-                    LIMIT 100
-                """, (chat_id, user_id_for_series, chat_id, user_id_for_series, chat_id))
+                if is_group:
+                    cur.execute("""
+                        SELECT 
+                            m.id AS film_id,
+                            m.kp_id,
+                            m.title,
+                            COALESCE(m.is_ongoing, FALSE) AS is_ongoing,
+                            COUNT(st.id) AS watched_episodes_count,
+                            BOOL_OR(ss.subscribed = TRUE) AS has_subscription,
+                            m.online_link,
+                            MAX(st.id) AS last_activity_id
+                        FROM movies m
+                        LEFT JOIN series_tracking st 
+                            ON st.film_id = m.id AND st.chat_id = %s AND st.watched = TRUE
+                        LEFT JOIN series_subscriptions ss 
+                            ON ss.film_id = m.id AND ss.chat_id = %s AND ss.subscribed = TRUE
+                        WHERE m.chat_id = %s AND m.is_series = 1
+                        GROUP BY m.id, m.kp_id, m.title, m.is_ongoing, m.online_link
+                        LIMIT 100
+                    """, (chat_id, chat_id, chat_id))
+                else:
+                    cur.execute("""
+                        SELECT 
+                            m.id AS film_id,
+                            m.kp_id,
+                            m.title,
+                            COALESCE(m.is_ongoing, FALSE) AS is_ongoing,
+                            COUNT(st.id) AS watched_episodes_count,
+                            BOOL_OR(ss.subscribed = TRUE) AS has_subscription,
+                            m.online_link,
+                            MAX(st.id) AS last_activity_id
+                        FROM movies m
+                        LEFT JOIN series_tracking st 
+                            ON st.film_id = m.id AND st.chat_id = %s AND st.user_id = %s AND st.watched = TRUE
+                        LEFT JOIN series_subscriptions ss 
+                            ON ss.film_id = m.id AND ss.chat_id = %s AND ss.user_id = %s AND ss.subscribed = TRUE
+                        WHERE m.chat_id = %s AND m.is_series = 1
+                        GROUP BY m.id, m.kp_id, m.title, m.is_ongoing, m.online_link
+                        LIMIT 100
+                    """, (chat_id, user_id_for_series, chat_id, user_id_for_series, chat_id))
                 rows = cur.fetchall()
             except Exception as e:
                 if 'is_ongoing' in str(e).lower() or 'column' in str(e).lower():
@@ -3106,6 +3128,8 @@ def create_web_app(bot):
                     """, (chat_id,))
                     rows = cur.fetchall()
                     series_list = []
+                    st_filter_user = "" if is_group else " AND user_id = %s"
+                    st_params_extra = () if is_group else (user_id_for_series,)
                     for r in rows:
                         film_id = r.get('id') if isinstance(r, dict) else r[0]
                         kp_id = str(r.get('kp_id') if isinstance(r, dict) else r[1])
@@ -3113,14 +3137,16 @@ def create_web_app(bot):
                         with db_lock:
                             cur.execute("""
                                 SELECT season_number, episode_number FROM series_tracking
-                                WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                                WHERE chat_id = %s AND film_id = %s AND watched = TRUE
+                                """ + st_filter_user + """
                                 ORDER BY season_number DESC, episode_number DESC LIMIT 1
-                            """, (chat_id, film_id, user_id_for_series))
+                            """, (chat_id, film_id) + st_params_extra)
                             last = cur.fetchone()
                             cur.execute("""
                                 SELECT COUNT(*), MAX(id) FROM series_tracking
-                                WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-                            """, (chat_id, film_id, user_id_for_series))
+                                WHERE chat_id = %s AND film_id = %s AND watched = TRUE
+                                """ + st_filter_user,
+                                (chat_id, film_id) + st_params_extra)
                             wc_row = cur.fetchone()
                         progress = None
                         if last:
