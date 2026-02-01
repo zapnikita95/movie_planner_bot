@@ -2717,7 +2717,10 @@ def create_web_app(bot):
                         AND season_number = %s AND episode_number <= %s AND watched = TRUE
                     """, (chat_id, film_id, user_id, season, episode))
                     row = cursor.fetchone()
-                    cnt = int(row.get('cnt', row.get('count', 0) or 0) if isinstance(row, dict) else int(row[0] or 0)
+                    if isinstance(row, dict):
+                        cnt = int(row.get('cnt', 0) or row.get('count', 0) or 0)
+                    else:
+                        cnt = int(row[0] or 0) if row else 0
                     already_marked = (cnt >= episode)
                 else:
                     cursor.execute("""
