@@ -872,7 +872,10 @@
       isValidPage: () => {
         const path = (window.location.pathname || '').replace(/\/$/, '');
         if (path === '' || path === '/' || path === '/vod' || path === '/channels/now' || path === '/archive') return false;
-        return path.startsWith('/vod/');
+        if (!path.startsWith('/vod/')) return false;
+        const segments = path.split('/').filter(Boolean);
+        if (segments.length < 3) return false;
+        return true;
       },
       isSeries: () => {
         const modalEl = document.querySelector('#modal .title-duration.color-dark-font-secondary span');
