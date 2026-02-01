@@ -2221,6 +2221,7 @@ def main_file_handler(message):
         if step == 'upload_ticket':
             plan_id = state.get('plan_id')
             chat_id_state = state.get('chat_id', message.chat.id)
+            chat_id = chat_id_state  # для отправки ответа и maybe_send_ticket_limit_message
             logger.info(f"[TICKET UPLOAD] Начало загрузки билета: plan_id={plan_id}, user_id={user_id}, chat_id={chat_id_state}")
             
             if not plan_id:
