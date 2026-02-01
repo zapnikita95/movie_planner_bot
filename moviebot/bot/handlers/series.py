@@ -137,18 +137,24 @@ def get_film_current_state(chat_id, kp_id, user_id=None):
                     logger.info(f"[GET FILM STATE] План не найден для film_id={film_id}")
             
             # Для сериалов проверяем подписку (внутри db_lock, но это безопасно)
+            # В группах: подписка общая — считаем "подписан", если подписан любой участник
             if film_row:
                 is_series_db = bool(film_row.get('is_series') if isinstance(film_row, dict) else (film_row[3] if len(film_row) > 3 else 0))
-                logger.info(f"[GET FILM STATE] is_series_db={is_series_db}, user_id={user_id}")
-                if is_series_db and user_id and film_id:
-                    query_user = user_id if user_id is not None else None
-                    logger.info(f"[GET FILM STATE] Проверка подписки для сериала: film_id={film_id}, user_id={query_user}")
-                    cursor_local.execute("""
-                        SELECT subscribed 
-                        FROM series_subscriptions 
-                        WHERE chat_id = %s AND film_id = %s AND user_id = %s 
-                        LIMIT 1
-                    """, (chat_id, film_id, query_user))
+                logger.info(f"[GET FILM STATE] is_series_db={is_series_db}, user_id={user_id}, chat_id={chat_id}")
+                if is_series_db and film_id:
+                    if chat_id < 0:
+                        # Группа: подписан ли кто-то из чата
+                        cursor_local.execute("""
+                            SELECT subscribed FROM series_subscriptions
+                            WHERE chat_id = %s AND film_id = %s AND subscribed = TRUE
+                            LIMIT 1
+                        """, (chat_id, film_id))
+                    else:
+                        cursor_local.execute("""
+                            SELECT subscribed FROM series_subscriptions
+                            WHERE chat_id = %s AND film_id = %s AND user_id = %s
+                            LIMIT 1
+                        """, (chat_id, film_id, user_id))
                     sub_row = cursor_local.fetchone()
                     if sub_row:
                         is_subscribed = bool(sub_row[0] if isinstance(sub_row, tuple) else sub_row.get('subscribed'))
@@ -404,10 +410,10 @@ def show_film_info_with_buttons(
         if is_series:
             logger.info(f"[SHOW_FILM] Сериал! kp_id={kp_id}")
             
-            # Проверяем, есть ли у пользователя отмеченные серии по этому сериалу
+            # Проверяем, есть ли отмеченные серии по этому сериалу (в группе — общий прогресс по чату)
             has_watched_episodes = False
             logger.info(f"[SHOW FILM INFO] Проверка отмеченных серий: is_series={is_series}, existing={existing}, user_id={user_id}, chat_id={chat_id}")
-            if existing and user_id:
+            if existing:
                 # existing - это кортеж (film_id, title, watched) или (film_id, _, watched)
                 film_id_for_check = None
                 if isinstance(existing, (list, tuple)) and len(existing) > 0:
@@ -420,17 +426,23 @@ def show_film_info_with_buttons(
                 logger.info(f"[SHOW FILM INFO] Извлечен film_id_for_check={film_id_for_check} из existing={existing} (тип: {type(existing)})")
                 if film_id_for_check:
                     try:
-                        # Используем импорт из начала файла, не создаем локальный
                         conn_check = get_db_connection()
                         cursor_check = get_db_cursor()
                         try:
                             with db_lock:
-                                cursor_check.execute("""
-                                    SELECT COUNT(*) as count
-                                    FROM series_tracking 
-                                    WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-                                    LIMIT 1
-                                """, (chat_id, film_id_for_check, user_id))
+                                if chat_id < 0:
+                                    # Группа: есть ли хотя бы одна отмеченная серия у любого участника
+                                    cursor_check.execute("""
+                                        SELECT COUNT(*) as count FROM series_tracking
+                                        WHERE chat_id = %s AND film_id = %s AND watched = TRUE
+                                        LIMIT 1
+                                    """, (chat_id, film_id_for_check))
+                                else:
+                                    cursor_check.execute("""
+                                        SELECT COUNT(*) as count FROM series_tracking
+                                        WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                                        LIMIT 1
+                                    """, (chat_id, film_id_for_check, user_id))
                                 row = cursor_check.fetchone()
                                 if row:
                                     count = row.get('count') if isinstance(row, dict) else row[0]

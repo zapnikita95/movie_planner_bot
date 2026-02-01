@@ -124,10 +124,17 @@ def get_next_unwatched_episode(chat_id, film_id, user_id, kp_id):
     try:
         with db_lock:
             cursor_w = conn_w.cursor()
-            cursor_w.execute('''
-                SELECT season_number, episode_number FROM series_tracking
-                WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-            ''', (chat_id, film_id, user_id))
+            # В группах: общий прогресс — все отмеченные серии любым участником
+            if chat_id < 0:
+                cursor_w.execute('''
+                    SELECT DISTINCT season_number, episode_number FROM series_tracking
+                    WHERE chat_id = %s AND film_id = %s AND watched = TRUE
+                ''', (chat_id, film_id))
+            else:
+                cursor_w.execute('''
+                    SELECT season_number, episode_number FROM series_tracking
+                    WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                ''', (chat_id, film_id, user_id))
             for w_row in cursor_w.fetchall():
                 s_num = str(w_row.get('season_number') if isinstance(w_row, dict) else w_row[0])
                 e_num = str(w_row.get('episode_number') if isinstance(w_row, dict) else w_row[1])
@@ -256,13 +263,20 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
                 ep_num = str(ep.get('episodeNumber', ''))
                 
                 with db_lock:
-                    cursor_local.execute('''
-                        SELECT watched FROM series_tracking 
-                        WHERE chat_id = %s AND film_id = %s AND user_id = %s 
-                        AND season_number = %s AND episode_number = %s
-                    ''', (chat_id, film_id, user_id, season_num, ep_num))
+                    if chat_id < 0:
+                        cursor_local.execute('''
+                            SELECT 1 FROM series_tracking
+                            WHERE chat_id = %s AND film_id = %s AND season_number = %s AND episode_number = %s AND watched = TRUE
+                            LIMIT 1
+                        ''', (chat_id, film_id, season_num, ep_num))
+                    else:
+                        cursor_local.execute('''
+                            SELECT watched FROM series_tracking
+                            WHERE chat_id = %s AND film_id = %s AND user_id = %s
+                            AND season_number = %s AND episode_number = %s
+                        ''', (chat_id, film_id, user_id, season_num, ep_num))
                     watched_row = cursor_local.fetchone()
-                    is_watched = watched_row and (watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
+                    is_watched = bool(watched_row)
                 
                 mark = "✅" if is_watched else "⬜"
                 button_text = f"{mark} {ep_num}"
@@ -304,13 +318,20 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
                 ep_num = str(ep.get('episodeNumber', ''))
                 
                 with db_lock:
-                    cursor_local.execute('''
-                        SELECT watched FROM series_tracking 
-                        WHERE chat_id = %s AND film_id = %s AND user_id = %s 
-                        AND season_number = %s AND episode_number = %s
-                    ''', (chat_id, film_id, user_id, season_num, ep_num))
+                    if chat_id < 0:
+                        cursor_local.execute('''
+                            SELECT 1 FROM series_tracking
+                            WHERE chat_id = %s AND film_id = %s AND season_number = %s AND episode_number = %s AND watched = TRUE
+                            LIMIT 1
+                        ''', (chat_id, film_id, season_num, ep_num))
+                    else:
+                        cursor_local.execute('''
+                            SELECT watched FROM series_tracking
+                            WHERE chat_id = %s AND film_id = %s AND user_id = %s
+                            AND season_number = %s AND episode_number = %s
+                        ''', (chat_id, film_id, user_id, season_num, ep_num))
                     watched_row = cursor_local.fetchone()
-                    is_watched = watched_row and (watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
+                    is_watched = bool(watched_row)
                 
                 mark = "✅" if is_watched else "⬜"
                 button_text = f"{mark} {ep_num}"
@@ -365,13 +386,20 @@ def show_episodes_page(kp_id, season_num, chat_id, user_id, page=1, message_id=N
         with db_lock:
             for ep in episodes:
                 ep_num = ep.get('episodeNumber', '')
-                cursor_local.execute('''
-                    SELECT watched FROM series_tracking 
-                    WHERE chat_id = %s AND film_id = %s AND user_id = %s 
-                    AND season_number = %s AND episode_number = %s
-                ''', (chat_id, film_id, user_id, season_num, ep_num))
+                if chat_id < 0:
+                    cursor_local.execute('''
+                        SELECT 1 FROM series_tracking
+                        WHERE chat_id = %s AND film_id = %s AND season_number = %s AND episode_number = %s AND watched = TRUE
+                        LIMIT 1
+                    ''', (chat_id, film_id, season_num, ep_num))
+                else:
+                    cursor_local.execute('''
+                        SELECT watched FROM series_tracking
+                        WHERE chat_id = %s AND film_id = %s AND user_id = %s
+                        AND season_number = %s AND episode_number = %s
+                    ''', (chat_id, film_id, user_id, season_num, ep_num))
                 watched_row = cursor_local.fetchone()
-                is_watched = watched_row and (watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
+                is_watched = bool(watched_row)
                 if not is_watched:
                     all_watched = False
                     break
@@ -639,17 +667,23 @@ def show_completed_series_list(chat_id: int, user_id: int, message_id: int = Non
             is_airing, _ = get_series_airing_status(kp_id)
             seasons_data = get_seasons_data(kp_id)
 
-            # Собираем ВСЕ отмеченные серии пользователя - используем локальный курсор
+            # Собираем отмеченные серии (в группе — общий прогресс по чату)
             watched_set = set()
             conn_watch = get_db_connection()
             cursor_watch = None
             try:
                 with db_lock:
                     cursor_watch = conn_watch.cursor()
-                    cursor_watch.execute('''
-                        SELECT season_number, episode_number FROM series_tracking 
-                        WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-                    ''', (chat_id, film_id, user_id))
+                    if chat_id < 0:
+                        cursor_watch.execute('''
+                            SELECT DISTINCT season_number, episode_number FROM series_tracking
+                            WHERE chat_id = %s AND film_id = %s AND watched = TRUE
+                        ''', (chat_id, film_id))
+                    else:
+                        cursor_watch.execute('''
+                            SELECT season_number, episode_number FROM series_tracking
+                            WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                        ''', (chat_id, film_id, user_id))
                     for w_row in cursor_watch.fetchall():
                         s_num = str(w_row.get('season_number') if isinstance(w_row, dict) else w_row[0])
                         e_num = str(w_row.get('episode_number') if isinstance(w_row, dict) else w_row[1])
@@ -954,41 +988,77 @@ def get_user_series_page(chat_id: int, user_id: int, page: int = 1, page_size: i
             total_pages = math.ceil(total_count / page_size) if total_count > 0 else 1
             offset = (page - 1) * page_size
 
-            # Загружаем ТОЛЬКО сериалы текущей страницы — с сортировкой и LIMIT/OFFSET в SQL
-            cursor_local.execute("""
-                WITH ranked AS (
-                    SELECT 
-                        m.id AS film_id,
-                        m.kp_id,
-                        m.title,
-                        m.year,
-                        COALESCE(m.poster_url, '') AS poster_url,
-                        m.link,
-                        COALESCE(m.is_ongoing, FALSE) AS is_ongoing,
-                        COALESCE(m.seasons_count, 0) AS seasons_count,
-                        m.next_episode,
-                        m.last_api_update,
-                        COUNT(st.id) AS watched_episodes_count,
-                        BOOL_OR(ss.subscribed = TRUE) AS has_subscription,
-                        (COALESCE(m.watched, 0) = 1) AS all_watched
-                    FROM movies m
-                    LEFT JOIN series_tracking st 
-                        ON st.film_id = m.id AND st.chat_id = %s AND st.user_id = %s AND st.watched = TRUE
-                    LEFT JOIN series_subscriptions ss 
-                        ON ss.film_id = m.id AND ss.chat_id = %s AND ss.user_id = %s AND ss.subscribed = TRUE
-                    WHERE m.chat_id = %s AND m.is_series = 1 AND (COALESCE(m.watched, 0) = 0)
-                    GROUP BY m.id
-                )
-                SELECT * FROM ranked
-                ORDER BY
-                    CASE WHEN watched_episodes_count > 0 THEN 0 ELSE 1 END,
-                    CASE WHEN is_ongoing AND has_subscription THEN 0
-                         WHEN is_ongoing THEN 1
-                         WHEN has_subscription THEN 2
-                         ELSE 3 END,
-                    film_id DESC
-                LIMIT %s OFFSET %s
-            """, (chat_id, user_id, chat_id, user_id, chat_id, page_size, offset))
+            # Загружаем ТОЛЬКО сериалы текущей страницы (в группе — прогресс и подписки общие по чату)
+            if chat_id < 0:
+                cursor_local.execute("""
+                    WITH ranked AS (
+                        SELECT 
+                            m.id AS film_id,
+                            m.kp_id,
+                            m.title,
+                            m.year,
+                            COALESCE(m.poster_url, '') AS poster_url,
+                            m.link,
+                            COALESCE(m.is_ongoing, FALSE) AS is_ongoing,
+                            COALESCE(m.seasons_count, 0) AS seasons_count,
+                            m.next_episode,
+                            m.last_api_update,
+                            COUNT(DISTINCT (st.season_number, st.episode_number)) AS watched_episodes_count,
+                            BOOL_OR(ss.subscribed = TRUE) AS has_subscription,
+                            (COALESCE(m.watched, 0) = 1) AS all_watched
+                        FROM movies m
+                        LEFT JOIN series_tracking st 
+                            ON st.film_id = m.id AND st.chat_id = %s AND st.watched = TRUE
+                        LEFT JOIN series_subscriptions ss 
+                            ON ss.film_id = m.id AND ss.chat_id = %s AND ss.subscribed = TRUE
+                        WHERE m.chat_id = %s AND m.is_series = 1 AND (COALESCE(m.watched, 0) = 0)
+                        GROUP BY m.id
+                    )
+                    SELECT * FROM ranked
+                    ORDER BY
+                        CASE WHEN watched_episodes_count > 0 THEN 0 ELSE 1 END,
+                        CASE WHEN is_ongoing AND has_subscription THEN 0
+                             WHEN is_ongoing THEN 1
+                             WHEN has_subscription THEN 2
+                             ELSE 3 END,
+                        film_id DESC
+                    LIMIT %s OFFSET %s
+                """, (chat_id, chat_id, chat_id, page_size, offset))
+            else:
+                cursor_local.execute("""
+                    WITH ranked AS (
+                        SELECT 
+                            m.id AS film_id,
+                            m.kp_id,
+                            m.title,
+                            m.year,
+                            COALESCE(m.poster_url, '') AS poster_url,
+                            m.link,
+                            COALESCE(m.is_ongoing, FALSE) AS is_ongoing,
+                            COALESCE(m.seasons_count, 0) AS seasons_count,
+                            m.next_episode,
+                            m.last_api_update,
+                            COUNT(st.id) AS watched_episodes_count,
+                            BOOL_OR(ss.subscribed = TRUE) AS has_subscription,
+                            (COALESCE(m.watched, 0) = 1) AS all_watched
+                        FROM movies m
+                        LEFT JOIN series_tracking st 
+                            ON st.film_id = m.id AND st.chat_id = %s AND st.user_id = %s AND st.watched = TRUE
+                        LEFT JOIN series_subscriptions ss 
+                            ON ss.film_id = m.id AND ss.chat_id = %s AND ss.user_id = %s AND ss.subscribed = TRUE
+                        WHERE m.chat_id = %s AND m.is_series = 1 AND (COALESCE(m.watched, 0) = 0)
+                        GROUP BY m.id
+                    )
+                    SELECT * FROM ranked
+                    ORDER BY
+                        CASE WHEN watched_episodes_count > 0 THEN 0 ELSE 1 END,
+                        CASE WHEN is_ongoing AND has_subscription THEN 0
+                             WHEN is_ongoing THEN 1
+                             WHEN has_subscription THEN 2
+                             ELSE 3 END,
+                        film_id DESC
+                    LIMIT %s OFFSET %s
+                """, (chat_id, user_id, chat_id, user_id, chat_id, page_size, offset))
 
             rows = cursor_local.fetchall()
 

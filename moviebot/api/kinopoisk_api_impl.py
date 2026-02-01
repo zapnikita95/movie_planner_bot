@@ -273,20 +273,27 @@ def get_seasons(kp_id, chat_id=None, user_id=None):
             data = response.json()
             seasons = data.get('items', [])
             if seasons:
-                # Получаем информацию о просмотренных сериях
+                # Получаем информацию о просмотренных сериях (в группе — общий прогресс по чату)
                 watched_episodes = set()
-                if chat_id and user_id:
+                if chat_id:
                     with db_lock:
                         cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
                         row = cursor.fetchone()
                         if row:
                             film_id = row.get('id') if isinstance(row, dict) else (row[0] if row else None)
                             if film_id:
-                                cursor.execute('''
-                                    SELECT season_number, episode_number 
-                                    FROM series_tracking 
-                                    WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-                                ''', (chat_id, film_id, user_id))
+                                if chat_id < 0:
+                                    cursor.execute('''
+                                        SELECT DISTINCT season_number, episode_number
+                                        FROM series_tracking
+                                        WHERE chat_id = %s AND film_id = %s AND watched = TRUE
+                                    ''', (chat_id, film_id))
+                                else:
+                                    cursor.execute('''
+                                        SELECT season_number, episode_number
+                                        FROM series_tracking
+                                        WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                                    ''', (chat_id, film_id, user_id))
                                 watched_rows = cursor.fetchall()
                                 for w_row in watched_rows:
                                     season = w_row.get('season_number') if isinstance(w_row, dict) else w_row[0]
@@ -373,20 +380,27 @@ def get_seasons(kp_id, chat_id=None, user_id=None):
                 data = response.json()
                 seasons = data.get('items', [])
                 if seasons:
-                    # Получаем информацию о просмотренных сериях
+                    # Получаем информацию о просмотренных сериях (в группе — общий прогресс)
                     watched_episodes = set()
-                    if chat_id and user_id:
+                    if chat_id:
                         with db_lock:
                             cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, str(kp_id)))
                             row = cursor.fetchone()
                             if row:
                                 film_id = row.get('id') if isinstance(row, dict) else (row[0] if row else None)
                                 if film_id:
-                                    cursor.execute('''
-                                        SELECT season_number, episode_number 
-                                        FROM series_tracking 
-                                        WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-                                    ''', (chat_id, film_id, user_id))
+                                    if chat_id < 0:
+                                        cursor.execute('''
+                                            SELECT DISTINCT season_number, episode_number
+                                            FROM series_tracking
+                                            WHERE chat_id = %s AND film_id = %s AND watched = TRUE
+                                        ''', (chat_id, film_id))
+                                    else:
+                                        cursor.execute('''
+                                            SELECT season_number, episode_number
+                                            FROM series_tracking
+                                            WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                                        ''', (chat_id, film_id, user_id))
                                     watched_rows = cursor.fetchall()
                                     for w_row in watched_rows:
                                         season = w_row.get('season_number') if isinstance(w_row, dict) else w_row[0]

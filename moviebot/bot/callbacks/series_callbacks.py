@@ -395,13 +395,19 @@ def register_series_callbacks(bot):
                     watched_count = 0
                     with db_lock:
                         for ep in episodes:
-                            # ВАЖНО: Всегда приводим к строке для единообразия
                             ep_num = str(ep.get('episodeNumber', ''))
-                            cursor_local.execute('''
-                                SELECT watched FROM series_tracking 
-                                WHERE chat_id = %s AND film_id = %s AND user_id = %s 
-                                AND season_number = %s AND episode_number = %s AND watched = TRUE
-                            ''', (chat_id, film_id, user_id, season_num, ep_num))
+                            if chat_id < 0:
+                                cursor_local.execute('''
+                                    SELECT 1 FROM series_tracking
+                                    WHERE chat_id = %s AND film_id = %s AND season_number = %s AND episode_number = %s AND watched = TRUE
+                                    LIMIT 1
+                                ''', (chat_id, film_id, season_num, ep_num))
+                            else:
+                                cursor_local.execute('''
+                                    SELECT watched FROM series_tracking
+                                    WHERE chat_id = %s AND film_id = %s AND user_id = %s
+                                    AND season_number = %s AND episode_number = %s AND watched = TRUE
+                                ''', (chat_id, film_id, user_id, season_num, ep_num))
                             watched_row = cursor_local.fetchone()
                             if watched_row:
                                 watched_count += 1
@@ -428,13 +434,19 @@ def register_series_callbacks(bot):
                     watched_count = 0
                     with db_lock:
                         for ep in episodes:
-                            # ВАЖНО: Всегда приводим к строке для единообразия
                             ep_num = str(ep.get('episodeNumber', ''))
-                            cursor_local.execute('''
-                                SELECT watched FROM series_tracking 
-                                WHERE chat_id = %s AND film_id = %s AND user_id = %s 
-                                AND season_number = %s AND episode_number = %s AND watched = TRUE
-                            ''', (chat_id, film_id, user_id, season_num, ep_num))
+                            if chat_id < 0:
+                                cursor_local.execute('''
+                                    SELECT 1 FROM series_tracking
+                                    WHERE chat_id = %s AND film_id = %s AND season_number = %s AND episode_number = %s AND watched = TRUE
+                                    LIMIT 1
+                                ''', (chat_id, film_id, season_num, ep_num))
+                            else:
+                                cursor_local.execute('''
+                                    SELECT watched FROM series_tracking
+                                    WHERE chat_id = %s AND film_id = %s AND user_id = %s
+                                    AND season_number = %s AND episode_number = %s AND watched = TRUE
+                                ''', (chat_id, film_id, user_id, season_num, ep_num))
                             watched_row = cursor_local.fetchone()
                             if watched_row:
                                 watched_count += 1
@@ -1492,16 +1504,23 @@ def handle_episode_toggle(call):
             with db_lock:
                 cursor_local = conn_local.cursor()
                 
-                # Проверяем текущий статус
-                cursor_local.execute('''
-                    SELECT watched FROM series_tracking 
-                    WHERE chat_id = %s AND film_id = %s AND user_id = %s 
-                    AND season_number = %s AND episode_number = %s
-                ''', (chat_id, film_id, user_id, season_num, ep_num))
+                # Проверяем текущий статус (в группе — считаем просмотренным, если отметил любой)
+                if chat_id < 0:
+                    cursor_local.execute('''
+                        SELECT 1 FROM series_tracking
+                        WHERE chat_id = %s AND film_id = %s AND season_number = %s AND episode_number = %s AND watched = TRUE
+                        LIMIT 1
+                    ''', (chat_id, film_id, season_num, ep_num))
+                else:
+                    cursor_local.execute('''
+                        SELECT watched FROM series_tracking
+                        WHERE chat_id = %s AND film_id = %s AND user_id = %s
+                        AND season_number = %s AND episode_number = %s
+                    ''', (chat_id, film_id, user_id, season_num, ep_num))
                 watched_row = cursor_local.fetchone()
                 is_watched = False
                 if watched_row:
-                    is_watched = bool(watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
+                    is_watched = True if chat_id < 0 else bool(watched_row.get('watched') if isinstance(watched_row, dict) else watched_row[0])
                 
                 logger.info(f"[EPISODE TOGGLE] Текущий статус: is_watched={is_watched}, user_episode_auto_mark_state для user_id={user_id}: {user_episode_auto_mark_state.get(user_id)}")
                 
@@ -1525,12 +1544,17 @@ def handle_episode_toggle(call):
                     ep_num_int = int(ep_num) if ep_num.isdigit() else 0
                     season_num_int = int(season_num) if str(season_num).isdigit() else 0
                     
-                    # ВАЖНО: Получаем все просмотренные эпизоды ДО начала отметки новых (во всех сезонах)
-                    cursor_local.execute('''
-                        SELECT season_number, episode_number FROM series_tracking 
-                        WHERE chat_id = %s AND film_id = %s AND user_id = %s 
-                        AND watched = TRUE
-                    ''', (chat_id, film_id, user_id))
+                    # ВАЖНО: Получаем все просмотренные эпизоды ДО начала отметки (в группе — общий прогресс)
+                    if chat_id < 0:
+                        cursor_local.execute('''
+                            SELECT DISTINCT season_number, episode_number FROM series_tracking
+                            WHERE chat_id = %s AND film_id = %s AND watched = TRUE
+                        ''', (chat_id, film_id))
+                    else:
+                        cursor_local.execute('''
+                            SELECT season_number, episode_number FROM series_tracking
+                            WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                        ''', (chat_id, film_id, user_id))
                     watched_episodes_set_before = set()
                     for w_row in cursor_local.fetchall():
                         watched_season = w_row.get('season_number') if isinstance(w_row, dict) else w_row[0]
@@ -1606,11 +1630,16 @@ def handle_episode_toggle(call):
                     # Используем функцию count_episodes_for_watch_check для точной проверки
                     from moviebot.bot.handlers.seasons import count_episodes_for_watch_check
                     watched_set_after = set()
-                    cursor_local.execute('''
-                        SELECT season_number, episode_number FROM series_tracking 
-                        WHERE chat_id = %s AND film_id = %s AND user_id = %s 
-                        AND watched = TRUE
-                    ''', (chat_id, film_id, user_id))
+                    if chat_id < 0:
+                        cursor_local.execute('''
+                            SELECT DISTINCT season_number, episode_number FROM series_tracking
+                            WHERE chat_id = %s AND film_id = %s AND watched = TRUE
+                        ''', (chat_id, film_id))
+                    else:
+                        cursor_local.execute('''
+                            SELECT season_number, episode_number FROM series_tracking
+                            WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
+                        ''', (chat_id, film_id, user_id))
                     for w_row in cursor_local.fetchall():
                         watched_season = str(w_row.get('season_number') if isinstance(w_row, dict) else w_row[0])
                         watched_ep_num = str(w_row.get('episode_number') if isinstance(w_row, dict) else w_row[1])
