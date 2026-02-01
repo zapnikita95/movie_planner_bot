@@ -1709,7 +1709,8 @@ def create_web_app(bot):
                 try:
                     data = response.json()
                     api_type = data.get('type', '').upper()
-                    if api_type == 'TV_SERIES':
+                    # TV_SERIES и MINI_SERIES — сериалы (у MINI_SERIES ссылка тоже /series/ на Кинопоиске)
+                    if api_type in ('TV_SERIES', 'MINI_SERIES'):
                         is_series = True
                     logger.info(f"[EXTENSION API] Тип фильма из API: {api_type}, is_series={is_series}")
                 except Exception as json_err:
