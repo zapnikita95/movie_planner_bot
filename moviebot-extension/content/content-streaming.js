@@ -65,7 +65,8 @@
   const supportedHosts = [
     'tvoe.live', 'ivi.ru', 'okko.tv', 'kinopoisk.ru', 'hd.kinopoisk.ru',
     'premier.one', 'wink.ru', 'start.ru', 'amediateka.ru', 'kion.ru',
-    'rezka.ag', 'rezka.ad', 'hdrezka', 'lordfilm', 'allserial', 'boxserial'
+    'rezka.ag', 'rezka.ad', 'hdrezka', 'lordfilm', 'allserial', 'boxserial',
+    'kino.pub', 'smotreshka.tv'
   ];
   
   const hostname = window.location.hostname.toLowerCase();
@@ -824,6 +825,86 @@
           return null;
         }
       }
+    },
+
+    'kino.pub': {
+      isValidPage: () => {
+        const path = (window.location.pathname || '').replace(/\/$/, '');
+        if (/^\/movie(\?|$)/.test(path) || path.startsWith('/users/')) return false;
+        return /\/item\/view\/\d+\/s\d+e\d+/.test(path);
+      },
+      isSeries: () => {
+        const m = (window.location.pathname || '').match(/\/item\/view\/\d+\/s(\d+)e\d+/);
+        return m ? parseInt(m[1], 10) > 0 : false;
+      },
+      title: {
+        selector: '#view > div > div > h3',
+        extract: (el) => {
+          if (el) {
+            const c = el.cloneNode(true);
+            while (c.firstElementChild) c.removeChild(c.firstElementChild);
+            const t = c.textContent?.replace(/\s+/g, ' ').trim();
+            if (t) return t;
+          }
+          const fallback = document.querySelector('#player .player-title-main-ru');
+          return fallback?.textContent?.trim() || null;
+        }
+      },
+      year: {
+        selector: '#view table tbody tr:nth-child(5) td:nth-child(2) a',
+        extract: (el) => {
+          const t = el?.textContent?.trim() || '';
+          return /^\d{4}$/.test(t) ? t : null;
+        }
+      },
+      seasonEpisode: {
+        fromUrl: () => {
+          const m = (window.location.pathname || '').match(/\/item\/view\/\d+\/s(\d+)e(\d+)/);
+          if (m) {
+            return { season: parseInt(m[1], 10), episode: parseInt(m[2], 10) };
+          }
+          return null;
+        }
+      }
+    },
+
+    'smotreshka.tv': {
+      isValidPage: () => {
+        const path = (window.location.pathname || '').replace(/\/$/, '');
+        if (path === '' || path === '/' || path === '/vod' || path === '/channels/now' || path === '/archive') return false;
+        if (!path.startsWith('/vod/')) return false;
+        return path.includes('/watch');
+      },
+      isSeries: () => {
+        const modalEl = document.querySelector('#modal .title-duration.color-dark-font-secondary span');
+        if (modalEl && /сезон|сезона|сезоны|сезонов|сезону/i.test(modalEl.textContent || '')) return true;
+        const el = document.querySelector('.player-vod .episode.now .marquee-wrap span span');
+        const t = el?.textContent?.trim() || '';
+        return /Сезон\s+\d+/i.test(t);
+      },
+      title: {
+        selector: '#modal .header.fixed .title, #modal .header.fixed > div, #scroll-container main .player-vod .player-footer-info .schedule-line.flex-space-between.flex-nowrap div span span',
+        extract: (el) => el?.textContent?.trim() || null
+      },
+      year: {
+        selector: '#modal .item.year, #modal span.item.year, main .container-1440 .row a .description.hidden-size-small',
+        extract: (el) => {
+          const t = el?.textContent?.trim() || '';
+          const m = t.match(/^(\d{4})/);
+          if (m) return m[1];
+          const m2 = t.match(/(\d{4})/);
+          return m2 ? m2[1] : null;
+        }
+      },
+      seasonEpisode: {
+        selector: '.player-vod .episode.now .marquee-wrap span span',
+        extract: (el) => {
+          const t = el?.textContent?.trim() || '';
+          const m = t.match(/Сезон\s+(\d+)/i);
+          if (m) return { season: parseInt(m[1], 10), episode: null };
+          return null;
+        }
+      }
     }
   };
   
@@ -853,6 +934,10 @@
     if (hostname.includes('amediateka')) {
       const m = path.match(/\/watch\/([^/]+)/);
       return m ? `amediateka:/watch/${m[1]}` : null;
+    }
+    if (hostname.includes('kino.pub')) {
+      const m = path.match(/\/item\/view\/(\d+)/);
+      return m ? `kino:/item/view/${m[1]}` : null;
     }
     return null;
   }
@@ -1302,7 +1387,7 @@
         <div style="margin-top: 8px !important; opacity: 0.9 !important; font-size: 13px !important; line-height: 1.3 !important;">${titleText}</div>
       </div>
       <div id="mpp-buttons-container" style="display: flex !important; flex-direction: column !important; gap: 8px !important; width: 100% !important;"></div>
-      <button id="mpp-close" style="position: absolute !important; top: 8px !important; right: 8px !important; background: rgba(255,255,255,0.2) !important; border: none !important; color: white !important; width: 24px !important; height: 24px !important; border-radius: 50% !important; cursor: pointer !important; font-size: 18px !important; line-height: 1 !important; display: flex !important; align-items: center !important; justify-content: center !important;">×</button>
+      <button id="mpp-close" style="position: absolute !important; top: 8px !important; right: 8px !important; background: rgba(255,255,255,0.2) !important; border: none !important; color: white !important; width: 24px !important; height: 24px !important; border-radius: 50% !important; cursor: pointer !important; font-size: 18px !important; line-height: 1 !important; display: flex !important; align-items: center !important; justify-content: center !important; outline: none !important; box-shadow: none !important;">×</button>
     `;
     
     document.body.appendChild(overlayElement);

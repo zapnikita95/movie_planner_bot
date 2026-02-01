@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Movie Planner",
   "description": "Добавляй фильмы в базу Movie Planner. Автоопределение фильма и сериала на странице просмотра российских стримингов.",
-  "version": "1.2.6",
+  "version": "1.2.7",
   "author": "Nikita Zaporozhets",
   "permissions": [
     "storage",
@@ -96,7 +96,9 @@
     "*://allserial.org.ru/*",
     "*://*.allserial.org.ru/*",
     "*://besplatno.allserial.org.ru/*",
-    "*://boxserial.org/*"
+    "*://boxserial.org/*",
+    "*://kino.pub/*",
+    "*://smotreshka.tv/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -231,7 +233,9 @@
         "*://allserial.org.ru/*",
         "*://*.allserial.org.ru/*",
         "*://besplatno.allserial.org.ru/*",
-        "*://boxserial.org/*"
+        "*://boxserial.org/*",
+        "*://kino.pub/*",
+        "*://smotreshka.tv/*"
       ],
       "js": ["content/content-streaming.js"],
       "run_at": "document_end"
