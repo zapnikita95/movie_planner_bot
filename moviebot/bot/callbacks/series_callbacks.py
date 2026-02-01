@@ -90,6 +90,92 @@ def _series_mark_episode_module_handler(call):
     _handle_series_mark_episode(call)
 
 
+@bot.callback_query_handler(func=lambda call: call.data == "series_mark_ep_no")
+def _series_mark_ep_no_module_handler(call):
+    """Отмена отметки серии — удалить сообщение подтверждения."""
+    logger.info(f"[SERIES MARK EP NO] callback получен")
+    try:
+        bot.answer_callback_query(call.id)
+        bot.delete_message(call.message.chat.id, call.message.message_id)
+    except Exception as e:
+        logger.warning(f"[SERIES MARK EP NO] Ошибка: {e}")
+
+
+@bot.callback_query_handler(func=lambda call: call.data and call.data.startswith("series_mark_ep_yes:"))
+def _series_mark_ep_yes_module_handler(call):
+    """Подтверждение отметки серии — отметить и обновить описание."""
+    logger.info(f"[SERIES MARK EP YES] callback получен: {call.data}")
+    _handle_series_mark_ep_yes(call)
+
+
+def _handle_series_mark_ep_yes(call):
+    """Логика подтверждения отметки серии."""
+    parts = call.data.split(":")
+    if len(parts) < 5:
+        try:
+            bot.answer_callback_query(call.id, "Ошибка формата", show_alert=True)
+        except Exception:
+            pass
+        return
+    kp_id = str(int(parts[1].strip()))
+    season_num = str(parts[2].strip())
+    ep_num = str(parts[3].strip())
+    desc_msg_id = int(parts[4].strip())
+    chat_id = call.message.chat.id
+    user_id = call.from_user.id
+    message_thread_id = getattr(call.message, 'message_thread_id', None)
+    try:
+        bot.answer_callback_query(call.id, "✅ Серия отмечена")
+    except Exception:
+        pass
+    try:
+        bot.delete_message(chat_id, call.message.message_id)
+    except Exception:
+        pass
+    conn = get_db_connection()
+    cursor = None
+    try:
+        with db_lock:
+            cursor = conn.cursor()
+            cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
+            row = cursor.fetchone()
+            if not row:
+                return
+            film_id = row.get('id') if isinstance(row, dict) else row[0]
+            cursor.execute('''
+                INSERT INTO series_tracking (chat_id, film_id, user_id, season_number, episode_number, watched)
+                VALUES (%s, %s, %s, %s, %s, TRUE)
+                ON CONFLICT (chat_id, film_id, user_id, season_number, episode_number) DO UPDATE SET watched = TRUE
+            ''', (chat_id, film_id, user_id, season_num, ep_num))
+        conn.commit()
+    except Exception as e:
+        logger.error(f"[SERIES MARK EP YES] Ошибка БД: {e}", exc_info=True)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+    finally:
+        if cursor:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+    # Обновить описание сериала
+    try:
+        from moviebot.bot.handlers.series import show_film_info_with_buttons, get_film_current_state
+        link = f"https://www.kinopoisk.ru/series/{kp_id}/"
+        info = extract_movie_info(link)
+        if info:
+            current_state = get_film_current_state(chat_id, int(kp_id), user_id)
+            existing = current_state['existing']
+            show_film_info_with_buttons(
+                chat_id, user_id, info, link, kp_id,
+                existing=existing, message_id=desc_msg_id, message_thread_id=message_thread_id
+            )
+    except Exception as e:
+        logger.warning(f"[SERIES MARK EP YES] Ошибка обновления описания: {e}")
+
+
 def register_series_callbacks(bot):
     """Регистрирует callback handlers для сериалов"""
     logger.info("=" * 80)
@@ -1031,76 +1117,6 @@ def series_subscribe_callback(call):
             )
         except Exception as e:
             logger.error(f"[SERIES LOCKED] Ошибка: {e}", exc_info=True)
-
-    @bot.callback_query_handler(func=lambda call: call.data == "series_mark_ep_no")
-    def series_mark_ep_no_callback(call):
-        """Отмена отметки серии — удалить сообщение подтверждения"""
-        try:
-            bot.answer_callback_query(call.id)
-            bot.delete_message(call.message.chat.id, call.message.message_id)
-        except Exception as e:
-            logger.warning(f"[SERIES MARK EP NO] Ошибка удаления: {e}")
-
-    @bot.callback_query_handler(func=lambda call: call.data.startswith("series_mark_ep_yes:"))
-    def series_mark_ep_yes_callback(call):
-        """Подтверждение отметки серии — отметить и обновить описание"""
-        parts = call.data.split(":")
-        if len(parts) < 5:
-            try:
-                bot.answer_callback_query(call.id, "Ошибка формата", show_alert=True)
-            except Exception:
-                pass
-            return
-        kp_id = str(int(parts[1].strip()))
-        season_num = str(parts[2].strip())
-        ep_num = str(parts[3].strip())
-        desc_msg_id = int(parts[4].strip())
-        chat_id = call.message.chat.id
-        user_id = call.from_user.id
-        message_thread_id = getattr(call.message, 'message_thread_id', None)
-        try:
-            bot.answer_callback_query(call.id, "✅ Серия отмечена")
-        except Exception:
-            pass
-        try:
-            bot.delete_message(chat_id, call.message.message_id)
-        except Exception:
-            pass
-        conn = get_db_connection()
-        cursor = None
-        try:
-            with db_lock:
-                cursor = conn.cursor()
-                cursor.execute('SELECT id FROM movies WHERE chat_id = %s AND kp_id = %s', (chat_id, kp_id))
-                row = cursor.fetchone()
-                if not row:
-                    return
-                film_id = row.get('id') if isinstance(row, dict) else row[0]
-                cursor.execute('''
-                    INSERT INTO series_tracking (chat_id, film_id, user_id, season_number, episode_number, watched)
-                    VALUES (%s, %s, %s, %s, %s, TRUE)
-                    ON CONFLICT (chat_id, film_id, user_id, season_number, episode_number)
-                    DO UPDATE SET watched = TRUE
-                ''', (chat_id, film_id, user_id, season_num, ep_num))
-                conn.commit()
-            from moviebot.bot.handlers.series import show_film_info_with_buttons, get_film_current_state
-            link = f"https://www.kinopoisk.ru/series/{kp_id}/"
-            info = extract_movie_info(link)
-            if info:
-                current_state = get_film_current_state(chat_id, int(kp_id), user_id)
-                existing = current_state['existing']
-                show_film_info_with_buttons(
-                    chat_id, user_id, info, link, kp_id,
-                    existing=existing, message_id=desc_msg_id, message_thread_id=message_thread_id
-                )
-        except Exception as e:
-            logger.error(f"[SERIES MARK EP YES] Ошибка: {e}", exc_info=True)
-        finally:
-            if cursor:
-                try:
-                    cursor.close()
-                except Exception:
-                    pass
 
     @bot.callback_query_handler(func=lambda call: call.data.startswith("series_episode_cancel_auto:"))
     def handle_episode_cancel_auto(call):

@@ -464,76 +464,9 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
         # Создаем кнопки как в примере
         markup = InlineKeyboardMarkup(row_width=1)
         
-        # Проверяем, есть ли просмотренные сериалы (первые 3 сериала бесплатно)
         has_access = has_series_features_access(chat_id, user_id, None)
         if has_access:
-            # Проверяем реально просмотренные сериалы (по эпизодам)
-            watched_count = 0
-            conn_check = get_db_connection()
-            cursor_check = None
-            try:
-                with db_lock:
-                    cursor_check = conn_check.cursor()
-                    cursor_check.execute('SELECT id, kp_id FROM movies WHERE chat_id = %s AND is_series = 1', (chat_id,))
-                    all_series_rows = cursor_check.fetchall()
-                
-                # Для каждого сериала проверяем, просмотрен ли он полностью
-                for row in all_series_rows:
-                    film_id_check = row.get('id') if isinstance(row, dict) else row[0]
-                    kp_id_check = row.get('kp_id') if isinstance(row, dict) else row[1]
-                    
-                    is_airing_check, _ = get_series_airing_status(kp_id_check)
-                    if is_airing_check:
-                        continue
-                    
-                    seasons_data_check = get_seasons_data(kp_id_check)
-                    if not seasons_data_check:
-                        continue
-                    
-                    watched_set_check = set()
-                    conn_watch_check = get_db_connection()
-                    cursor_watch_check = None
-                    try:
-                        with db_lock:
-                            cursor_watch_check = conn_watch_check.cursor()
-                            cursor_watch_check.execute('''
-                                SELECT season_number, episode_number FROM series_tracking 
-                                WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-                            ''', (chat_id, film_id_check, user_id))
-                            for w_row in cursor_watch_check.fetchall():
-                                s_num = str(w_row.get('season_number') if isinstance(w_row, dict) else w_row[0])
-                                e_num = str(w_row.get('episode_number') if isinstance(w_row, dict) else w_row[1])
-                                watched_set_check.add((s_num, e_num))
-                    finally:
-                        if cursor_watch_check:
-                            try:
-                                cursor_watch_check.close()
-                            except:
-                                pass
-                        try:
-                            conn_watch_check.close()
-                        except:
-                            pass
-                    
-                    total_ep_check, watched_ep_check = count_episodes_for_watch_check(
-                        seasons_data_check, False, watched_set_check, chat_id, film_id_check, user_id
-                    )
-                    
-                    if total_ep_check == watched_ep_check and total_ep_check > 0:
-                        watched_count += 1
-                
-                if watched_count > 0:
-                    markup.add(InlineKeyboardButton(f"✅ Просмотренные ({watched_count})", callback_data="watched_series_list"))
-            finally:
-                if cursor_check:
-                    try:
-                        cursor_check.close()
-                    except:
-                        pass
-                try:
-                    conn_check.close()
-                except:
-                    pass
+            markup.add(InlineKeyboardButton("✅ Просмотренные", callback_data="watched_series_list"))
         
         markup.add(InlineKeyboardButton("🔍 Поиск фильмов и сериалов", callback_data="start_menu:search"))
         markup.add(InlineKeyboardButton("⬅️ Назад к режимам", callback_data="start_menu:seasons"))
@@ -613,82 +546,10 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
 
         markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{int(kp_id)}"))
 
-    # Кнопка "Просмотренные" - показываем только если есть реально просмотренные сериалы (первые 3 бесплатно)
+    # Кнопка "Просмотренные" — без API-вызовов (быстрая загрузка). Счётчик упрощён.
     has_access = has_series_features_access(chat_id, user_id, None)
     if has_access:
-        # Проверяем реально просмотренные сериалы (по эпизодам, а не по полю watched)
-        # Используем ту же логику, что и в show_completed_series_list
-        watched_count = 0
-        conn_check = get_db_connection()
-        cursor_check = None
-        try:
-            with db_lock:
-                cursor_check = conn_check.cursor()
-                # Получаем все сериалы пользователя
-                cursor_check.execute('SELECT id, kp_id FROM movies WHERE chat_id = %s AND is_series = 1', (chat_id,))
-                all_series_rows = cursor_check.fetchall()
-            
-            # Для каждого сериала проверяем, просмотрен ли он полностью
-            for row in all_series_rows:
-                film_id_check = row.get('id') if isinstance(row, dict) else row[0]
-                kp_id_check = row.get('kp_id') if isinstance(row, dict) else row[1]
-                
-                # Получаем статус выхода сериала
-                is_airing_check, _ = get_series_airing_status(kp_id_check)
-                if is_airing_check:
-                    continue  # Выпускающиеся сериалы не могут быть полностью просмотрены
-                
-                seasons_data_check = get_seasons_data(kp_id_check)
-                if not seasons_data_check:
-                    continue
-                
-                # Собираем просмотренные эпизоды
-                watched_set_check = set()
-                conn_watch_check = get_db_connection()
-                cursor_watch_check = None
-                try:
-                    with db_lock:
-                        cursor_watch_check = conn_watch_check.cursor()
-                        cursor_watch_check.execute('''
-                            SELECT season_number, episode_number FROM series_tracking 
-                            WHERE chat_id = %s AND film_id = %s AND user_id = %s AND watched = TRUE
-                        ''', (chat_id, film_id_check, user_id))
-                        for w_row in cursor_watch_check.fetchall():
-                            s_num = str(w_row.get('season_number') if isinstance(w_row, dict) else w_row[0])
-                            e_num = str(w_row.get('episode_number') if isinstance(w_row, dict) else w_row[1])
-                            watched_set_check.add((s_num, e_num))
-                finally:
-                    if cursor_watch_check:
-                        try:
-                            cursor_watch_check.close()
-                        except:
-                            pass
-                    try:
-                        conn_watch_check.close()
-                    except:
-                        pass
-                
-                # Считаем эпизоды
-                total_ep_check, watched_ep_check = count_episodes_for_watch_check(
-                    seasons_data_check, False, watched_set_check, chat_id, film_id_check, user_id
-                )
-                
-                # Если все эпизоды просмотрены - увеличиваем счетчик
-                if total_ep_check == watched_ep_check and total_ep_check > 0:
-                    watched_count += 1
-            
-            if watched_count > 0:
-                markup.add(InlineKeyboardButton(f"✅ Просмотренные ({watched_count})", callback_data="watched_series_list"))
-        finally:
-            if cursor_check:
-                try:
-                    cursor_check.close()
-                except:
-                    pass
-            try:
-                conn_check.close()
-            except:
-                pass
+        markup.add(InlineKeyboardButton("✅ Просмотренные", callback_data="watched_series_list"))
     
     # Пагинация
     if series_data['total_pages'] > 1:

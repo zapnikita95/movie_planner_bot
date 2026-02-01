@@ -885,12 +885,12 @@ def register_start_handlers(bot):
                 return
 
             if action == 'seasons':
-                # Сразу показываем отклик — редактируем сообщение в «Загружаю...», затем подгружаем список
+                # Сразу показываем отклик в сообщении — пользователь видит, что идёт загрузка
                 try:
                     edit_kw = {'chat_id': chat_id, 'message_id': message_id, 'text': '⏳ Загружаю список сериалов...', 'parse_mode': 'HTML'}
                     bot.edit_message_text(**edit_kw)
-                except Exception:
-                    pass
+                except Exception as edit_err:
+                    logger.warning(f"[START MENU] Не удалось отредактировать на «Загружаю»: {edit_err}")
                 show_seasons_list(
                     chat_id=chat_id,
                     user_id=user_id,
