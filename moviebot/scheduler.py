@@ -1226,7 +1226,7 @@ def clean_home_plans():
 
 
 def clean_cinema_plans():
-    """Каждый понедельник удаляет все планы кино (фильмы) и планы мероприятий, которые прошли более 1 дня назад"""
+    """Ежедневно удаляет прошедшие планы кино (фильмы и мероприятия), которые прошли более 1 дня назад"""
     from datetime import datetime, timedelta
     import pytz
     
@@ -1237,8 +1237,13 @@ def clean_cinema_plans():
             now_utc = datetime.now(pytz.utc)
             yesterday_utc = now_utc - timedelta(days=1)
             
-            # Удаляем все планы кино (фильмы) - как было раньше
-            cursor_local.execute("DELETE FROM plans WHERE plan_type = 'cinema' AND film_id IS NOT NULL")
+            # Удаляем прошедшие планы кино (фильмы), которые прошли более 1 дня назад
+            cursor_local.execute("""
+                DELETE FROM plans 
+                WHERE plan_type = 'cinema' 
+                AND film_id IS NOT NULL 
+                AND plan_datetime < %s
+            """, (yesterday_utc,))
             deleted_films = cursor_local.rowcount
             
             # Удаляем мероприятия (film_id IS NULL), которые прошли более 1 дня назад
@@ -1251,7 +1256,7 @@ def clean_cinema_plans():
             deleted_events = cursor_local.rowcount
             
             conn_local.commit()
-        logger.info(f"Очищены планы кино (понедельник): {deleted_films} фильмов, {deleted_events} мероприятий")
+        logger.info(f"[CLEAN CINEMA PLANS] Очищены прошедшие планы кино: {deleted_films} фильмов, {deleted_events} мероприятий")
     except Exception as e:
         logger.error(f"[CLEAN CINEMA PLANS] Ошибка: {e}", exc_info=True)
     finally:

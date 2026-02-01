@@ -173,6 +173,8 @@ if process_recurring_payments:
 
 # Добавляем задачи очистки в scheduler
 scheduler.add_job(clean_home_plans, 'cron', hour=9, minute=0, timezone=PLANS_TZ, id='clean_home_plans')
+# Очистка прошедших планов кино — каждый день в 09:05 (чтобы не конфликтовать с clean_home_plans)
+scheduler.add_job(clean_cinema_plans, 'cron', hour=9, minute=5, timezone=PLANS_TZ, id='clean_cinema_plans')
 scheduler.add_job(hourly_stats, 'interval', hours=1, id='hourly_stats')
 
 # Уведомления о планах и случайные события (разнесены по времени, чтобы не шли вместе)
