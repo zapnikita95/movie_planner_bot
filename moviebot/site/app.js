@@ -401,19 +401,27 @@
     const ratingStr = m.rating_kp != null ? ' · КП: ' + Number(m.rating_kp).toFixed(1) : '';
     const desc = (m.description || '').trim();
     const descHtml = desc ? '<div class="film-description">' + escapeHtml(desc.slice(0, 200)) + (desc.length > 200 ? '…' : '') + '</div>' : '';
+    const streamingUrl = (m.online_link || '').trim();
+    const streamingBtn = streamingUrl
+      ? '<a href="' + escapeHtml(streamingUrl) + '" target="_blank" rel="noopener" class="btn btn-small btn-secondary film-streaming-btn" onclick="event.stopPropagation()">Просмотр на стриминге ⏯️</a>'
+      : '';
     return `
-      <a href="${link}" target="_blank" rel="noopener" class="card film-card">
-        <div class="card-poster-wrap">
-          ${poster ? '<img src="' + poster + '" alt="" class="card-poster" width="80" height="120" referrerpolicy="no-referrer" loading="lazy" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">' : ''}
-          <div class="film-poster-placeholder" style="${poster ? 'display:none' : ''}">${m.is_series ? '📺' : '🎬'}</div>
+      <div class="card film-card">
+        <a href="${link}" target="_blank" rel="noopener" class="film-card-main">
+          <div class="card-poster-wrap">
+            ${poster ? '<img src="' + poster + '" alt="" class="card-poster" width="80" height="120" referrerpolicy="no-referrer" loading="lazy" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">' : ''}
+            <div class="film-poster-placeholder" style="${poster ? 'display:none' : ''}">${m.is_series ? '📺' : '🎬'}</div>
+          </div>
+          <div class="film-info">
+            <div class="film-title">${escapeHtml(m.title)}${year}${ratingStr}</div>
+            ${descHtml}
+            <div class="film-status">Статус: В базе</div>
+          </div>
+        </a>
+        <div class="film-buttons">
+          <a href="${link}" target="_blank" rel="noopener" class="btn btn-small btn-primary">Продолжить в Telegram</a>${streamingBtn}
         </div>
-        <div class="film-info">
-          <div class="film-title">${escapeHtml(m.title)}${year}${ratingStr}</div>
-          ${descHtml}
-          <div class="film-status">Статус: В базе</div>
-          <span class="btn btn-small btn-primary">Продолжить в Telegram</span>
-        </div>
-      </a>`;
+      </div>`;
   }
 
   function renderUnwatchedList() {
@@ -459,18 +467,26 @@
             const link = filmDeepLink(s.kp_id, true);
             const progress = s.progress ? `Прогресс: ${s.progress}` : 'Не начат';
             const poster = posterUrl(s.kp_id);
+            const streamingUrl = (s.online_link || '').trim();
+            const streamingBtn = streamingUrl
+              ? '<a href="' + escapeHtml(streamingUrl) + '" target="_blank" rel="noopener" class="btn btn-small btn-secondary film-streaming-btn" onclick="event.stopPropagation()">Просмотр на стриминге ⏯️</a>'
+              : '';
             return `
-              <a href="${link}" target="_blank" rel="noopener" class="card series-card">
-                <div class="card-poster-wrap">
-                  ${poster ? '<img src="' + poster + '" alt="" class="card-poster" width="80" height="120" referrerpolicy="no-referrer" loading="lazy" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">' : ''}
-                  <div class="film-poster-placeholder" style="${poster ? 'display:none' : ''}">📺</div>
+              <div class="card series-card">
+                <a href="${link}" target="_blank" rel="noopener" class="film-card-main">
+                  <div class="card-poster-wrap">
+                    ${poster ? '<img src="' + poster + '" alt="" class="card-poster" width="80" height="120" referrerpolicy="no-referrer" loading="lazy" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\'">' : ''}
+                    <div class="film-poster-placeholder" style="${poster ? 'display:none' : ''}">📺</div>
+                  </div>
+                  <div class="film-info">
+                    <div class="film-title">${escapeHtml(s.title)}</div>
+                    <div class="film-status">${progress}</div>
+                  </div>
+                </a>
+                <div class="film-buttons">
+                  <a href="${link}" target="_blank" rel="noopener" class="btn btn-small btn-primary">Продолжить в Telegram</a>${streamingBtn}
                 </div>
-                <div class="film-info">
-                  <div class="film-title">${escapeHtml(s.title)}</div>
-                  <div class="film-status">${progress}</div>
-                  <span class="btn btn-small btn-primary">Продолжить в Telegram</span>
-                </div>
-              </a>`;
+              </div>`;
           }).join('')
         : '<p class="empty-hint">Нет сериалов. Добавьте в боте.</p>';
     });
@@ -489,6 +505,7 @@
             const ratingKpStr = r.rating_kp != null ? ' · КП: ' + Number(r.rating_kp).toFixed(1) : '';
             const desc = (r.description || '').trim();
             const descHtml = desc ? '<div class="film-description">' + escapeHtml(desc.slice(0, 200)) + (desc.length > 200 ? '…' : '') + '</div>' : '';
+            const raterStr = (r.rater_username && r.rater_username.trim()) ? ' · ' + escapeHtml(r.rater_username.trim()) : '';
             return `
               <a href="${link}" target="_blank" rel="noopener" class="card film-card">
                 <div class="card-poster-wrap">
@@ -498,7 +515,7 @@
                 <div class="film-info">
                   <div class="film-title">${escapeHtml(r.title)}${year}${ratingKpStr}</div>
                   ${descHtml}
-                  <div class="film-status">⭐ ${r.rating}</div>
+                  <div class="film-status">⭐ ${r.rating}${raterStr}</div>
                   <span class="btn btn-small btn-primary">Продолжить в Telegram</span>
                 </div>
               </a>`;
