@@ -880,9 +880,11 @@
       isSeries: () => {
         const modalEl = document.querySelector('#modal .title-duration.color-dark-font-secondary span');
         if (modalEl && /сезон|сезона|сезоны|сезонов|сезону/i.test(modalEl.textContent || '')) return true;
-        const el = document.querySelector('.player-vod .episode.now .marquee-wrap span span');
-        const t = el?.textContent?.trim() || '';
-        return /Сезон\s+\d+/i.test(t);
+        const episodeEl = document.querySelector('.player-vod .episode.now .marquee-wrap span span') ||
+          document.querySelector('.player-footer-info .episode.now .marquee-wrap span span') ||
+          document.querySelector('.episode.now .marquee-wrap span span');
+        const t = episodeEl?.textContent?.trim() || '';
+        return /Сезон|Серия/i.test(t);
       },
       title: {
         selector: '#modal .header.fixed .title, #modal .header.fixed > div, #scroll-container main .player-vod .player-footer-info .schedule-line.flex-space-between.flex-nowrap div span span',
@@ -907,11 +909,16 @@
         }
       },
       seasonEpisode: {
-        selector: '.player-vod .episode.now .marquee-wrap span span',
+        selector: '.player-vod .episode.now .marquee-wrap span span, .player-footer-info .episode.now .marquee-wrap span span, .episode.now .marquee-wrap span span',
         extract: (el) => {
           const t = el?.textContent?.trim() || '';
-          const m = t.match(/Сезон\s+(\d+)/i);
-          if (m) return { season: parseInt(m[1], 10), episode: null };
+          const seasonM = t.match(/Сезон\s+(\d+)/i);
+          const episodeM = t.match(/Серия\s+(\d+)/i);
+          if (seasonM) {
+            const season = parseInt(seasonM[1], 10);
+            const episode = episodeM ? parseInt(episodeM[1], 10) : null;
+            return { season, episode };
+          }
           return null;
         }
       }

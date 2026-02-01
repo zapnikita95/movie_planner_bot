@@ -534,7 +534,7 @@ async function detectAndLoadFilm(url, urlChanged = true) {
       return;
     }
 
-    const streamingHosts = ['tvoe.live', 'ivi.ru', 'okko.tv', 'kinopoisk.ru', 'hd.kinopoisk.ru', 'premier.one', 'wink.ru', 'start.ru', 'amediateka.ru', 'rezka.ag', 'rezka.ad', 'hdrezka', 'lordfilm', 'allserial', 'boxserial'];
+    const streamingHosts = ['tvoe.live', 'ivi.ru', 'okko.tv', 'kinopoisk.ru', 'hd.kinopoisk.ru', 'premier.one', 'wink.ru', 'start.ru', 'amediateka.ru', 'rezka.ag', 'rezka.ad', 'hdrezka', 'lordfilm', 'allserial', 'boxserial', 'kino.pub', 'smotreshka.tv'];
     let hostname = '';
     try {
       hostname = new URL(url).hostname.toLowerCase();
@@ -1059,10 +1059,13 @@ async function loadFromStreamingPage(info) {
         } else {
           // Кнопка: отметить открытую на экране серию (текущую)
           const markBtn = document.createElement('button');
+          markBtn.type = 'button';
           markBtn.textContent = `Отметить серию ${targetSeason}×${targetEpisode}`;
           markBtn.className = 'btn btn-primary';
           markBtn.style.marginTop = '8px';
-          markBtn.addEventListener('click', async () => {
+          markBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
             markBtn.disabled = true;
             markBtn.textContent = '⏳ Отмечаем...';
             try {
@@ -1121,10 +1124,13 @@ async function loadFromStreamingPage(info) {
           
           if (hasUnwatchedBefore) {
             const markAllBtn = document.createElement('button');
+            markAllBtn.type = 'button';
             markAllBtn.textContent = 'Отметить все предыдущие';
             markAllBtn.className = 'btn btn-secondary';
             markAllBtn.style.marginTop = '4px';
-            markAllBtn.addEventListener('click', async () => {
+            markAllBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
             markAllBtn.disabled = true;
             markAllBtn.textContent = '⏳ Отмечаем...';
             try {
@@ -1198,10 +1204,13 @@ async function loadFromStreamingPage(info) {
         
         // Кнопка отметки следующей непросмотренной серии
         const markNextBtn = document.createElement('button');
+        markNextBtn.type = 'button';
         markNextBtn.textContent = `Отметить серию ${nextSeason}×${nextEpisode}`;
         markNextBtn.className = 'btn btn-primary';
         markNextBtn.style.marginTop = '8px';
-        markNextBtn.addEventListener('click', async () => {
+        markNextBtn.addEventListener('click', async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
           markNextBtn.disabled = true;
           markNextBtn.textContent = '⏳ Отмечаем...';
           try {
@@ -1254,10 +1263,13 @@ async function loadFromStreamingPage(info) {
         // Кнопка "Отметить все предыдущие" - только если есть непросмотренные ДО следующей
         if (filmJson.has_unwatched_before && (nextSeason > 1 || nextEpisode > 1)) {
           const markAllBtn = document.createElement('button');
+          markAllBtn.type = 'button';
           markAllBtn.textContent = 'Отметить все предыдущие';
           markAllBtn.className = 'btn btn-secondary';
           markAllBtn.style.marginTop = '4px';
-          markAllBtn.addEventListener('click', async () => {
+          markAllBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
             markAllBtn.disabled = true;
             markAllBtn.textContent = '⏳ Отмечаем...';
             try {
@@ -1336,7 +1348,10 @@ async function loadFromStreamingPage(info) {
           
           // Добавляем обработчики
           ratingDiv.querySelectorAll('button[data-rating]').forEach(btn => {
-            btn.addEventListener('click', async () => {
+            btn.type = 'button';
+            btn.addEventListener('click', async (e) => {
+              e.preventDefault();
+              e.stopPropagation();
               const rating = parseInt(btn.dataset.rating);
               ratingDiv.querySelectorAll('button').forEach(b => b.disabled = true);
               try {
@@ -1374,10 +1389,13 @@ async function loadFromStreamingPage(info) {
         } else {
           // Если не просмотрен - показываем кнопку отметки
           const markBtn = document.createElement('button');
+          markBtn.type = 'button';
           markBtn.textContent = 'Отметить фильм просмотренным';
           markBtn.className = 'btn btn-primary';
           markBtn.style.marginTop = '8px';
-          markBtn.addEventListener('click', async () => {
+          markBtn.addEventListener('click', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
             markBtn.disabled = true;
             markBtn.textContent = '⏳ Отмечаем...';
             try {

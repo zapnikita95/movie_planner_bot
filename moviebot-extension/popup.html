@@ -24,7 +24,7 @@
                 </div>
                 <div class="form-group">
                     <input type="text" id="code-input" placeholder="Введите код из бота" maxlength="10" class="input">
-                    <button id="bind-btn" class="btn btn-primary">Привязать</button>
+                    <button type="button" id="bind-btn" class="btn btn-primary">Привязать</button>
                 </div>
                 <p id="status" class="status"></p>
             </div>
@@ -47,8 +47,8 @@
                     <div id="film-confirmation" class="film-confirmation hidden" style="margin-top: 10px; padding: 10px; background: #f0f0f0; border-radius: 5px;">
                         <p style="margin: 0 0 8px 0; font-size: 14px;">Фильм определён верно?</p>
                         <div style="display: flex; gap: 8px;">
-                            <button id="confirm-film-yes" class="btn btn-primary" style="flex: 1; padding: 6px 12px; font-size: 12px;">Да</button>
-                            <button id="confirm-film-no" class="btn btn-secondary" style="flex: 1; padding: 6px 12px; font-size: 12px;">Нет</button>
+                            <button type="button" id="confirm-film-yes" class="btn btn-primary" style="flex: 1; padding: 6px 12px; font-size: 12px;">Да</button>
+                            <button type="button" id="confirm-film-no" class="btn btn-secondary" style="flex: 1; padding: 6px 12px; font-size: 12px;">Нет</button>
                         </div>
                     </div>
                 </div>
@@ -57,8 +57,8 @@
                     <div class="form-group">
                         <label>Выберите, где смотреть:</label>
                         <div class="plan-type-buttons">
-                            <button id="plan-type-home" class="btn btn-primary plan-type-btn active" data-type="home">🏠 Дома</button>
-                            <button id="plan-type-cinema" class="btn btn-secondary plan-type-btn" data-type="cinema">🎬 В кино</button>
+                            <button type="button" id="plan-type-home" class="btn btn-primary plan-type-btn active" data-type="home">🏠 Дома</button>
+                            <button type="button" id="plan-type-cinema" class="btn btn-secondary plan-type-btn" data-type="cinema">🎬 В кино</button>
                         </div>
                     </div>
                     <div class="form-group">
@@ -78,19 +78,19 @@
                             <option value="">Выберите сервис</option>
                         </select>
                     </div>
-                    <button id="create-plan-btn" class="btn btn-primary">Создать план</button>
-                    <button id="cancel-plan-btn" class="btn btn-secondary">Отмена</button>
-                    <button id="add-tickets-btn" class="btn btn-secondary hidden" style="margin-top: 10px;" disabled>🎟️ Добавить билеты</button>
+                    <button type="button" id="create-plan-btn" class="btn btn-primary">Создать план</button>
+                    <button type="button" id="cancel-plan-btn" class="btn btn-secondary">Отмена</button>
+                    <button type="button" id="add-tickets-btn" class="btn btn-secondary hidden" style="margin-top: 10px;" disabled>🎟️ Добавить билеты</button>
                 </div>
                 <div id="streaming-mark-last" class="streaming-mark-last hidden" style="display: none !important; margin-bottom: 12px; padding: 10px; background: #f0f0f0; border-radius: 8px;">
                     <p style="margin: 0 0 8px 0; font-size: 13px;">Отметить последнюю просмотренную серию?</p>
                     <p id="streaming-mark-last-label" style="margin: 0 0 8px 0; font-size: 12px; opacity: 0.8;"></p>
-                    <button id="streaming-mark-last-btn" class="btn btn-primary" style="width: 100%; padding: 8px;">✅ Отметить серию</button>
+                    <button type="button" id="streaming-mark-last-btn" class="btn btn-primary" style="width: 100%; padding: 8px;">✅ Отметить серию</button>
                 </div>
                 <div id="search-section" class="search-section hidden" style="display: none;">
                     <div class="form-group">
                         <input type="text" id="search-input" class="input" placeholder="Поиск фильмов и сериалов...">
-                        <button id="search-btn" class="btn btn-secondary" style="margin-top: 10px;">🔍 Найти</button>
+                        <button type="button" id="search-btn" class="btn btn-secondary" style="margin-top: 10px;">🔍 Найти</button>
                     </div>
                     <div id="search-results" class="search-results hidden"></div>
                 </div>
