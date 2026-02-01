@@ -3035,15 +3035,22 @@ def create_web_app(bot):
         cur = get_db_cursor()
         with db_lock:
             cur.execute("""
-                SELECT id, kp_id, title, year, is_series, online_link FROM movies
-                WHERE chat_id = %s AND watched = 0
-                ORDER BY id DESC
+                SELECT m.id, m.kp_id, m.title, m.year, m.is_series, m.online_link,
+                    (SELECT 'S' || st.season_number || ' • E' || st.episode_number
+                     FROM series_tracking st
+                     WHERE st.chat_id = m.chat_id AND st.film_id = m.id AND st.watched = TRUE
+                     ORDER BY st.season_number DESC, st.episode_number DESC
+                     LIMIT 1) AS progress
+                FROM movies m
+                WHERE m.chat_id = %s AND m.watched = 0
+                ORDER BY m.id DESC
                 LIMIT 200
             """, (chat_id,))
             rows = cur.fetchall()
         items = []
         for r in rows:
             online_link = r.get('online_link') if isinstance(r, dict) else (r[5] if len(r) > 5 else None)
+            progress = r.get('progress') if isinstance(r, dict) else (r[6] if len(r) > 6 else None)
             items.append({
                 "film_id": r.get('id') if isinstance(r, dict) else r[0],
                 "kp_id": str(r.get('kp_id') if isinstance(r, dict) else r[1]),
@@ -3051,6 +3058,7 @@ def create_web_app(bot):
                 "year": r.get('year') if isinstance(r, dict) else r[3],
                 "is_series": bool(r.get('is_series') if isinstance(r, dict) else (r[4] if len(r) > 4 else 0)),
                 "online_link": (online_link or '').strip() or None,
+                "progress": (progress or '').strip() or None,
                 "description": None,
                 "rating_kp": None,
             })
