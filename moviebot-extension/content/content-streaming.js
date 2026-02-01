@@ -872,8 +872,7 @@
       isValidPage: () => {
         const path = (window.location.pathname || '').replace(/\/$/, '');
         if (path === '' || path === '/' || path === '/vod' || path === '/channels/now' || path === '/archive') return false;
-        if (!path.startsWith('/vod/')) return false;
-        return path.includes('/watch');
+        return path.startsWith('/vod/');
       },
       isSeries: () => {
         const modalEl = document.querySelector('#modal .title-duration.color-dark-font-secondary span');
@@ -887,9 +886,17 @@
         extract: (el) => el?.textContent?.trim() || null
       },
       year: {
-        selector: '#modal .item.year, #modal span.item.year, main .container-1440 .row a .description.hidden-size-small',
+        selector: '#modal .item.year',
         extract: (el) => {
-          const t = el?.textContent?.trim() || '';
+          let t = el?.textContent?.trim() || '';
+          if (!t) {
+            const modal = document.querySelector('#modal');
+            if (modal) {
+              const yEl = modal.querySelector('.item.year');
+              t = yEl?.textContent?.trim() || '';
+            }
+          }
+          if (!t) return null;
           const m = t.match(/^(\d{4})/);
           if (m) return m[1];
           const m2 = t.match(/(\d{4})/);
