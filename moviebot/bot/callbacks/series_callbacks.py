@@ -18,7 +18,7 @@ from moviebot.database.db_operations import get_watched_emojis, get_watched_cust
 
 from moviebot.api.kinopoisk_api import get_seasons_data, extract_movie_info
 
-from moviebot.utils.helpers import has_notifications_access
+from moviebot.utils.helpers import has_notifications_access, has_series_features_access, maybe_send_series_limit_message
 
 from moviebot.scheduler import send_series_notification, check_series_for_new_episodes
 
@@ -78,16 +78,6 @@ def register_series_callbacks(bot):
                     logger.info(f"[SERIES TRACK] Очищаем состояние автоотметки при переходе к списку сезонов: user_id={user_id}, kp_id={kp_id}")
                     del user_episode_auto_mark_state[user_id]
 
-            # Проверяем доступ к функциям уведомлений
-            if not has_notifications_access(chat_id, user_id):
-                logger.warning(f"[SERIES TRACK] Нет доступа: user_id={user_id}, chat_id={chat_id}")
-                bot.answer_callback_query(
-                    call.id,
-                    "🔒 Функционал можно подключить через /payment",
-                    show_alert=True
-                )
-                return
-
             # Получаем film_id (добавляем в базу, если нет)
             link = f"https://www.kinopoisk.ru/series/{kp_id}/"
             info = extract_movie_info(link)
@@ -102,10 +92,20 @@ def register_series_callbacks(bot):
                 bot.answer_callback_query(call.id, "❌ Ошибка при добавлении сериала в базу", show_alert=True)
                 return
 
+            if not has_series_features_access(chat_id, user_id, film_id):
+                logger.warning(f"[SERIES TRACK] Нет доступа: user_id={user_id}, chat_id={chat_id}, film_id={film_id}")
+                bot.answer_callback_query(
+                    call.id,
+                    "🔒 Функционал можно подключить через /payment",
+                    show_alert=True
+                )
+                return
+
             title = info.get('title', 'Сериал')
 
             if was_inserted:
                 bot.send_message(chat_id, f"✅ Сериал добавлен в базу!")
+                maybe_send_series_limit_message(bot, chat_id, user_id, getattr(call.message, 'message_thread_id', None))
                 logger.info(f"[SERIES TRACK] Сериал добавлен в базу: film_id={film_id}, title={title}")
 
             # Проверяем, отмечен ли сериал как просмотренный
@@ -525,16 +525,6 @@ def series_subscribe_callback(call):
         kp_id = data[1]
         logger.info(f"[SERIES SUBSCRIBE] Парсинг данных: kp_id={kp_id}, chat_id={chat_id}, user_id={user_id}")
         
-        # Проверяем доступ к функциям уведомлений
-        if not has_notifications_access(chat_id, user_id):
-            logger.warning(f"[SERIES SUBSCRIBE] Нет доступа к уведомлениям для user_id={user_id}, chat_id={chat_id}")
-            bot.answer_callback_query(
-                call.id, 
-                "🔒 Функционал можно подключить через /payment", 
-                show_alert=True
-            )
-            return
-        
         # Используем локальные соединение и курсор
         from moviebot.database.db_connection import get_db_connection, get_db_cursor
         conn_local = get_db_connection()
@@ -594,6 +584,11 @@ def series_subscribe_callback(call):
                 logger.info(f"[SERIES SUBSCRIBE] Сериал добавлен/найден в БД: film_id={film_id}, title={title}, was_inserted={was_inserted}")
                 # Уведомление «добавлен в базу» отправим после успешной подписки (одним сообщением)
         
+        if not has_series_features_access(chat_id, user_id, film_id):
+            logger.warning(f"[SERIES SUBSCRIBE] Нет доступа для film_id={film_id}")
+            bot.answer_callback_query(call.id, "🔒 Функционал можно подключить через /payment", show_alert=True)
+            return
+        
         # Добавление подписки — отдельное соединение (ensure_movie_in_database мог закрыть глобальный cursor)
         logger.info(f"[SERIES SUBSCRIBE] Добавляю подписку в БД: chat_id={chat_id}, film_id={film_id}, kp_id={kp_id}, user_id={user_id}")
         import psycopg2
@@ -640,9 +635,11 @@ def series_subscribe_callback(call):
         # Одно сообщение: добавлен в базу + подписка (если сериал только что добавили и подписка прошла)
         if was_inserted and subscription_ok:
             bot.send_message(chat_id, "✅ Сериал добавлен в базу. Вы подписаны на уведомления о новых сериях.")
+            maybe_send_series_limit_message(bot, chat_id, user_id, getattr(call.message, 'message_thread_id', None))
             logger.info("[SERIES SUBSCRIBE] Уведомление об добавлении и подписке отправлено")
         elif was_inserted and not subscription_ok:
             bot.send_message(chat_id, "✅ Сериал добавлен в базу!")
+            maybe_send_series_limit_message(bot, chat_id, user_id, getattr(call.message, 'message_thread_id', None))
             logger.info("[SERIES SUBSCRIBE] Уведомление об добавлении отправлено")
         
         # Получение данных о сезонах (с try)
@@ -815,17 +812,7 @@ def series_subscribe_callback(call):
             kp_id = data[1]
             logger.info(f"[SERIES UNSUBSCRIBE] Парсинг данных: kp_id={kp_id}, chat_id={chat_id}, user_id={user_id}")
             
-            # Проверяем доступ к функциям уведомлений
-            if not has_notifications_access(chat_id, user_id):
-                logger.warning(f"[SERIES UNSUBSCRIBE] Нет доступа к уведомлениям для user_id={user_id}, chat_id={chat_id}")
-                bot.answer_callback_query(
-                    call.id, 
-                    "🔒 Функционал можно подключить через /payment", 
-                    show_alert=True
-                )
-                return
-            
-            # Получение film_id
+            # Получение film_id (нужен для проверки has_series_features_access)
             conn_local = get_db_connection()
             cursor_local = get_db_cursor()
             try:
@@ -844,6 +831,10 @@ def series_subscribe_callback(call):
                         title = row[1]
                     
                     logger.info(f"[SERIES UNSUBSCRIBE] Найден сериал: film_id={film_id}, title={title}")
+                    
+                    if not has_series_features_access(chat_id, user_id, film_id):
+                        bot.answer_callback_query(call.id, "🔒 Функционал можно подключить через /payment", show_alert=True)
+                        return
                     
                     # Отписываемся
                     logger.info(f"[SERIES UNSUBSCRIBE] Отписка от сериала: user_id={user_id}, film_id={film_id}")
@@ -997,12 +988,12 @@ def series_subscribe_callback(call):
             user_id = call.from_user.id
             desc_msg_id = call.message.message_id
             message_thread_id = getattr(call.message, 'message_thread_id', None)
-            if not has_notifications_access(chat_id, user_id):
-                bot.answer_callback_query(call.id, "🔒 Функционал можно подключить через /payment", show_alert=True)
-                return
             film_id, _ = ensure_movie_in_database(chat_id, kp_id, f"https://www.kinopoisk.ru/series/{kp_id}/", extract_movie_info(f"https://www.kinopoisk.ru/series/{kp_id}/"), user_id)
             if not film_id:
                 bot.answer_callback_query(call.id, "❌ Сериал не найден", show_alert=True)
+                return
+            if not has_series_features_access(chat_id, user_id, film_id):
+                bot.answer_callback_query(call.id, "🔒 Функционал можно подключить через /payment", show_alert=True)
                 return
             from moviebot.bot.handlers.seasons import get_next_unwatched_episode
             next_ep = get_next_unwatched_episode(chat_id, film_id, user_id, kp_id)

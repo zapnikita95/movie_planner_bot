@@ -27,8 +27,13 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 # 4. Твои локальные импорты (отсортируй по алфавиту внутри группы)
 from moviebot.bot.bot_init import bot, BOT_ID
-from moviebot.database.db_connection import db_lock  # Только db_lock, get_db_connection убрали
-from moviebot.config import PLANS_TZ
+from moviebot.database.db_connection import db_lock
+from moviebot.config import PLANS_TZ, DATABASE_URL
+
+# Локальные соединения: scheduler не использует глобальные get_db_connection/get_db_cursor
+def _scheduler_conn():
+    """Новое соединение для каждой операции (не глобальное)."""
+    return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
 from moviebot.api.kinopoisk_api import get_seasons_data
 from moviebot.api.kinopoisk_api import get_external_sources
 
@@ -36,7 +41,7 @@ from moviebot.api.kinopoisk_api import get_external_sources
 # from moviebot.utils.helpers import (...)
 from moviebot.database.db_operations import get_user_timezone_or_default, get_notification_settings
 from moviebot.bot.handlers.seasons import get_series_airing_status
-from moviebot.utils.helpers import has_notifications_access
+from moviebot.utils.helpers import has_notifications_access, has_series_features_access
 
 logger = logging.getLogger(__name__)
 
@@ -69,9 +74,8 @@ def hourly_stats():
 # Функции для уведомлений о планах (определяем до использования в scheduler)
 def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=None, user_id=None):
     """Отправляет уведомление о запланированном просмотре"""
-    # Используем локальные соединение и курсор
-    from moviebot.database.db_connection import get_db_connection, db_lock
-    conn_local = get_db_connection()
+    # Локальное соединение (не глобальное)
+    conn_local = _scheduler_conn()
     cursor_local = None
     
     try:
@@ -86,7 +90,7 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
         is_series = False
         last_episode_info = None
         if user_id and film_id:
-            conn_series = get_db_connection()
+            conn_series = _scheduler_conn()
             cursor_series = None
             try:
                 with db_lock:
@@ -131,15 +135,15 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
             text += f"\n\n📺 <b>Последняя просмотренная серия:</b> Сезон {last_episode_info['season']}, Серия {last_episode_info['episode']}"
        
         has_access = False
-        if user_id:
-            has_access = has_notifications_access(chat_id, user_id)
+        if user_id and film_id:
+            has_access = has_series_features_access(chat_id, user_id, film_id)
        
         if not has_access and user_id:
             text += "\n\n💡 <b>Вы можете отслеживать просмотренные серии и подключить напоминания о выходе новых серий с тарифом 🔔 Уведомления</b>"
        
         # Для планов "дома" — существующий код с онлайн-кинотеатрами
         if plan_type == 'home' and plan_id:
-            conn_plan = get_db_connection()
+            conn_plan = _scheduler_conn()
             cursor_plan = None
             plan_row = None
             try:
@@ -184,7 +188,7 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
                     markup.add(InlineKeyboardButton(streaming_service, url=streaming_url))
                     
                     # Добавляем кнопку "Перейти к описанию", если есть kp_id
-                    conn_kp = get_db_connection()
+                    conn_kp = _scheduler_conn()
                     cursor_kp = None
                     kp_id = None
                     try:
@@ -219,7 +223,7 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
        
         # Новый блок для планов "в кино"
         elif plan_type == 'cinema' and plan_id:
-            conn_cinema = get_db_connection()
+            conn_cinema = _scheduler_conn()
             cursor_cinema = None
             try:
                 with db_lock:
@@ -256,7 +260,7 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
 
         # Получаем kp_id для кнопок "Перейти к описанию" и "Изменить в расписании"
         if film_id and plan_id:
-            conn_kp = get_db_connection()
+            conn_kp = _scheduler_conn()
             cursor_kp = None
             try:
                 with db_lock:
@@ -312,7 +316,7 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
        
         # КРИТИЧЕСКИ ВАЖНО: Обновляем флаг notification_sent СРАЗУ после отправки
         if plan_id:
-            conn_update = get_db_connection()
+            conn_update = _scheduler_conn()
             cursor_update = None
             try:
                 with db_lock:
@@ -339,7 +343,6 @@ def send_plan_notification(chat_id, film_id, title, link, plan_type, plan_id=Non
 
 def send_plan_notification_combined(chat_id, date_str, user_id=None):
     """Одно утреннее уведомление на день: список всех планов на дату с кнопками к описанию каждого фильма."""
-    from moviebot.database.db_connection import get_db_connection, get_db_cursor
 
     if not bot:
         return
@@ -352,8 +355,8 @@ def send_plan_notification_combined(chat_id, date_str, user_id=None):
     start_utc = start_local.astimezone(pytz.utc)
     end_utc = start_utc + timedelta(days=1)
 
-    conn_local = get_db_connection()
-    cursor_local = get_db_cursor()
+    conn_local = _scheduler_conn()
+    cursor_local = conn_local.cursor()
     try:
         with db_lock:
             cursor_local.execute('''
@@ -471,8 +474,8 @@ def send_plan_notification_combined(chat_id, date_str, user_id=None):
         logger.error(f"[PLAN COMBINED] Ошибка отправки: {e}", exc_info=True)
         return
 
-    conn_update = get_db_connection()
-    cursor_update = get_db_cursor()
+    conn_update = _scheduler_conn()
+    cursor_update = conn_update.cursor()
     try:
         with db_lock:
             for p in plans:
@@ -494,10 +497,9 @@ def send_plan_notification_combined(chat_id, date_str, user_id=None):
 
 def send_ticket_notification(chat_id, plan_id):
     """Отправляет напоминание с билетами за 10 минут до сеанса"""
-    from moviebot.database.db_connection import get_db_connection, get_db_cursor
     
-    conn_local = get_db_connection()
-    cursor_local = get_db_cursor()
+    conn_local = _scheduler_conn()
+    cursor_local = conn_local.cursor()
     try:
         with db_lock:
             cursor_local.execute('''
@@ -603,10 +605,9 @@ def check_and_send_plan_notifications():
         
 
         # Используем локальное соединение вместо глобального для избежания проблем с закрытыми соединениями
-        from moviebot.database.db_connection import get_db_connection, get_db_cursor
         
-        conn_local = get_db_connection()
-        cursor_local = get_db_cursor()
+        conn_local = _scheduler_conn()
+        cursor_local = conn_local.cursor()
         
         # КРИТИЧЕСКИЙ ФИКС: Добавляем rollback при ошибках транзакции
         try:
@@ -626,7 +627,7 @@ def check_and_send_plan_notifications():
                     if cursor_local.closed:
                         logger.warning("[PLAN CHECK] Курсор закрыт, создаем новый")
                         cursor_local.close()
-                        cursor_local = get_db_cursor()
+                        cursor_local = conn_local.cursor()
                     
                     cursor_local.execute('''
 
@@ -918,14 +919,13 @@ def check_and_send_rate_reminders():
     отправляет сообщение «Как вам фильм X? Оцените и посмотрите факты» с кнопками Оценить и Факты.
     Не отправляет, если фильм уже оценён хотя бы одним пользователем в чате."""
     import html as html_module
-    from moviebot.database.db_connection import get_db_connection, get_db_cursor
 
     now_utc = datetime.now(pytz.utc)
     window_start = now_utc - timedelta(hours=3, minutes=20)
     window_end = now_utc - timedelta(hours=3) + timedelta(minutes=20)
 
-    conn_local = get_db_connection()
-    cursor_local = get_db_cursor()
+    conn_local = _scheduler_conn()
+    cursor_local = conn_local.cursor()
     try:
         with db_lock:
             cursor_local.execute('''
@@ -970,8 +970,8 @@ def check_and_send_rate_reminders():
             _mark_rate_reminder_sent(plan_id, chat_id)
             continue
 
-        conn_check = get_db_connection()
-        cursor_check = get_db_cursor()
+        conn_check = _scheduler_conn()
+        cursor_check = conn_check.cursor()
         has_rating = False
         try:
             with db_lock:
@@ -1021,9 +1021,8 @@ def check_and_send_rate_reminders():
 
 def _mark_rate_reminder_sent(plan_id, chat_id):
     """Отмечает план как «напоминание об оценке отправлено»."""
-    from moviebot.database.db_connection import get_db_connection, get_db_cursor
-    conn_up = get_db_connection()
-    cursor_up = get_db_cursor()
+    conn_up = _scheduler_conn()
+    cursor_up = conn_up.cursor()
     try:
         with db_lock:
             cursor_up.execute(
@@ -1054,7 +1053,6 @@ def _mark_rate_reminder_sent(plan_id, chat_id):
 def clean_home_plans():
     """Ежедневно удаляет планы дома на вчерашний день, если по фильму нет оценок.
     Также удаляет все планы дома на прошедшие выходные (суббота и воскресенье) в понедельник."""
-    from moviebot.database.db_connection import get_db_connection, get_db_cursor
     
     now = datetime.now(plans_tz)
     today = now.date()
@@ -1063,8 +1061,8 @@ def clean_home_plans():
 
     deleted_count = 0
     
-    conn_local = get_db_connection()
-    cursor_local = get_db_cursor()
+    conn_local = _scheduler_conn()
+    cursor_local = conn_local.cursor()
 
     try:
         with db_lock:
@@ -1229,12 +1227,11 @@ def clean_home_plans():
 
 def clean_cinema_plans():
     """Каждый понедельник удаляет все планы кино (фильмы) и планы мероприятий, которые прошли более 1 дня назад"""
-    from moviebot.database.db_connection import get_db_connection, get_db_cursor
     from datetime import datetime, timedelta
     import pytz
     
-    conn_local = get_db_connection()
-    cursor_local = get_db_cursor()
+    conn_local = _scheduler_conn()
+    cursor_local = conn_local.cursor()
     try:
         with db_lock:
             now_utc = datetime.now(pytz.utc)
@@ -1279,11 +1276,38 @@ def clean_cinema_plans():
 # Добавляем задачи очистки и голосования в scheduler
 # Вызовы scheduler.add_job должны быть в moviebot.py после импорта модуля
 
-def send_series_notification(chat_id, film_id, kp_id, title, season, episode):
-    """Отправляет уведомление о выходе новой серии и проверяет следующую дату"""
+def send_series_notification(chat_id, film_id, kp_id, title, season, episode, user_id=None):
+    """Отправляет уведомление о выходе новой серии и проверяет следующую дату. user_id опционален (для personal chat_id=user_id)."""
     try:
         if not bot:
             logger.error("[SERIES NOTIFICATION] bot не установлен")
+            return
+        
+        # Проверка доступа: personal — chat_id=user_id; group — проверяем подписчиков
+        should_send = False
+        if chat_id > 0:
+            should_send = has_series_features_access(chat_id, chat_id, film_id)
+        else:
+            conn_sub = _scheduler_conn()
+            cur_sub = None
+            try:
+                with db_lock:
+                    cur_sub = conn_sub.cursor()
+                    cur_sub.execute('SELECT user_id FROM series_subscriptions WHERE chat_id=%s AND film_id=%s AND subscribed=TRUE', (chat_id, film_id))
+                    subs = cur_sub.fetchall()
+                for r in (subs or []):
+                    uid = r.get('user_id') if isinstance(r, dict) else r[0]
+                    if has_series_features_access(chat_id, uid, film_id):
+                        should_send = True
+                        break
+            finally:
+                if cur_sub:
+                    try: cur_sub.close()
+                    except: pass
+                try: conn_sub.close()
+                except: pass
+        if not should_send:
+            logger.info(f"[SERIES NOTIFICATION] Пропуск — нет доступа для chat_id={chat_id}, film_id={film_id}")
             return
         
         text = f"🔔 <b>Новая серия вышла!</b>\n\n"
@@ -1361,8 +1385,8 @@ def send_series_notification(chat_id, film_id, kp_id, title, season, episode):
                 # Получаем часовой пояс пользователя
                 user_tz = pytz.timezone('Europe/Moscow')
                 try:
-                    conn_tz = get_db_connection()
-                    cursor_tz = get_db_cursor()
+                    conn_tz = _scheduler_conn()
+                    cursor_tz = conn_tz.cursor()
                     try:
                         with db_lock:
                             cursor_tz.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'timezone'", (chat_id,))
@@ -1436,8 +1460,8 @@ def check_series_for_new_episodes(chat_id, film_id, kp_id, user_id):
             return
         
         # Проверяем, подписан ли еще пользователь
-        conn_sub = get_db_connection()
-        cursor_sub = get_db_cursor()
+        conn_sub = _scheduler_conn()
+        cursor_sub = conn_sub.cursor()
         try:
             with db_lock:
                 cursor_sub.execute('SELECT subscribed FROM series_subscriptions WHERE chat_id = %s AND film_id = %s AND user_id = %s', (chat_id, film_id, user_id))
@@ -1455,6 +1479,10 @@ def check_series_for_new_episodes(chat_id, film_id, kp_id, user_id):
         
         if not is_subscribed:
             logger.info(f"[SERIES CHECK] Пользователь {user_id} отписался от сериала kp_id={kp_id}")
+            return
+        
+        if not has_series_features_access(chat_id, user_id, film_id):
+            logger.info(f"[SERIES CHECK] Нет доступа для user_id={user_id}, film_id={film_id} (не в первых 3)")
             return
         
         # Ищем следующую серию
@@ -1493,8 +1521,8 @@ def check_series_for_new_episodes(chat_id, film_id, kp_id, user_id):
             # Получаем часовой пояс пользователя
             user_tz = pytz.timezone('Europe/Moscow')
             try:
-                conn_tz = get_db_connection()
-                cursor_tz = get_db_cursor()
+                conn_tz = _scheduler_conn()
+                cursor_tz = conn_tz.cursor()
                 try:
                     with db_lock:
                         cursor_tz.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'timezone'", (chat_id,))
@@ -1519,8 +1547,8 @@ def check_series_for_new_episodes(chat_id, film_id, kp_id, user_id):
             notification_time = user_tz.localize(notification_time.replace(hour=10, minute=0))
             
             with db_lock:
-                conn_title = get_db_connection()
-                cursor_title = get_db_cursor()
+                conn_title = _scheduler_conn()
+                cursor_title = conn_title.cursor()
                 try:
                     cursor_title.execute("SELECT title FROM movies WHERE id = %s", (film_id,))
                     title_row = cursor_title.fetchone()
@@ -1575,10 +1603,9 @@ def check_series_for_new_episodes(chat_id, film_id, kp_id, user_id):
 
 def send_rating_reminder(chat_id, film_id, film_title, user_id):
     """Отправляет напоминание пользователю об оценке фильма на следующий день после просмотра"""
-    from moviebot.database.db_connection import get_db_connection, get_db_cursor
     
-    conn_local = get_db_connection()
-    cursor_local = get_db_cursor()
+    conn_local = _scheduler_conn()
+    cursor_local = conn_local.cursor()
     
     try:
         # Проверяем, не оценил ли уже пользователь
@@ -1643,13 +1670,12 @@ def send_rating_reminder(chat_id, film_id, film_title, user_id):
 
 def check_subscription_payments():
     """Проверяет подписки и отправляет уведомления за день до списания"""
-    from moviebot.database.db_connection import get_db_connection, get_db_cursor
     
     if not bot:
         return
     
-    conn_local = get_db_connection()
-    cursor_local = get_db_cursor()
+    conn_local = _scheduler_conn()
+    cursor_local = conn_local.cursor()
     
     try:
         from moviebot.database.db_operations import get_active_subscription        
@@ -1973,7 +1999,6 @@ def send_successful_payment_notification(
             from moviebot.utils.admin import get_all_admins, is_owner
             from moviebot.states import user_check_receipt_state
             from moviebot.bot.handlers.admin import OWNER_ID
-            from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock  # Локальный импорт (как в других местах scheduler.py)
             
             # Получаем информацию о подписке для админов
             sub_user_id = sub.get('user_id')
@@ -1982,9 +2007,8 @@ def send_successful_payment_notification(
             
             # Получаем реальную сумму последнего платежа (для upgrade — доплата)
             actual_amount = sub_price
-            from moviebot.database.db_connection import get_db_connection, get_db_cursor
-            conn_local = get_db_connection()
-            cursor_local = get_db_cursor()
+            conn_local = _scheduler_conn()
+            cursor_local = conn_local.cursor()
             try:
                 with db_lock:
                     cursor_local.execute("""
@@ -2079,7 +2103,6 @@ def process_recurring_payments():
     import psycopg2
     from psycopg2.extras import RealDictCursor
     from moviebot.config import DATABASE_URL
-    from moviebot.database.db_connection import db_lock
     import logging
     from datetime import datetime, timedelta
     import pytz
@@ -2510,10 +2533,9 @@ def process_recurring_payments():
 
 def get_random_events_enabled(chat_id):
     """Проверяет, включены ли случайные события для чата"""
-    from moviebot.database.db_connection import get_db_connection, get_db_cursor
     
-    conn_local = get_db_connection()
-    cursor_local = get_db_cursor()
+    conn_local = _scheduler_conn()
+    cursor_local = conn_local.cursor()
     try:
         with db_lock:
             cursor_local.execute("SELECT value FROM settings WHERE chat_id = %s AND key = 'random_events_enabled'", (chat_id,))
@@ -2535,13 +2557,12 @@ def get_random_events_enabled(chat_id):
 
 def was_event_sent_today(chat_id, event_type):
     """Проверяет, было ли отправлено событие/уведомление сегодня для данного чата"""
-    from moviebot.database.db_connection import get_db_connection, get_db_cursor
     
     if not bot:
         return False
     
-    conn_local = get_db_connection()
-    cursor_local = get_db_cursor()
+    conn_local = _scheduler_conn()
+    cursor_local = conn_local.cursor()
     
     try:
         now = datetime.now(PLANS_TZ)
@@ -2569,13 +2590,12 @@ def was_event_sent_today(chat_id, event_type):
 
 def was_event_sent_this_week(chat_id, event_types):
     """Проверяет, было ли отправлено любое из указанных событий/уведомлений на текущей неделе (понедельник-воскресенье)"""
-    from moviebot.database.db_connection import get_db_connection, get_db_cursor
     
     if not bot:
         return False
     
-    conn_local = get_db_connection()
-    cursor_local = get_db_cursor()
+    conn_local = _scheduler_conn()
+    cursor_local = conn_local.cursor()
     
     try:
         now = datetime.now(PLANS_TZ)
@@ -2613,13 +2633,12 @@ def was_event_sent_this_week(chat_id, event_types):
 
 def mark_event_sent(chat_id, event_type):
     """Отмечает, что событие/уведомление было отправлено сегодня"""
-    from moviebot.database.db_connection import get_db_connection, get_db_cursor
     
     if not bot:
         return
     
-    conn_local = get_db_connection()
-    cursor_local = get_db_cursor()
+    conn_local = _scheduler_conn()
+    cursor_local = conn_local.cursor()
     
     try:
         now = datetime.now(PLANS_TZ)
@@ -2648,14 +2667,13 @@ def check_weekend_schedule():
     """Проверяет расписание на выходные (пт-сб-вс) и отправляет уведомление, если нет планов домашнего просмотра.
     ПРИОРИТЕТ 1: Выполняется только в пятницу, в базовое время уведомлений пользователя.
     Если на текущей неделе уже было уведомление (нет планов дома/кино/случайное событие), не отправляет."""
-    from moviebot.database.db_connection import get_db_connection, get_db_cursor
     from moviebot.database.db_operations import get_notification_settings
     
     if not bot:
         return
     
-    conn_local = get_db_connection()
-    cursor_local = get_db_cursor()
+    conn_local = _scheduler_conn()
+    cursor_local = conn_local.cursor()
     
     try:
         now = datetime.now(PLANS_TZ)
@@ -2794,14 +2812,13 @@ def check_weekend_schedule():
 def check_premiere_reminder():
     """Проверяет, нет ли планов в кинотеатре на выходные, и отправляет напоминание с кнопками-премьерами.
     ПРИОРИТЕТ 2: Выполняется только в четверг. Если на текущей неделе уже было уведомление, не отправляет."""
-    from moviebot.database.db_connection import get_db_connection, get_db_cursor
     from moviebot.api.kinopoisk_api import get_premieres_for_period
     
     if not bot:
         return
     
-    conn_local = get_db_connection()
-    cursor_local = get_db_cursor()
+    conn_local = _scheduler_conn()
+    cursor_local = conn_local.cursor()
     
     try:
         now = datetime.now(PLANS_TZ)
@@ -2931,13 +2948,12 @@ def check_and_send_random_events():
     """Проверяет и отправляет случайные события (ПРИОРИТЕТ 3).
     Работает только в пт/сб/вс, только если на неделе не было других уведомлений.
     Чередует типы событий: с выбором участника и без (игра в кубик)."""
-    from moviebot.database.db_connection import get_db_connection, get_db_cursor
     
     if not bot:
         return
     
-    conn_local = get_db_connection()
-    cursor_local = get_db_cursor()
+    conn_local = _scheduler_conn()
+    cursor_local = conn_local.cursor()
     
     try:
         now = datetime.now(PLANS_TZ)
@@ -3228,13 +3244,12 @@ def _onboarding_was_sent(chat_id, key, cursor_local):
 
 def check_onboarding_24h():
     """Через 24ч после первого /start: если пользователь ничего не сделал (0 фильмов) — привет + запланировать + 3 подборки."""
-    from moviebot.database.db_connection import get_db_connection, get_db_cursor
     from moviebot.database.db_operations import get_latest_tags
 
     if not bot:
         return
-    conn_local = get_db_connection()
-    cursor_local = get_db_cursor()
+    conn_local = _scheduler_conn()
+    cursor_local = conn_local.cursor()
     now = datetime.now(PLANS_TZ)
     if now.tzinfo is None:
         now = pytz.utc.localize(now)
@@ -3295,13 +3310,12 @@ def check_onboarding_24h():
 
 def check_onboarding_plan_reminder():
     """Через 2–3 дня после /start: если добавил хотя бы 1 фильм, но не запланировал — напомнить запланировать + кнопка к фильму + 3 подборки."""
-    from moviebot.database.db_connection import get_db_connection, get_db_cursor
     from moviebot.database.db_operations import get_latest_tags
 
     if not bot:
         return
-    conn_local = get_db_connection()
-    cursor_local = get_db_cursor()
+    conn_local = _scheduler_conn()
+    cursor_local = conn_local.cursor()
     now = datetime.now(PLANS_TZ)
     if now.tzinfo is None:
         now = pytz.utc.localize(now)
@@ -3388,12 +3402,11 @@ def check_onboarding_plan_reminder():
 
 def check_onboarding_48h():
     """Через 48–72ч после /start: если всё ещё нет добавленных фильмов — предложить расширение."""
-    from moviebot.database.db_connection import get_db_connection, get_db_cursor
 
     if not bot:
         return
-    conn_local = get_db_connection()
-    cursor_local = get_db_cursor()
+    conn_local = _scheduler_conn()
+    cursor_local = conn_local.cursor()
     now = datetime.now(PLANS_TZ)
     if now.tzinfo is None:
         now = pytz.utc.localize(now)
@@ -3444,13 +3457,12 @@ def check_unwatched_films_notification():
     """Проверяет и отправляет уведомления о непросмотренных фильмах пользователям с более чем 5 фильмами.
     ПРИОРИТЕТ 4 (ниже остальных): Выполняется только в воскресенье или вторник, после 14:00 по местному времени.
     Примерно раз в 10 дней, не более 1 сообщения в день."""
-    from moviebot.database.db_connection import get_db_connection, get_db_cursor
     
     if not bot:
         return
     
-    conn_local = get_db_connection()
-    cursor_local = get_db_cursor()
+    conn_local = _scheduler_conn()
+    cursor_local = conn_local.cursor()
     
     try:
         now_utc = datetime.now(PLANS_TZ)
@@ -3570,7 +3582,7 @@ def check_unwatched_films_notification():
                 # Проверяем количество непросмотренных фильмов (watched = FALSE)
                 # Работает и для личных чатов, и для групповых
                 unwatched_count = 0
-                conn_count = get_db_connection()
+                conn_count = _scheduler_conn()
                 cursor_count = None
                 try:
                     with db_lock:

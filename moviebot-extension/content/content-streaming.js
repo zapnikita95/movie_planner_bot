@@ -1426,6 +1426,7 @@
     const st = storageLocal();
     const storageData = st ? await st.get(['has_notifications_access']) : {};
     const hasNotificationsAccess = storageData.has_notifications_access || false;
+    const hasSeriesFeaturesAccess = filmData?.has_series_features_access ?? hasNotificationsAccess;
     
     // Если сериал без определенной серии - показываем простой UI
     if (showSeriesUi && noEpisodeDetected) {
@@ -1459,7 +1460,7 @@
         const nextSeason = filmData?.next_unwatched_season || 1;
         const nextEpisode = filmData?.next_unwatched_episode || 1;
         
-        if (hasNotificationsAccess) {
+        if (hasSeriesFeaturesAccess) {
           // Информация о следующей серии
           const nextEpInfo = document.createElement('div');
           nextEpInfo.style.cssText = 'padding: 12px !important; background: rgba(255,255,255,0.15) !important; border-radius: 8px !important; text-align: center !important; margin-bottom: 10px !important;';
@@ -1621,7 +1622,7 @@
     
     if (isUnknown && filmData?.kp_id) {
       if (showSeriesUi) {
-        if (!hasNotificationsAccess) {
+        if (!hasSeriesFeaturesAccess) {
           const noAccessMsg = document.createElement('div');
           noAccessMsg.style.cssText = 'padding: 12px; background: rgba(255,255,255,0.1); border-radius: 6px; text-align: center; font-size: 13px; margin-bottom: 8px;';
           noAccessMsg.innerHTML = '🔒 Для отметки серий нужна подписка "Уведомления" или "Пакетная"<br><small style="opacity: 0.8;">Доступно только добавление в базу</small>';
@@ -1735,8 +1736,8 @@
       container.appendChild(addBtn);
     } else {
       if (showSeriesUi) {
-        if (!hasNotificationsAccess) {
-          // Нет подписки - показываем только информацию
+        if (!hasSeriesFeaturesAccess) {
+          // Нет доступа - показываем только информацию (первые 3 сериала бесплатно)
           const noAccessMsg = document.createElement('div');
           noAccessMsg.style.cssText = 'padding: 12px; background: rgba(255,255,255,0.1); border-radius: 6px; text-align: center; font-size: 13px; margin-bottom: 8px;';
           noAccessMsg.innerHTML = '🔒 Для отметки серий нужна подписка "Уведомления" или "Пакетная"<br><small style="opacity: 0.8;">Доступно только добавление в базу</small>';
@@ -2376,7 +2377,8 @@
                   current_episode_watched: result.current_episode_watched || false,
                   next_unwatched_season: nextS,
                   next_unwatched_episode: nextE,
-                  is_series: !!result.film?.is_series
+                  is_series: !!result.film?.is_series,
+                  has_series_features_access: !!result.has_series_features_access
                 };
                 console.log('[STREAMING] filmData после парсинга:', filmData);
               }
@@ -2422,7 +2424,8 @@
                       current_episode_watched: retryResult.current_episode_watched || false,
                       next_unwatched_season: retryNextS,
                       next_unwatched_episode: retryNextE,
-                      is_series: !!retryResult.film?.is_series
+                      is_series: !!retryResult.film?.is_series,
+                      has_series_features_access: !!retryResult.has_series_features_access
                     };
                     console.log('[STREAMING] Повторный запрос успешен, film_id:', filmId);
                   }

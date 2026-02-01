@@ -116,6 +116,9 @@ def add_to_database_callback(call):
                     conn_local.commit()
 
                     logger.info(f"[ADD TO DB] Добавлен/обновлён → existing={existing}")
+                    if is_series:
+                        from moviebot.utils.helpers import maybe_send_series_limit_message
+                        maybe_send_series_limit_message(bot, chat_id, user_id, thread_id)
 
             except Exception as db_err:
                 logger.error(f"[ADD TO DB] Ошибка БД: {db_err}", exc_info=True)
@@ -879,6 +882,10 @@ def mark_watched_from_description_kp_callback(call):
             from moviebot.bot.bot_init import safe_answer_callback_query
             safe_answer_callback_query(bot, call.id, "❌ Ошибка при добавлении фильма в базу", show_alert=True)
             return
+
+        if was_inserted and info.get('is_series'):
+            from moviebot.utils.helpers import maybe_send_series_limit_message
+            maybe_send_series_limit_message(bot, chat_id, user_id, message_thread_id)
 
         # Отмечаем фильм как просмотренный
         # ВАЖНО: Используем локальные соединения вместо глобальных

@@ -24,7 +24,7 @@ from moviebot.states import (
     user_plan_state, plan_notification_messages, plan_error_messages,
     bot_messages
 )
-from moviebot.config import MONTHS_MAP, DAYS_FULL
+from moviebot.config import MONTHS_MAP, DAYS_FULL, TIME_OF_DAY_MAP
 
 
 logger = logging.getLogger(__name__)
@@ -504,6 +504,15 @@ def register_plan_handlers(bot):
                             month_names = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 
                                          'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
                             day_or_date = f"{day_num} {month_names[month_num - 1]}"
+            
+            # Добавляем время дня из текста (утром, вечером, с утра и т.д.), если есть
+            if day_or_date:
+                text_lower = text.lower()
+                day_lower = day_or_date.lower()
+                for phrase in sorted(TIME_OF_DAY_MAP.keys(), key=len, reverse=True):
+                    if phrase in text_lower and phrase not in day_lower:
+                        day_or_date = day_or_date + " " + phrase
+                        break
             
             # Проверяем, есть ли отдельно указанное время
             if day_or_date and plan_type == 'cinema':
@@ -1138,6 +1147,9 @@ def plan_type_callback(call):
                     film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id_str, link, info, user_id)
                     if was_inserted:
                         logger.info(f"[PLAN FROM ADDED] Фильм добавлен в базу при планировании: kp_id={kp_id_str}, film_id={film_id}")
+                        if info.get('is_series'):
+                            from moviebot.utils.helpers import maybe_send_series_limit_message
+                            maybe_send_series_limit_message(bot, chat_id, user_id, getattr(call.message, 'message_thread_id', None))
                     if not film_id:
                         bot.answer_callback_query(call.id, "❌ Ошибка при добавлении фильма в базу", show_alert=True)
                         return

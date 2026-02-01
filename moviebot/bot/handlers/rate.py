@@ -436,6 +436,9 @@ def handle_rating_internal(message, rating):
         if info:
             film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
             logger.info(f"[RATE] film_id={film_id}, inserted={was_inserted}")
+            if was_inserted and info.get('is_series'):
+                from moviebot.utils.helpers import maybe_send_series_limit_message
+                maybe_send_series_limit_message(bot, chat_id, user_id, None)
         else:
             bot.reply_to(message, "❌ Не удалось получить данные фильма.")
             return

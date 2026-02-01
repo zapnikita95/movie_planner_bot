@@ -23,7 +23,7 @@ from moviebot.database.db_connection import get_db_connection, get_db_cursor, db
 from moviebot.database.db_operations import get_user_timezone_or_default, get_user_films_count
 from moviebot.utils.helpers import extract_film_info_from_existing
 from moviebot.api.kinopoisk_api import search_films, extract_movie_info, get_premieres_for_period, get_seasons_data, search_films_by_filters, get_film_distribution, search_persons, get_staff
-from moviebot.utils.helpers import has_tickets_access, has_recommendations_access, has_notifications_access, has_pro_access
+from moviebot.utils.helpers import has_tickets_access, has_recommendations_access, has_notifications_access, has_pro_access, has_series_features_access
 from moviebot.utils.parsing import parse_plan_date_text
 from moviebot.bot.handlers.seasons import get_series_airing_status, count_episodes_for_watch_check
 
@@ -936,14 +936,13 @@ def show_film_info_with_buttons(
         logger.info(f"[SHOW FILM INFO] Обработка кнопок сериала: is_series={is_series}, user_id={user_id}, film_id={film_id}")
 
         if is_series:
-            # КРИТИЧЕСКАЯ ПРОВЕРКА: user_id должен быть указан для проверки доступа
+            # КРИТИЧЕСКАЯ ПРОВЕРКА: user_id и film_id для проверки доступа (первые 3 сериала — бесплатно)
             if user_id is None:
                 logger.warning(f"[SHOW FILM INFO] user_id is None для сериала kp_id={kp_id}, показываем заблокированные кнопки")
                 has_access = False
             else:
-                # Проверяем доступ — функция требует user_id
-                has_access = has_notifications_access(chat_id, user_id)
-                logger.info(f"[SHOW FILM INFO] Проверка подписки для сериала: kp_id={kp_id}, chat_id={chat_id}, user_id={user_id}, has_notifications_access={has_access}")
+                has_access = has_series_features_access(chat_id, user_id, film_id)
+                logger.info(f"[SHOW FILM INFO] Проверка доступа для сериала: kp_id={kp_id}, film_id={film_id}, has_series_features_access={has_access}")
                 if has_access:
                     logger.info(f"[SHOW FILM INFO] ✅ Кнопки сериала РАЗБЛОКИРОВАНЫ (есть подписка Уведомления или пакетная)")
                 else:

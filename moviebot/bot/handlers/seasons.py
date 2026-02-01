@@ -13,7 +13,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from moviebot.database.db_operations import log_request
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
-from moviebot.utils.helpers import has_notifications_access
+from moviebot.utils.helpers import has_notifications_access, has_series_features_access
 from moviebot.api.kinopoisk_api import get_seasons_data, extract_movie_info
 from moviebot.states import user_episodes_state, user_episode_auto_mark_state
 
@@ -464,8 +464,8 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
         # Создаем кнопки как в примере
         markup = InlineKeyboardMarkup(row_width=1)
         
-        # Проверяем, есть ли просмотренные сериалы - используем ту же логику, что и в основном списке
-        has_access = has_notifications_access(chat_id, user_id)
+        # Проверяем, есть ли просмотренные сериалы (первые 3 сериала бесплатно)
+        has_access = has_series_features_access(chat_id, user_id, None)
         if has_access:
             # Проверяем реально просмотренные сериалы (по эпизодам)
             watched_count = 0
@@ -664,8 +664,8 @@ def show_seasons_list(chat_id, user_id, message_id=None, message_thread_id=None,
 
         markup.add(InlineKeyboardButton(button_text, callback_data=f"seasons_kp:{int(kp_id)}"))
 
-    # Кнопка "Просмотренные" - показываем только если есть реально просмотренные сериалы
-    has_access = has_notifications_access(chat_id, user_id)
+    # Кнопка "Просмотренные" - показываем только если есть реально просмотренные сериалы (первые 3 бесплатно)
+    has_access = has_series_features_access(chat_id, user_id, None)
     if has_access:
         # Проверяем реально просмотренные сериалы (по эпизодам, а не по полю watched)
         # Используем ту же логику, что и в show_completed_series_list
@@ -808,7 +808,7 @@ def show_completed_series_list(chat_id: int, user_id: int, message_id: int = Non
 
     logger.info(f"[SHOW_COMPLETED_SERIES_LIST] chat_id={chat_id}, user_id={user_id}, message_id={message_id}")
 
-    has_access = has_notifications_access(chat_id, user_id)
+    has_access = has_series_features_access(chat_id, user_id, None)
     
     conn_local = get_db_connection()
     cursor_local = None

@@ -1840,7 +1840,9 @@ def create_web_app(bot):
                         except Exception as unw_err:
                             logger.warning(f"[EXTENSION API] Ошибка проверки unwatched_before: {unw_err}")
             
-            logger.info(f"[EXTENSION API] Возвращаем film-info: film_id={film_id}, film_in_db={film_in_db}, watched={watched}, kp_id={kp_id}, chat_id={chat_id}")
+            from moviebot.utils.helpers import has_series_features_access
+            has_series_features = has_series_features_access(chat_id, user_id, film_id) if (is_series and user_id) else False
+            logger.info(f"[EXTENSION API] Возвращаем film-info: film_id={film_id}, film_in_db={film_in_db}, has_series_features={has_series_features}")
             resp = jsonify({
                 "success": True,
                 "film": {
@@ -1863,7 +1865,8 @@ def create_web_app(bot):
                 "next_unwatched_episode": next_unwatched_episode,
                 "has_plan": has_plan,
                 "plan_type": plan_type,
-                "plan_id": plan_id
+                "plan_id": plan_id,
+                "has_series_features_access": has_series_features
             })
             logger.info(f"[EXTENSION API] JSON ответ сформирован: film_id={film_id} (type: {type(film_id)})")
             # after_request hook автоматически добавит CORS заголовки
@@ -1928,6 +1931,13 @@ def create_web_app(bot):
             # after_request hook автоматически добавит CORS заголовки
             return resp, 400
         
+        user_id_ext = data.get('user_id') or chat_id
+        if user_id_ext:
+            try:
+                user_id_ext = int(user_id_ext)
+            except (ValueError, TypeError):
+                user_id_ext = chat_id
+        
         try:
             # Сначала определяем тип через API, чтобы правильно сформировать ссылку
             headers = {'X-API-KEY': KP_TOKEN, 'Content-Type': 'application/json'}
@@ -1985,6 +1995,10 @@ def create_web_app(bot):
             result = cursor.fetchone()
             film_id = result.get('id') if isinstance(result, dict) else result[0]
             conn.commit()
+
+            if is_series:
+                from moviebot.utils.helpers import maybe_send_series_limit_message
+                maybe_send_series_limit_message(bot, chat_id, user_id_ext, None)
 
             # Отправляем сообщение в Telegram о добавлении фильма
             try:
@@ -2437,7 +2451,6 @@ def create_web_app(bot):
             from moviebot.utils.helpers import has_tickets_access, has_notifications_access
             has_tickets = has_tickets_access(chat_id, user_id)
             has_notifications = has_notifications_access(chat_id, user_id)
-            
             resp = jsonify({
                 "success": True,
                 "has_tickets_access": has_tickets,
@@ -2656,6 +2669,14 @@ def create_web_app(bot):
 
             if not film_id:
                 return jsonify({"success": False, "error": "film not found"}), 404
+
+            from moviebot.utils.helpers import has_series_features_access
+            if not has_series_features_access(chat_id, user_id, film_id):
+                return jsonify({
+                    "success": False,
+                    "error": "series_limit",
+                    "message": "Уведомления и отметка серий доступны для первых 3 сериалов. Подключите подписку через /payment"
+                }), 403
 
             if online_link:
                 with db_lock:

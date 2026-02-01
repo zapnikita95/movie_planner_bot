@@ -809,6 +809,9 @@ def premiere_add_to_db(call):
             return
         
         logger.info(f"[PREMIERE ADD] Фильм добавлен в базу: film_id={film_id}, was_inserted={was_inserted}")
+        if was_inserted and info.get('is_series'):
+            from moviebot.utils.helpers import maybe_send_series_limit_message
+            maybe_send_series_limit_message(bot, chat_id, user_id, message_thread_id)
         if not callback_is_old:
             try:
                 bot.answer_callback_query(call.id, "✅ Фильм добавлен в базу!", show_alert=False)

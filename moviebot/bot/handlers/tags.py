@@ -1159,6 +1159,9 @@ def handle_tag_confirm(call):
                     logger.info(f"[TAG CONFIRM] Фильм не найден в базе, добавляем: kp_id={kp_id}, title={title}")
                     film_id, was_inserted = ensure_movie_in_database(chat_id, kp_id, link, info, user_id)
                     logger.info(f"[TAG CONFIRM] Результат ensure_movie_in_database: film_id={film_id}, was_inserted={was_inserted}")
+                    if was_inserted and is_series:
+                        from moviebot.utils.helpers import maybe_send_series_limit_message
+                        maybe_send_series_limit_message(bot, chat_id, user_id, getattr(call.message, 'message_thread_id', None))
                     if film_id:
                         if is_series:
                             added_series.append(title)
