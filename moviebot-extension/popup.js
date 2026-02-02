@@ -369,9 +369,25 @@ async function detectAndLoadFilm(url, urlChanged = true) {
       if (actionsEl) actionsEl.innerHTML = '';
     }
     
-    // Кинопоиск (НО НЕ hd.kinopoisk.ru - там hash ID, обрабатывается как стриминг)
+    // Кинопоиск: только страницы фильма/сериала (film/123 или series/123). Не открывать на mykp, user, lists и т.д.
     const isHdKinopoisk = url.includes('hd.kinopoisk.ru');
+    const isKinopoiskMain = url.includes('kinopoisk.ru') && !isHdKinopoisk;
     const kpMatch = !isHdKinopoisk && url.match(/kinopoisk\.ru\/(film|series)\/(\d+)/i);
+    if (isKinopoiskMain && !kpMatch) {
+      if (filmInfo) {
+        filmInfo.classList.remove('hidden');
+        filmInfo.style.display = 'block';
+        const titleEl = document.getElementById('film-title');
+        if (titleEl) titleEl.textContent = 'Откройте страницу фильма или сериала';
+        const yearEl = document.getElementById('film-year');
+        if (yearEl) yearEl.textContent = 'На Кинопоиске: kinopoisk.ru/film/... или kinopoisk.ru/series/...';
+        const statusEl = document.getElementById('film-status');
+        if (statusEl) statusEl.innerHTML = '';
+        const actionsEl = document.getElementById('film-actions');
+        if (actionsEl) actionsEl.innerHTML = '';
+      }
+      return;
+    }
     if (kpMatch) {
       const kpId = kpMatch[2];
       // Пытаемся получить данные от content script, если нет - используем URL
