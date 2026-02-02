@@ -7478,30 +7478,31 @@ def handle_rand_final(call):
 
         # === СПЕЦИАЛЬНЫЙ СЛУЧАЙ: кнопка "Найти фильм" из случайных событий (без состояния) ===
         if call.data.startswith("rand_final:go"):
-            # Парсим callback_data: rand_final:go или rand_final:go:participant_id
-            parts = call.data.split(":")
+            # Парсим callback_data: rand_final:go (все могут нажать) или rand_final:go:participant_id (только выбранный)
+            prefix = "rand_final:go:"
             expected_participant_id = None
-            if len(parts) > 2:
+            if call.data.startswith(prefix) and len(call.data) > len(prefix):
                 try:
-                    expected_participant_id = int(parts[2])
-                except (ValueError, IndexError):
+                    raw = call.data[len(prefix):].strip()
+                    if raw.isdigit():
+                        expected_participant_id = int(raw)
+                except (ValueError, TypeError):
                     pass
-            
-            # Проверяем, что кнопка доступна только для выбранного участника (сравниваем как int: из БД/API могут прийти str)
-            try:
-                clicker_id = int(user_id)
-                expected_id = int(expected_participant_id)
-            except (TypeError, ValueError):
-                clicker_id, expected_id = user_id, expected_participant_id
-            if expected_participant_id is not None and clicker_id != expected_id:
+
+            clicker_id = int(user_id) if user_id is not None else None
+            expected_id = int(expected_participant_id) if expected_participant_id is not None else None
+
+            # Кнопка с participant_id — только этот пользователь может нажать
+            if expected_id is not None and clicker_id != expected_id:
                 try:
                     bot.answer_callback_query(call.id, "Эта кнопка доступна только для выбранного участника случайного события", show_alert=True)
-                    logger.info(f"[RANDOM CALLBACK] Показана ошибка пользователю {clicker_id} (кнопка для {expected_id})")
-                except Exception as e:
-                    logger.warning(f"[RANDOM CALLBACK] Не удалось показать ошибку: {e}")
-                logger.info(f"[RANDOM CALLBACK] Пользователь {clicker_id} пытается использовать кнопку, предназначенную для {expected_id}")
+                except Exception:
+                    pass
+                logger.info(f"[RANDOM CALLBACK] Отказ: нажал user_id={clicker_id}, кнопка для user_id={expected_id}, data={call.data!r}")
                 return
-            
+
+            if expected_id is not None:
+                logger.info(f"[RANDOM CALLBACK] Выбранный участник {clicker_id} нажал «Найти фильм», чат {chat_id}")
             logger.info(f"[RANDOM CALLBACK] Кнопка 'Найти фильм' из случайных событий, запускаем рандом по своей базе")
             bot.answer_callback_query(call.id)
             

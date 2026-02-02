@@ -3048,8 +3048,8 @@ def check_and_send_random_events():
             
             # Отправляем соответствующее событие
             if send_participant_event:
-                # Отправляем событие с выбором участника
-                _send_random_participant_event(chat_id, now, cursor_local, conn_local)
+                # Отправляем событие с выбором участника (собственное соединение — без путаницы с курсором цикла)
+                _send_random_participant_event(chat_id, now)
             else:
                 # Отправляем событие с игрой в кубик
                 from moviebot.utils.random_events import send_dice_game_event
@@ -3076,90 +3076,100 @@ def check_and_send_random_events():
             pass
 
 
-def _send_random_participant_event(chat_id, now, cursor_local, conn_local):
-    """Вспомогательная функция для отправки события с выбором случайного участника"""
+def _send_random_participant_event(chat_id, now):
+    """Отправка события с выбором случайного участника. Собственное соединение к БД — только этот чат, без путаницы с курсором в цикле по чатам."""
+    conn_own = None
+    cur_own = None
     try:
-        # Получаем участников
         from moviebot.bot.bot_init import BOT_ID
         current_bot_id = BOT_ID
         if current_bot_id is None:
             try:
                 current_bot_id = bot.get_me().id
-            except:
+            except Exception:
                 current_bot_id = None
-        
+
+        conn_own = _scheduler_conn()
+        cur_own = conn_own.cursor()
+
         query = '''
-            SELECT DISTINCT user_id, username 
-            FROM stats 
-            WHERE chat_id = %s 
+            SELECT DISTINCT user_id, username
+            FROM stats
+            WHERE chat_id = %s
             AND timestamp >= %s
         '''
         params = (chat_id, (now - timedelta(days=30)).isoformat())
-        
         if current_bot_id:
             query += " AND user_id != %s"
             params += (current_bot_id,)
-            
+
         with db_lock:
-            cursor_local.execute(query, params)
-            participants = cursor_local.fetchall()
-        
+            cur_own.execute(query, params)
+            participants = cur_own.fetchall()
+
         if not participants:
             return False
-        
-        # Выбираем участника
+
         participant = random.choice(participants)
-        user_id = participant.get('user_id') if isinstance(participant, dict) else participant[0]
+        user_id_raw = participant.get('user_id') if isinstance(participant, dict) else participant[0]
         try:
-            user_id = int(user_id)
+            selected_user_id = int(user_id_raw)
         except (TypeError, ValueError):
             return False
         username = participant.get('username') if isinstance(participant, dict) else participant[1]
-        
-        # Формируем имя
+
         if username:
             user_name = f"@{username}"
         else:
             try:
-                member = bot.get_chat_member(chat_id, user_id)
+                member = bot.get_chat_member(chat_id, selected_user_id)
                 user_name = member.user.first_name or "участник"
-            except:
+            except Exception:
                 user_name = "участник"
-        
-        # Готовим сообщение
+
+        # Кнопка только для выбранного: callback_data = rand_final:go:{selected_user_id} — в обработчике сравниваем call.from_user.id с этим id
+        callback_payload = f"rand_final:go:{selected_user_id}"
         markup = InlineKeyboardMarkup(row_width=1)
-        markup.add(InlineKeyboardButton("🎲 Найти фильм", callback_data=f"rand_final:go:{user_id}"))
+        markup.add(InlineKeyboardButton("🎲 Найти фильм", callback_data=callback_payload))
         markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
         markup.add(InlineKeyboardButton("❌ Закрыть", callback_data="random_event:close"))
-        
+
         text = "🔮 Вас посетил дух выбора случайного фильма!\n\n"
         text += f"Он выбрал <b>{user_name}</b> для выбора фильма для вашей компании."
-        
-        # Отправляем сообщение
+
         bot.send_message(
             chat_id=chat_id,
             text=text,
             reply_markup=markup,
             parse_mode='HTML'
         )
-        
-        # Отмечаем событие
+
         mark_event_sent(chat_id, 'random_event')
-        
-        # Сохраняем дату
+
         with db_lock:
-            cursor_local.execute('''
+            cur_own.execute('''
                 INSERT INTO settings (chat_id, key, value)
                 VALUES (%s, 'last_random_participant_date', %s)
                 ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
             ''', (chat_id, now.date().isoformat()))
-            conn_local.commit()
-        
-        logger.info(f"[RANDOM EVENTS] Отправлено событие с участником {user_id} для чата {chat_id}")
+            conn_own.commit()
+
+        logger.info(f"[RANDOM EVENTS] Отправлено событие: чат {chat_id}, выбранный участник user_id={selected_user_id}, callback_data={callback_payload!r}")
         return True
     except Exception as e:
         logger.error(f"[RANDOM EVENTS] Ошибка при отправке события с участником: {e}", exc_info=True)
         return False
+    finally:
+        if cur_own:
+            try:
+                cur_own.close()
+            except Exception:
+                pass
+        if conn_own:
+            try:
+                conn_own.close()
+            except Exception:
+                pass
 
 
 def choose_random_participant():
