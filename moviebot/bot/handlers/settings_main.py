@@ -273,70 +273,16 @@ def handle_settings_callback(call):
             bot.answer_callback_query(call.id, "Отправляю пример события...")
             
             if example_type == "with_user":
-                # Пример события с участником (выбор случайного участника)
-                current_bot_id = None
+                # Пример события с участником: выбираем того, кто запросил пример, чтобы он мог сразу нажать «Найти фильм»
+                p_user_id = int(user_id)
                 try:
-                    bot_info = bot.get_me()
-                    current_bot_id = bot_info.id
-                except Exception as e:
-                    logger.warning(f"Не удалось получить информацию о боте: {e}")
-
-                conn_local_ex = get_db_connection()
-                cursor_local_ex = get_db_cursor()
-                try:
-                    with db_lock:
-                        if current_bot_id:
-                            cursor_local_ex.execute('''
-                                SELECT DISTINCT user_id, username 
-                                FROM stats 
-                                WHERE chat_id = %s 
-                                AND user_id != %s
-                                LIMIT 10
-                            ''', (chat_id, current_bot_id))
-                        else:
-                            cursor_local_ex.execute('''
-                                SELECT DISTINCT user_id, username 
-                                FROM stats 
-                                WHERE chat_id = %s 
-                                LIMIT 10
-                            ''', (chat_id,))
-                        participants = cursor_local_ex.fetchall()
-                finally:
-                    try:
-                        cursor_local_ex.close()
-                    except:
-                        pass
-                    try:
-                        conn_local_ex.close()
-                    except:
-                        pass
-                
-                if current_bot_id:
-                    filtered_participants = []
-                    for p in participants:
-                        p_user_id = p.get('user_id') if isinstance(p, dict) else p[0]
-                        if p_user_id != current_bot_id:
-                            filtered_participants.append(p)
-                    participants = filtered_participants
-                
-                if participants:
-                    participant = random.choice(participants)
-                    p_user_id = participant.get('user_id') if isinstance(participant, dict) else participant[0]
-                    username = participant.get('username') if isinstance(participant, dict) else participant[1]
-                    
-                    if username:
-                        user_name = f"@{username}"
-                    else:
-                        try:
-                            user_info = bot.get_chat_member(chat_id, p_user_id)
-                            user_name = user_info.user.first_name or "участник"
-                        except:
-                            user_name = "участник"
-                else:
+                    member = bot.get_chat_member(chat_id, p_user_id)
+                    u = member.user
+                    user_name = f"@{u.username}" if u.username else (u.first_name or "участник")
+                except Exception:
                     user_name = "участник"
                 
                 markup = InlineKeyboardMarkup(row_width=1)
-                # Используем p_user_id для ограничения доступа к кнопке только выбранному участнику
                 markup.add(InlineKeyboardButton("🎲 Найти фильм", callback_data=f"rand_final:go:{p_user_id}"))
                 markup.add(InlineKeyboardButton("❌ Отменить такие уведомления", callback_data="reminder:disable:random_events"))
                 markup.add(InlineKeyboardButton("❌ Закрыть", callback_data="random_event:close"))
