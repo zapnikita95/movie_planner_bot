@@ -3251,6 +3251,53 @@ def _onboarding_was_sent(chat_id, key, cursor_local):
     return val == '1' or val == 'true'
 
 
+def _user_has_blocked_bot(chat_id, cursor_local):
+    """Проверяет, помечен ли пользователь как заблокировавший бота (403 blocked)."""
+    with db_lock:
+        cursor_local.execute(
+            "SELECT value FROM settings WHERE chat_id = %s AND key = %s",
+            (chat_id, 'bot_blocked_by_user')
+        )
+        row = cursor_local.fetchone()
+    if not row:
+        return False
+    val = row.get('value') if isinstance(row, dict) else row[0]
+    return str(val).lower() in ('1', 'true')
+
+
+def _onboarding_mark_bot_blocked(user_id):
+    """Помечает пользователя как заблокировавшего бота (отдельное соединение)."""
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+    from moviebot.config import DATABASE_URL
+    conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+    cur = conn.cursor()
+    try:
+        with db_lock:
+            cur.execute("""
+                INSERT INTO settings (chat_id, key, value) VALUES (%s, %s, '1')
+                ON CONFLICT (chat_id, key) DO UPDATE SET value = '1'
+            """, (user_id, 'bot_blocked_by_user'))
+            conn.commit()
+        logger.info(f"[ONBOARDING] Помечен как заблокировавший бота: user_id={user_id}")
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _is_telegram_blocked_error(exc):
+    """Проверяет, что исключение — «пользователь заблокировал бота» (403)."""
+    msg = (getattr(exc, 'description', None) or str(exc) or '').lower()
+    code = str(getattr(exc, 'error_code', '') or '')
+    return code == '403' or ('403' in code and 'blocked' in msg) or ('forbidden' in msg and 'blocked by the user' in msg)
+
+
 def check_onboarding_24h():
     """Через 24ч после первого /start: если пользователь ничего не сделал (0 фильмов) — привет + запланировать + 3 подборки."""
     from moviebot.database.db_operations import get_latest_tags
@@ -3272,6 +3319,8 @@ def check_onboarding_24h():
                 continue
             chat_id = user_id
             if _onboarding_was_sent(chat_id, 'onboarding_24h_sent', cursor_local):
+                continue
+            if _user_has_blocked_bot(chat_id, cursor_local):
                 continue
             with db_lock:
                 cursor_local.execute("SELECT COUNT(*) FROM movies WHERE chat_id = %s", (chat_id,))
@@ -3303,6 +3352,8 @@ def check_onboarding_24h():
                 _onboarding_set_sent(chat_id, 'onboarding_24h_sent')
                 logger.info(f"[ONBOARDING 24H] Отправлено user_id={user_id}")
             except Exception as e:
+                if _is_telegram_blocked_error(e):
+                    _onboarding_mark_bot_blocked(user_id)
                 logger.warning(f"[ONBOARDING 24H] Не удалось отправить user_id={user_id}: {e}")
     except Exception as e:
         logger.error(f"[ONBOARDING 24H] Ошибка: {e}", exc_info=True)
@@ -3430,6 +3481,8 @@ def check_onboarding_48h():
             chat_id = user_id
             if _onboarding_was_sent(chat_id, 'onboarding_48h_sent', cursor_local):
                 continue
+            if _user_has_blocked_bot(chat_id, cursor_local):
+                continue
             with db_lock:
                 cursor_local.execute("SELECT COUNT(*) FROM movies WHERE chat_id = %s", (chat_id,))
                 cnt = cursor_local.fetchone()
@@ -3448,6 +3501,8 @@ def check_onboarding_48h():
                 _onboarding_set_sent(chat_id, 'onboarding_48h_sent')
                 logger.info(f"[ONBOARDING 48H] Отправлено user_id={user_id}")
             except Exception as e:
+                if _is_telegram_blocked_error(e):
+                    _onboarding_mark_bot_blocked(user_id)
                 logger.warning(f"[ONBOARDING 48H] Не удалось отправить user_id={user_id}: {e}")
     except Exception as e:
         logger.error(f"[ONBOARDING 48H] Ошибка: {e}", exc_info=True)

@@ -1824,6 +1824,14 @@ def get_admin_statistics():
             row = cursor_local.fetchone()
             stats['cancelled_subscriptions_week'] = row['count'] if row else 0
             
+            # Пользователи, заблокировавшие бота (403)
+            cursor_local.execute('''
+                SELECT COUNT(*) as count FROM settings
+                WHERE key = %s AND (value = '1' OR LOWER(value) = 'true')
+            ''', ('bot_blocked_by_user',))
+            row = cursor_local.fetchone()
+            stats['users_blocked_bot'] = row['count'] if row else 0
+            
             # Переходы по ссылкам подборок: название, сколько раз добавили
             try:
                 cursor_local.execute('''

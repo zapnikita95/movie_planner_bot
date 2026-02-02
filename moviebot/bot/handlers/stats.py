@@ -776,7 +776,8 @@ def register_stats_handlers(bot):
             text += f"   • Всего пользователей: {stats.get('total_users', 0)}\n"
             text += f"   • Новых за день: {stats.get('new_users_day', 0)}\n"
             text += f"   • Новых за неделю: {stats.get('new_users_week', 0)}\n"
-            text += f"   • Платных пользователей: {stats.get('paid_users', 0)}\n\n"
+            text += f"   • Платных пользователей: {stats.get('paid_users', 0)}\n"
+            text += f"   • Заблокировали бота: {stats.get('users_blocked_bot', 0)}\n\n"
             
             text += "👥 <b>Группы:</b>\n"
             text += f"   • Активных за 30 дней: {stats.get('active_groups_30d', 0)}\n"
