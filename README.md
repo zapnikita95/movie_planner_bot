@@ -1,8 +1,8 @@
 # Movie Planner
 
-Movie Planner is a Telegram bot and browser extension for planning movie and TV show viewing. The service helps maintain a watchlist, track series, plan joint viewings, add tickets, and receive reminders.
+Movie Planner is a service for planning and tracking movie and TV show viewing. It helps you manage your watchlist, track series, plan joint viewings, add cinema tickets, and receive smart reminders.
 
-**Сервис для планирования просмотра фильмов и сериалов** — это стэк личного кабинета, браузерного расширения с глубокой интеграцией в Telegram для киноманов и синефилов, которые хотят организовать свой watchlist, планировать просмотры дома и в кино, отслеживать сериалы и получать персональные рекомендации.
+**Сервис для планирования просмотра фильмов и сериалов** — экосистема для киноманов и синефилов, которая помогает организовать watchlist, планировать просмотры дома и в кино, отслеживать сериалы и получать персональные рекомендации. Сервис доступен через веб-кабинет, браузерное расширение и с глубокой интеграцией в Telegram.
 
 Movie Planner — это полноценный **трекер фильмов и сериалов** с функциями планирования, который работает как в личных сообщениях, так и в групповых чатах. Ведите личную базу просмотров или создавайте общий watchlist с друзьями — бот поможет не потерять интересные фильмы и организовать совместные просмотры.
 
