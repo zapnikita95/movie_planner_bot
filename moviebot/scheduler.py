@@ -3110,6 +3110,10 @@ def _send_random_participant_event(chat_id, now, cursor_local, conn_local):
         # Выбираем участника
         participant = random.choice(participants)
         user_id = participant.get('user_id') if isinstance(participant, dict) else participant[0]
+        try:
+            user_id = int(user_id)
+        except (TypeError, ValueError):
+            return False
         username = participant.get('username') if isinstance(participant, dict) else participant[1]
         
         # Формируем имя
