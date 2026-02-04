@@ -696,10 +696,8 @@ def handle_settings_callback(call):
             else:
                 markup.add(InlineKeyboardButton("🔒 Настройки напоминаний", callback_data="settings:notifications_locked"))
             
-            if has_pro_access(chat_id, user_id):
-                markup.add(InlineKeyboardButton("📥 Импорт базы из Кинопоиска", callback_data="settings:import"))
-            else:
-                markup.add(InlineKeyboardButton("🔒 Импорт базы из Кинопоиска", callback_data="settings:import_locked"))
+            # Импорт базы из Кинопоиска доступен всем
+            markup.add(InlineKeyboardButton("📥 Импорт базы из Кинопоиска", callback_data="settings:import"))
             
             # Проверяем, является ли чат личным (случайные события доступны только в группах)
             if is_private:
