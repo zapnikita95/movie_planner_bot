@@ -10,7 +10,12 @@ from moviebot.bot.handlers.text_messages import expect_text_from_user, user_sear
 from moviebot.states import user_random_state
 # Импортируем модуль series для доступа к _show_genre_step через series_handlers
 from moviebot.bot.handlers import series as series_handlers
-from moviebot.utils.helpers import has_recommendations_access
+from moviebot.utils.helpers import (
+    has_recommendations_access,
+    has_recommendations_subscription,
+    get_recommendations_remaining_free,
+    increment_recommendation_paid_uses,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -30,18 +35,44 @@ def register_random_callbacks(bot):
             
             logger.info(f"[RANDOM CALLBACK] Mode: {mode}, user_id={user_id}, chat_id={chat_id}")
             
-            # Проверяем доступ к рекомендациям для режимов, требующих подписку
+            # Платные режимы: подписка или первые 3 использования бесплатно
             if mode in ['kinopoisk', 'my_votes', 'group_votes']:
                 has_rec_access = has_recommendations_access(chat_id, user_id)
                 logger.info(f"[RANDOM CALLBACK] Mode {mode} requires recommendations access: {has_rec_access}")
                 if not has_rec_access:
                     bot.answer_callback_query(
-                        call.id, 
-                        "❌ Этот режим доступен только с подпиской на рекомендации. Используйте /payment для оформления подписки.", 
+                        call.id,
+                        "❌ Лимит бесплатных использований исчерпан. Подключите подписку в /payment или используйте режимы «Рандом по базе» и «По оценкам в базе» — они всегда бесплатны.",
                         show_alert=True
                     )
                     logger.warning(f"[RANDOM CALLBACK] Access denied for mode {mode}, user_id={user_id}")
                     return
+                # Бесплатное использование: показываем предупреждение с остатком и кнопками (если не пришли по кнопке «Продолжить»)
+                if not user_random_state.get(user_id, {}).pop('_paid_confirmed', False) and not has_recommendations_subscription(chat_id, user_id):
+                    remaining = get_recommendations_remaining_free(chat_id, user_id)
+                    if remaining is not None and remaining >= 0:
+                        warning_text = (
+                            f"🆓 <b>Бесплатное использование</b>\n\n"
+                            f"Осталось бесплатных использований рекомендаций: <b>{remaining}</b> из 3.\n\n"
+                            f"Режимы <b>«Рандом по базе»</b> и <b>«По оценкам в базе»</b> всегда доступны бесплатно.\n\n"
+                            f"Подключите подписку для неограниченного доступа к режимам по Кинопоиску, по вашим оценкам и Шазаму."
+                        )
+                        markup = InlineKeyboardMarkup(row_width=1)
+                        markup.add(InlineKeyboardButton("▶️ Продолжить", callback_data=f"rand_paid_confirm:{mode}"))
+                        markup.add(InlineKeyboardButton("💳 Тарифы", callback_data="start_menu:payment"))
+                        markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+                        if user_id not in user_random_state:
+                            user_random_state[user_id] = {'step': 'mode', 'mode': None, 'periods': [], 'genres': [], 'directors': [], 'actors': []}
+                        user_random_state[user_id]['pending_paid_mode'] = mode
+                        bot.answer_callback_query(call.id)
+                        bot.edit_message_text(
+                            warning_text,
+                            chat_id,
+                            call.message.message_id,
+                            reply_markup=markup,
+                            parse_mode='HTML'
+                        )
+                        return
                 
             # ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
             # НОВАЯ ПРОВЕРКА ПУСТОЙ БАЗЫ ДЛЯ РЕЖИМА database
@@ -99,15 +130,13 @@ def register_random_callbacks(bot):
                         pass
                 
                 if imported_ratings == 0:
-                    # Нет импортированных оценок - показываем сообщение с кнопкой на импорт
-                    markup = InlineKeyboardMarkup()
-                    markup.add(InlineKeyboardButton("📥 Импорт базы из Кинопоиска", callback_data="settings:import"))
-                    markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="rand_mode:back"))
-                    
+                    markup = InlineKeyboardMarkup(row_width=1)
+                    markup.add(InlineKeyboardButton("📥 Импорт оценок с Кинопоиска", callback_data="settings:import"))
+                    markup.add(InlineKeyboardButton("⬅️ Назад к режимам", callback_data="rand_mode:back"))
                     bot.answer_callback_query(call.id)
                     bot.edit_message_text(
-                        "📥 <b>Загрузите ваши оценки из базы Кинопоиска</b>\n\n"
-                        "Для использования режима \"По моим оценкам\" необходимо импортировать ваши оценки с Кинопоиска.",
+                        "📥 <b>Режим «По моим оценкам (9–10)»</b>\n\n"
+                        "Для этого режима нужно импортировать ваши оценки с Кинопоиска.",
                         chat_id,
                         call.message.message_id,
                         reply_markup=markup,
@@ -308,9 +337,9 @@ def register_random_callbacks(bot):
             # Для режима kinopoisk сначала показываем выбор типа контента
             if mode == 'kinopoisk':
                 markup = InlineKeyboardMarkup(row_width=1)
-                markup.add(InlineKeyboardButton("🎬 Фильм", callback_data="rand_content_type:FILM"))
-                markup.add(InlineKeyboardButton("📺 Сериал", callback_data="rand_content_type:TV_SERIES"))
-                markup.add(InlineKeyboardButton("🎬 Фильм и Сериал", callback_data="rand_content_type:ALL"))
+                markup.add(InlineKeyboardButton("🎬 Фильм", callback_data="rand_content_type:kinopoisk:films"))
+                markup.add(InlineKeyboardButton("📺 Сериал", callback_data="rand_content_type:kinopoisk:series"))
+                markup.add(InlineKeyboardButton("🎬 Фильм и Сериал", callback_data="rand_content_type:kinopoisk:mixed"))
                 markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="rand_mode:back"))
                 
                 bot.answer_callback_query(call.id)
@@ -342,7 +371,43 @@ def register_random_callbacks(bot):
                 bot.answer_callback_query(call.id, "❌ Ошибка обработки", show_alert=True)
             except:
                 pass
-    
+
+    @bot.callback_query_handler(func=lambda call: call.data.startswith("rand_paid_confirm:"))
+    def rand_paid_confirm_handler(call):
+        """После нажатия «Продолжить» на экране бесплатного использования: списываем использование и переходим в режим."""
+        try:
+            user_id = call.from_user.id
+            chat_id = call.message.chat.id
+            parts = call.data.split(":", 1)
+            if len(parts) < 2:
+                bot.answer_callback_query(call.id)
+                return
+            mode = parts[1]
+            if mode not in ['kinopoisk', 'my_votes', 'group_votes']:
+                bot.answer_callback_query(call.id)
+                return
+            increment_recommendation_paid_uses(chat_id, user_id)
+            if user_id not in user_random_state:
+                user_random_state[user_id] = {'step': 'mode', 'mode': None, 'periods': [], 'genres': [], 'directors': [], 'actors': []}
+            user_random_state[user_id]['_paid_confirmed'] = True
+            user_random_state[user_id]['mode'] = mode
+            user_random_state[user_id].pop('pending_paid_mode', None)
+            # Подмена call.data и повторный вызов random_mode_handler (он увидит _paid_confirmed и не покажет предупреждение снова)
+            class _FakeCall:
+                pass
+            fake = _FakeCall()
+            fake.id = call.id
+            fake.message = call.message
+            fake.from_user = call.from_user
+            fake.data = "rand_mode:" + mode
+            random_mode_handler(fake)
+        except Exception as e:
+            logger.error(f"[RANDOM CALLBACK] ❌ ERROR in rand_paid_confirm_handler: {e}", exc_info=True)
+            try:
+                bot.answer_callback_query(call.id, "❌ Ошибка", show_alert=True)
+            except Exception:
+                pass
+
     @bot.callback_query_handler(func=lambda call: call.data.startswith("rand_mode_locked:"))
     def random_mode_locked_handler(call):
         """Обработчик заблокированных режимов рандомайзера"""
@@ -513,19 +578,12 @@ def register_random_callbacks(bot):
                 user_random_state[user_id]['directors'] = []
                 user_random_state[user_id]['actors'] = []
             
-            # Показываем выбор режима — 1) база, 2) по оценкам в базе (всегда), далее режимы PRO
-            from moviebot.utils.helpers import has_recommendations_access
+            # Все режимы отображаем без замка (доступ проверяется при выборе; 3 бесплатных использования)
             markup = InlineKeyboardMarkup(row_width=1)
             markup.add(InlineKeyboardButton("🎲 Рандом по своей базе", callback_data="rand_mode:database"))
             markup.add(InlineKeyboardButton("⭐ По оценкам в базе", callback_data="rand_mode:group_votes"))
-            has_rec_access = has_recommendations_access(chat_id, user_id)
-            if has_rec_access:
-                markup.add(InlineKeyboardButton("🎬 Рандом по кинопоиску", callback_data="rand_mode:kinopoisk"))
-                markup.add(InlineKeyboardButton("⭐ По моим оценкам (9-10)", callback_data="rand_mode:my_votes"))
-            else:
-                markup.add(InlineKeyboardButton("🔒 Рандом по кинопоиску", callback_data="rand_mode_locked:kinopoisk"))
-                markup.add(InlineKeyboardButton("🔒 По моим оценкам (9-10)", callback_data="rand_mode_locked:my_votes"))
-            
+            markup.add(InlineKeyboardButton("🎬 Рандом по кинопоиску", callback_data="rand_mode:kinopoisk"))
+            markup.add(InlineKeyboardButton("⭐ По моим оценкам (9-10)", callback_data="rand_mode:my_votes"))
             markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
             
             try:

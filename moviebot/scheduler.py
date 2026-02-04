@@ -3264,6 +3264,62 @@ def _onboarding_set_sent(chat_id, key):
             pass
 
 
+def _onboarding_get_last_sent_at(chat_id, key):
+    """Возвращает datetime последней отправки (value — ISO строка) или None."""
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+    from moviebot.config import DATABASE_URL
+    conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+    cur = conn.cursor()
+    try:
+        with db_lock:
+            cur.execute("SELECT value FROM settings WHERE chat_id = %s AND key = %s", (chat_id, key))
+            row = cur.fetchone()
+        if not row:
+            return None
+        val = row.get('value') if isinstance(row, dict) else (row[0] if row else None)
+        if not val or val == '1':
+            return None
+        try:
+            return datetime.fromisoformat(str(val).replace('Z', '+00:00'))
+        except Exception:
+            return None
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _onboarding_set_sent_at(chat_id, key, dt):
+    """Сохраняет время отправки (ISO) в settings."""
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+    from moviebot.config import DATABASE_URL
+    conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
+    cur = conn.cursor()
+    try:
+        with db_lock:
+            cur.execute("""
+                INSERT INTO settings (chat_id, key, value) VALUES (%s, %s, %s)
+                ON CONFLICT (chat_id, key) DO UPDATE SET value = EXCLUDED.value
+            """, (chat_id, key, dt.isoformat() if hasattr(dt, 'isoformat') else str(dt)))
+            conn.commit()
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 def _onboarding_was_sent(chat_id, key, cursor_local):
     with db_lock:
         cursor_local.execute("SELECT value FROM settings WHERE chat_id = %s AND key = %s", (chat_id, key))
@@ -3392,7 +3448,8 @@ def check_onboarding_24h():
 
 
 def check_onboarding_plan_reminder():
-    """Через 2–3 дня после /start: если добавил хотя бы 1 фильм, но не запланировал — напомнить запланировать + кнопка к фильму + 3 подборки."""
+    """Через 2–3 дня после /start: если добавил хотя бы 1 фильм, но не запланировал — напомнить запланировать + кнопка к фильму + 3 подборки.
+    Не чаще раза в неделю на пользователя."""
     from moviebot.database.db_operations import get_latest_tags
 
     if not bot:
@@ -3411,6 +3468,13 @@ def check_onboarding_plan_reminder():
             if not (2 <= delta_days <= 3):
                 continue
             chat_id = user_id
+            # Не чаще раза в неделю
+            last_sent = _onboarding_get_last_sent_at(chat_id, 'onboarding_plan_reminder_last_at')
+            if last_sent:
+                if last_sent.tzinfo is None:
+                    last_sent = pytz.utc.localize(last_sent)
+                if (now - last_sent).total_seconds() < 7 * 24 * 3600:
+                    continue
             if _onboarding_was_sent(chat_id, 'onboarding_plan_reminder_sent', cursor_local):
                 continue
             with db_lock:
@@ -3467,6 +3531,7 @@ def check_onboarding_plan_reminder():
             try:
                 bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
                 _onboarding_set_sent(chat_id, 'onboarding_plan_reminder_sent')
+                _onboarding_set_sent_at(chat_id, 'onboarding_plan_reminder_last_at', now)
                 logger.info(f"[ONBOARDING PLAN] Отправлено user_id={user_id}, film_id={film_id}")
             except Exception as e:
                 logger.warning(f"[ONBOARDING PLAN] Не удалось отправить user_id={user_id}: {e}")

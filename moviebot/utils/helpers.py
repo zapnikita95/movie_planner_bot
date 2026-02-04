@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 
 FREE_SERIES_LIMIT = 3  # первые N сериалов — полный функционал бесплатно
 FREE_TICKET_PLANS_LIMIT = 3  # первые N планов с билетами — полный функционал бесплатно
+FREE_RECOMMENDATIONS_LIMIT = 3  # первые N использований платных режимов рекомендаций (рандом по КП, по моим оценкам, по оценкам в базе, Шазам) — бесплатно
 
 
 def _get_first_series_film_ids(chat_id):
@@ -443,10 +444,151 @@ def has_pro_access(chat_id, user_id):
     return False
 
 
+def _recommendation_uses_key(chat_id, user_id):
+    """Ключ в settings для счётчика платных использований рекомендаций (личный чат: один ключ, группа: на пользователя)."""
+    if chat_id > 0:
+        return 'recommendation_paid_uses'
+    return 'recommendation_paid_uses_%s' % user_id
+
+
+def get_recommendation_paid_uses_count(chat_id, user_id):
+    """Сколько раз пользователь уже использовал платные режимы рекомендаций (рандом по КП, по оценкам, Шазам)."""
+    from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+    key = _recommendation_uses_key(chat_id, user_id)
+    # В личном чате chat_id == user_id, в группе — chat_id группы
+    scope_id = chat_id if chat_id > 0 else chat_id
+    conn = get_db_connection()
+    cur = get_db_cursor()
+    try:
+        with db_lock:
+            cur.execute("SELECT value FROM settings WHERE chat_id = %s AND key = %s", (scope_id, key))
+            row = cur.fetchone()
+        if not row:
+            return 0
+        val = row.get('value') if isinstance(row, dict) else row[0]
+        try:
+            return int(val) if val is not None else 0
+        except (TypeError, ValueError):
+            return 0
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def increment_recommendation_paid_uses(chat_id, user_id):
+    """Увеличивает счётчик платных использований рекомендаций на 1."""
+    from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
+    key = _recommendation_uses_key(chat_id, user_id)
+    scope_id = chat_id
+    conn = get_db_connection()
+    cur = get_db_cursor()
+    try:
+        with db_lock:
+            cur.execute(
+                """INSERT INTO settings (chat_id, key, value) VALUES (%s, %s, '1')
+                ON CONFLICT (chat_id, key) DO UPDATE SET value = (COALESCE(NULLIF(TRIM(settings.value), ''), '0')::int + 1)::text""",
+                (scope_id, key)
+            )
+            conn.commit()
+    finally:
+        try:
+            cur.close()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def get_recommendations_remaining_free(chat_id, user_id):
+    """Осталось бесплатных использований рекомендаций. -1 или None = без лимита (есть подписка)."""
+    if has_recommendations_subscription(chat_id, user_id):
+        return -1
+    used = get_recommendation_paid_uses_count(chat_id, user_id)
+    return max(0, FREE_RECOMMENDATIONS_LIMIT - used)
+
+
+def has_recommendations_subscription(chat_id, user_id):
+    """Есть ли подписка на рекомендации (только подписка, без учёта бесплатных использований)."""
+    from moviebot.database.db_operations import get_user_personal_subscriptions
+
+    personal_subs = get_user_personal_subscriptions(user_id)
+    if personal_subs:
+        for sub in personal_subs:
+            plan_type = sub.get('plan_type')
+            expires_at = sub.get('expires_at')
+            if plan_type in ['recommendations', 'all']:
+                if expires_at is None:
+                    return True
+                try:
+                    now = datetime.now(pytz.UTC)
+                    if isinstance(expires_at, datetime):
+                        if expires_at.tzinfo is None:
+                            expires_at = pytz.UTC.localize(expires_at)
+                        if expires_at > now:
+                            return True
+                    elif isinstance(expires_at, str):
+                        expires_dt = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+                        if expires_dt.tzinfo is None:
+                            expires_dt = pytz.UTC.localize(expires_dt)
+                        if expires_dt > now:
+                            return True
+                except Exception:
+                    pass
+    if chat_id < 0:
+        from moviebot.database.db_operations import get_active_group_subscription_by_chat_id, get_subscription_members
+        group_sub = get_active_group_subscription_by_chat_id(chat_id)
+        if group_sub:
+            plan_type = group_sub.get('plan_type')
+            group_size = group_sub.get('group_size')
+            subscription_id = group_sub.get('id')
+            expires_at = group_sub.get('expires_at')
+            if plan_type in ['recommendations', 'all']:
+                if expires_at is not None:
+                    try:
+                        now = datetime.now(pytz.UTC)
+                        if isinstance(expires_at, datetime):
+                            if expires_at.tzinfo is None:
+                                expires_at = pytz.UTC.localize(expires_at)
+                            if expires_at <= now:
+                                return False
+                        elif isinstance(expires_at, str):
+                            expires_dt = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+                            if expires_dt.tzinfo is None:
+                                expires_dt = pytz.UTC.localize(expires_dt)
+                            if expires_dt <= now:
+                                return False
+                    except Exception:
+                        return False
+                if group_size is not None and subscription_id:
+                    try:
+                        members = get_subscription_members(subscription_id)
+                        if members and user_id in members:
+                            return True
+                        return False
+                    except Exception:
+                        return False
+                return True
+    return False
+
+
 def has_recommendations_access(chat_id, user_id):
-    """Проверяет, есть ли у пользователя доступ к функциям рекомендаций
-    (требуется подписка 'recommendations' или 'all')
-    """
+    """Доступ к платным режимам рекомендаций: подписка ИЛИ первые FREE_RECOMMENDATIONS_LIMIT использований бесплатно."""
+    if has_recommendations_subscription(chat_id, user_id):
+        return True
+    return get_recommendation_paid_uses_count(chat_id, user_id) < FREE_RECOMMENDATIONS_LIMIT
+
+
+def has_recommendations_access_legacy(chat_id, user_id):
+    """Проверяет, есть ли у пользователя доступ к функциям рекомендаций (только подписка).
+    Используется внутри логики подписки; для проверки доступа используйте has_recommendations_access."""
     from moviebot.database.db_operations import get_user_personal_subscriptions
 
     # Проверяем личную подписку

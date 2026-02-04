@@ -18,7 +18,12 @@ from moviebot.services.shazam_service import (
 )
 from moviebot.api.kinopoisk_api import get_film_by_imdb_id, search_films
 
-from moviebot.utils.helpers import has_recommendations_access
+from moviebot.utils.helpers import (
+    has_recommendations_access,
+    has_recommendations_subscription,
+    get_recommendations_remaining_free,
+    increment_recommendation_paid_uses,
+)
 
 from moviebot.states import shazam_state
 
@@ -605,6 +610,22 @@ def process_shazam_voice_async(message, loading_msg):
 def register_shazam_handlers(bot):
     """Регистрирует обработчики для Шазам"""
     
+    def _show_shazam_main_screen(bot_instance, chat_id, message_id):
+        """Показать основной экран Шазам (Написать / Записать голосовое)."""
+        text = "🔮 <b>Шазам</b>\n\n"
+        text += "Вы можете описать своими словами, какой фильм хотели бы посмотреть, а мы найдем подходящие"
+        markup = InlineKeyboardMarkup(row_width=1)
+        markup.add(InlineKeyboardButton("✍️ Написать", callback_data="shazam:text"))
+        markup.add(InlineKeyboardButton("▶️ Записать голосовое", callback_data="shazam:voice"))
+        markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="back_to_start_menu"))
+        bot_instance.edit_message_text(
+            text,
+            chat_id,
+            message_id,
+            reply_markup=markup,
+            parse_mode='HTML'
+        )
+
     @bot.callback_query_handler(func=lambda call: call.data == "shazam:start")
     def shazam_start_callback(call):
         """Обработчик кнопки Шазам из главного меню"""
@@ -613,16 +634,14 @@ def register_shazam_handlers(bot):
             user_id = call.from_user.id
             chat_id = call.message.chat.id
             
-            # Проверяем доступ
+            # Нет доступа (лимит исчерпан и нет подписки)
             if not has_recommendations_access(chat_id, user_id):
                 text = "🔒 <b>Шазам</b>\n\n"
-                text += "Вы можете описать своими словами, какой фильм хотели бы посмотреть, а мы найдем подходящие. Эта функция доступна с подпиской <b>💎 Movie Planner PRO</b>.\n\n"
-                text += "Используйте /payment для оформления подписки."
-                
-                markup = InlineKeyboardMarkup()
-                markup.add(InlineKeyboardButton("💳 К подписке", callback_data="payment:tariffs:personal"))
+                text += "Лимит бесплатных использований исчерпан. Режимы «Рандом по базе» и «По оценкам в базе» всегда бесплатны.\n\n"
+                text += "Подключите подписку для неограниченного доступа к Шазаму."
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("💳 Тарифы", callback_data="start_menu:payment"))
                 markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
-                
                 bot.edit_message_text(
                     text,
                     chat_id,
@@ -631,30 +650,58 @@ def register_shazam_handlers(bot):
                     parse_mode='HTML'
                 )
                 return
-            
-            text = "🔮 <b>Шазам</b>\n\n"
-            text += "Вы можете описать своими словами, какой фильм хотели бы посмотреть, а мы найдем подходящие"
-            
-            markup = InlineKeyboardMarkup(row_width=1)
-            markup.add(InlineKeyboardButton("✍️ Написать", callback_data="shazam:text"))
-            markup.add(InlineKeyboardButton("▶️ Записать голосовое", callback_data="shazam:voice"))
-            markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="back_to_start_menu"))
-            
-            bot.edit_message_text(
-                text,
-                chat_id,
-                call.message.message_id,
-                reply_markup=markup,
-                parse_mode='HTML'
-            )
-            
-            # Устанавливаем состояние
+
+            # Есть подписка — сразу показываем экран Шазам
+            if has_recommendations_subscription(chat_id, user_id):
+                _show_shazam_main_screen(bot, chat_id, call.message.message_id)
+                shazam_state[user_id] = {'mode': None, 'chat_id': chat_id}
+                return
+
+            # Бесплатное использование: предупреждение с остатком
+            remaining = get_recommendations_remaining_free(chat_id, user_id)
+            if remaining is not None and remaining >= 0:
+                warning_text = (
+                    "🆓 <b>Бесплатное использование</b>\n\n"
+                    f"Осталось бесплатных использований рекомендаций: <b>{remaining}</b> из 3.\n\n"
+                    "Режимы <b>«Рандом по базе»</b> и <b>«По оценкам в базе»</b> всегда доступны бесплатно.\n\n"
+                    "Подключите подписку для неограниченного доступа к Шазаму."
+                )
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("▶️ Продолжить", callback_data="shazam_paid_confirm"))
+                markup.add(InlineKeyboardButton("💳 Тарифы", callback_data="start_menu:payment"))
+                markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+                bot.edit_message_text(
+                    warning_text,
+                    chat_id,
+                    call.message.message_id,
+                    reply_markup=markup,
+                    parse_mode='HTML'
+                )
+                return
+
+            _show_shazam_main_screen(bot, chat_id, call.message.message_id)
             shazam_state[user_id] = {'mode': None, 'chat_id': chat_id}
-            
         except Exception as e:
             logger.error(f"Ошибка в shazam_start_callback: {e}", exc_info=True)
             try:
                 bot.answer_callback_query(call.id, "Произошла ошибка", show_alert=True)
+            except:
+                pass
+
+    @bot.callback_query_handler(func=lambda call: call.data == "shazam_paid_confirm")
+    def shazam_paid_confirm_callback(call):
+        """После «Продолжить» на экране бесплатного использования Шазама: списываем использование и показываем экран Шазам."""
+        try:
+            bot.answer_callback_query(call.id)
+            user_id = call.from_user.id
+            chat_id = call.message.chat.id
+            increment_recommendation_paid_uses(chat_id, user_id)
+            _show_shazam_main_screen(bot, chat_id, call.message.message_id)
+            shazam_state[user_id] = {'mode': None, 'chat_id': chat_id}
+        except Exception as e:
+            logger.error(f"Ошибка в shazam_paid_confirm_callback: {e}", exc_info=True)
+            try:
+                bot.answer_callback_query(call.id, "Ошибка", show_alert=True)
             except:
                 pass
     

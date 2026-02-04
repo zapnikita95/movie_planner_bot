@@ -62,11 +62,8 @@ def settings_command(message):
         else:
             markup.add(InlineKeyboardButton("🔒 Настройки напоминаний", callback_data="settings:notifications_locked"))
         
-        # Проверяем доступ к импорту базы (требуется 💎 Movie Planner PRO)
-        if has_pro_access(chat_id, user_id):
-            markup.add(InlineKeyboardButton("📥 Импорт базы из Кинопоиска", callback_data="settings:import"))
-        else:
-            markup.add(InlineKeyboardButton("🔒 Импорт базы из Кинопоиска", callback_data="settings:import_locked"))
+        # Импорт базы из Кинопоиска доступен всем
+        markup.add(InlineKeyboardButton("📥 Импорт базы из Кинопоиска", callback_data="settings:import"))
         
         # Проверяем, является ли чат личным (случайные события доступны только в группах)
         is_private = message.chat.type == 'private'
@@ -369,16 +366,7 @@ def handle_settings_callback(call):
             return
         
         if action == "import":
-            # Проверяем доступ к импорту базы из Кинопоиска (💎 Movie Planner PRO)
-            if not has_pro_access(chat_id, user_id):
-                bot.answer_callback_query(
-                    call.id,
-                    "📥 Импорт базы из Кинопоиска доступен с подпиской 💎 Movie Planner PRO. Подключите через /payment",
-                    show_alert=True
-                )
-                return
-            
-            # Импорт базы из Кинопоиска
+            # Импорт базы из Кинопоиска доступен всем пользователям
             user_import_state[user_id] = {
                 'step': 'waiting_user_id',
                 'kp_user_id': None,
