@@ -438,8 +438,9 @@ def send_plan_notification_combined(chat_id, date_str, user_id=None):
         else:
             icon = '🎥'
         text += f"{icon} {title_esc} — {time_str}\n"
+    text += "\n🏠 — просмотр дома\n🎥 — просмотр в кино\n🎟️ — загружены билеты"
     if single and p0.get('link'):
-        text += f"\n{p0.get('link')}"
+        text += f"\n\n{p0.get('link')}"
 
     markup = InlineKeyboardMarkup(row_width=1)
     for p in plans:
@@ -463,10 +464,6 @@ def send_plan_notification_combined(chat_id, date_str, user_id=None):
         elif p0['plan_type'] == 'home' and p0.get('streaming_service') and p0.get('streaming_url'):
             markup.add(InlineKeyboardButton(p0['streaming_service'], url=p0['streaming_url']))
         markup.add(InlineKeyboardButton("✏️ Изменить в расписании", callback_data=f"edit_plan:{p0['plan_id']}"))
-    else:
-        for p in plans:
-            t = (p.get('title') or 'план')[:25]
-            markup.add(InlineKeyboardButton(f"✏️ Изменить — {t}", callback_data=f"edit_plan:{p['plan_id']}"))
 
     try:
         bot.send_message(chat_id, text, parse_mode='HTML', disable_web_page_preview=False, reply_markup=markup)
@@ -1051,7 +1048,7 @@ def _mark_rate_reminder_sent(plan_id, chat_id):
 # Очистка планов
 
 def clean_home_plans():
-    """Ежедневно удаляет планы дома на вчерашний день, если по фильму нет оценок.
+    """Ежедневно удаляет планы дома и в кино на вчерашний день, если по фильму нет оценок (пограничные: plan+3h > конец вчера не удаляем).
     Также удаляет все планы дома на прошедшие выходные (суббота и воскресенье) в понедельник."""
     
     now = datetime.now(plans_tz)
@@ -1136,72 +1133,88 @@ def clean_home_plans():
                 
                 logger.info(f"Очищены планы дома на выходные: {len(weekend_rows)} планов")
             
-            # Находим планы дома на вчера (используем AT TIME ZONE для корректной работы с TIMESTAMP WITH TIME ZONE)
-            cursor_local.execute('''
-                SELECT p.id, p.film_id, p.chat_id
-                FROM plans p
-                WHERE p.plan_type = 'home' AND DATE(p.plan_datetime AT TIME ZONE 'Europe/Moscow') = %s
-            ''', (yesterday,))
+            # Конец вчерашнего дня (МСК) в UTC — для пограничных планов: не удаляем, если напоминание об оценке могло прийти уже «сегодня»
+            end_yesterday_local = datetime(yesterday.year, yesterday.month, yesterday.day, 23, 59, 59)
+            end_yesterday_utc = plans_tz.localize(end_yesterday_local).astimezone(pytz.utc)
 
+            # Планы дома и в кино на вчера (с film_id — по ним проверяем оценки)
+            cursor_local.execute('''
+                SELECT p.id, p.film_id, p.chat_id, p.plan_type, p.plan_datetime
+                FROM plans p
+                WHERE p.film_id IS NOT NULL
+                  AND (p.plan_type = 'home' OR p.plan_type = 'cinema')
+                  AND DATE((p.plan_datetime AT TIME ZONE 'UTC') AT TIME ZONE 'Europe/Moscow') = %s
+            ''', (yesterday,))
             rows = cursor_local.fetchall()
 
-            # Группируем планы по чатам и проверяем оценки
             plans_by_chat = {}
             for row in rows:
                 plan_id = row.get('id') if isinstance(row, dict) else row[0]
                 film_id = row.get('film_id') if isinstance(row, dict) else row[1]
                 chat_id = row.get('chat_id') if isinstance(row, dict) else row[2]
+                plan_type = row.get('plan_type') if isinstance(row, dict) else row[3]
+                plan_dt = row.get('plan_datetime') if isinstance(row, dict) else row[4]
+                if plan_dt and hasattr(plan_dt, 'replace'):
+                    if plan_dt.tzinfo is None:
+                        plan_dt = pytz.utc.localize(plan_dt)
+                elif plan_dt:
+                    plan_dt = datetime.fromisoformat(str(plan_dt).replace('Z', '+00:00'))
 
-                # Проверяем, есть ли оценки по фильму
+                # Пограничный план: если напоминание об оценке (plan+3h) пришло бы после конца вчера — не удаляем
+                if plan_dt and (plan_dt + timedelta(hours=3)) > end_yesterday_utc:
+                    continue
+
                 cursor_local.execute('SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND film_id = %s', (chat_id, film_id))
                 count_row = cursor_local.fetchone()
                 count = count_row.get('count') if isinstance(count_row, dict) else (count_row[0] if count_row else 0)
+                if count != 0:
+                    continue
 
-                if count == 0:
-                    cursor_local.execute('SELECT title, link, kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
-                    movie_row = cursor_local.fetchone()
-                    
-                    if movie_row:
-                        title = movie_row.get('title') if isinstance(movie_row, dict) else movie_row[0]
-                        link = movie_row.get('link') if isinstance(movie_row, dict) else movie_row[1]
-                        kp_id = movie_row.get('kp_id') if isinstance(movie_row, dict) else (movie_row[2] if len(movie_row) > 2 else None)
-                        
-                        if chat_id not in plans_by_chat:
-                            plans_by_chat[chat_id] = []
-                        plans_by_chat[chat_id].append({
-                            'plan_id': plan_id,
-                            'film_id': film_id,
-                            'title': title,
-                            'link': link,
-                            'kp_id': str(kp_id) if kp_id is not None else None
-                        })
+                cursor_local.execute('SELECT title, link, kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                movie_row = cursor_local.fetchone()
+                if not movie_row:
+                    continue
+                title = movie_row.get('title') if isinstance(movie_row, dict) else movie_row[0]
+                link = movie_row.get('link') if isinstance(movie_row, dict) else movie_row[1]
+                kp_id = movie_row.get('kp_id') if isinstance(movie_row, dict) else (movie_row[2] if len(movie_row) > 2 else None)
+                if chat_id not in plans_by_chat:
+                    plans_by_chat[chat_id] = []
+                plans_by_chat[chat_id].append({
+                    'plan_id': plan_id,
+                    'film_id': film_id,
+                    'title': title,
+                    'link': link,
+                    'kp_id': str(kp_id) if kp_id is not None else None,
+                    'plan_type': plan_type,
+                })
 
-            # Удаляем планы и отправляем сообщения
             for chat_id, plans in plans_by_chat.items():
-                # Удаляем все планы для этого чата
                 for plan_info in plans:
                     cursor_local.execute('DELETE FROM plans WHERE id = %s', (plan_info['plan_id'],))
                     deleted_count += 1
 
-                # Отправляем одно сообщение на чат с кнопками для всех фильмов
                 if bot and plans:
                     try:
                         from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-                        
                         if len(plans) == 1:
-                            message_text = f"📅 План на фильм удалён (нет оценок за вчера)."
+                            message_text = "📅 План на фильм удалён (нет оценок за вчера)."
                         else:
                             message_text = f"📅 Удалены планы на {len(plans)} фильмов (нет оценок за вчера):"
-                        
+                        message_text += "\n\n🏠 — просмотр дома\n🎥 — просмотр в кино"
                         markup = InlineKeyboardMarkup(row_width=1)
                         for plan_info in plans:
                             kp_id = plan_info.get('kp_id')
+                            title_short = (plan_info.get('title') or 'Фильм')[:50]
+                            icon = '🏠' if plan_info.get('plan_type') == 'home' else '🎥'
+                            btn_text = f"{icon} {title_short}"
+                            if len(btn_text) > 64:
+                                btn_text = btn_text[:61] + "..."
                             if kp_id:
-                                button_text = f"🎬 {plan_info['title']}"
-                                if len(button_text) > 64:
-                                    button_text = button_text[:61] + "..."
-                                markup.add(InlineKeyboardButton(button_text, callback_data=f"show_film_info:{kp_id}"))
-                        
+                                try:
+                                    kp_int = int(kp_id)
+                                    markup.add(InlineKeyboardButton(btn_text, callback_data=f"back_to_film:{kp_int}"))
+                                except (ValueError, TypeError):
+                                    pass
                         if markup.keyboard:
                             bot.send_message(chat_id, message_text, parse_mode='HTML', reply_markup=markup)
                         else:
@@ -1221,7 +1234,7 @@ def clean_home_plans():
         except:
             pass
 
-    logger.info(f"Очищены планы дома без оценок: {deleted_count} планов")
+    logger.info(f"Очищены планы (дома и в кино) без оценок: {deleted_count} планов")
 
 
 
