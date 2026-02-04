@@ -31,6 +31,18 @@ let lastDetectedUrl = null; // Для отслеживания изменени�
 let isProcessing = false; // Флаг для защиты от двойных кликов
 let urlRequestHistory = []; // История запросов для защиты от спама
 
+// Неблокирующее уведомление (без попапа и клика «Ок»)
+function showToast(message) {
+  const existing = document.getElementById('movieplanner-toast');
+  if (existing) existing.remove();
+  const toast = document.createElement('div');
+  toast.id = 'movieplanner-toast';
+  toast.textContent = message;
+  toast.style.cssText = 'position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 20px; border-radius: 10px; font-size: 13px; z-index: 10000; box-shadow: 0 4px 16px rgba(0,0,0,0.2); max-width: 90%; text-align: center; pointer-events: none;';
+  document.body.appendChild(toast);
+  setTimeout(() => { toast.remove(); }, 3500);
+}
+
 // Функция сброса состояния расширения
 function resetExtensionState() {
   currentFilm = null;
@@ -162,6 +174,17 @@ document.addEventListener('DOMContentLoaded', async () => {
   } else {
     showAuthScreen();
   }
+  
+  // При перезагрузке страницы во вкладке — обновляем контент попапа (чтобы подтянуть актуальный фильм по URL)
+  chrome.tabs.onUpdated.addListener(function onTabUpdated(tabId, changeInfo, tab) {
+    if (changeInfo.status !== 'complete' || !tab.url) return;
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs[0] && tabs[0].id === tabId) {
+        lastDetectedUrl = null; // чтобы detectAndLoadFilm загрузил данные заново
+        loadCurrentTabFilm();
+      }
+    });
+  });
   
   // Обработчики событий
   const bindBtn = document.getElementById('bind-btn');
@@ -389,62 +412,16 @@ async function detectAndLoadFilm(url, urlChanged = true) {
       return;
     }
     if (kpMatch) {
+      // Всегда берём kp_id из URL, чтобы при переходе на другой фильм показывался именно он (content script может отдавать старую страницу)
       const kpId = kpMatch[2];
-      // Пытаемся получить данные от content script, если нет - используем URL
-      try {
-        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (tabs && tabs[0]) {
-          chrome.tabs.sendMessage(tabs[0].id, { action: 'get_kp_id' }, async (response) => {
-            // Проверяем ошибки Chrome runtime
-            if (chrome.runtime.lastError) {
-              console.log('Content script не отвечает, используем URL:', chrome.runtime.lastError.message);
-              await loadFilmByKpId(kpId);
-              return;
-            }
-            if (response && response.kpId) {
-              await loadFilmByKpId(response.kpId);
-            } else {
-              await loadFilmByKpId(kpId);
-            }
-          });
-        } else {
-          await loadFilmByKpId(kpId);
-        }
-      } catch (error) {
-        console.error('Ошибка получения kp_id:', error);
-        await loadFilmByKpId(kpId);
-      }
+      await loadFilmByKpId(kpId);
       return;
     }
     
-    // IMDb
+    // IMDb: всегда берём id из URL, чтобы при переходе на другой фильм показывался именно он
     const imdbMatch = url.match(/imdb\.com\/title\/(tt\d+)/i);
     if (imdbMatch) {
-      const imdbId = imdbMatch[1];
-      // Пытаемся получить данные от content script
-      try {
-        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (tabs && tabs[0]) {
-          chrome.tabs.sendMessage(tabs[0].id, { action: 'get_imdb_id' }, async (response) => {
-            // Проверяем ошибки Chrome runtime
-            if (chrome.runtime.lastError) {
-              console.log('Content script не отвечает, используем URL:', chrome.runtime.lastError.message);
-              await loadFilmByImdbId(imdbId);
-              return;
-            }
-            if (response && response.imdbId) {
-              await loadFilmByImdbId(response.imdbId, 'imdb');
-            } else {
-              await loadFilmByImdbId(imdbId, 'imdb');
-            }
-          });
-        } else {
-          await loadFilmByImdbId(imdbId);
-        }
-      } catch (error) {
-        console.error('Ошибка получения imdb_id:', error);
-        await loadFilmByImdbId(imdbId);
-      }
+      await loadFilmByImdbId(imdbMatch[1], 'imdb');
       return;
     }
     
@@ -1765,17 +1742,21 @@ function displayFilmInfo(film, data, showConfirmation = false) {
         if (response.ok) {
           const result = await response.json();
           if (result.success) {
-            alert('✅ Сообщение отправлено в бота. Отправьте фото или файл с билетом(ами) в чат.');
+            showToast('Отправьте фото или файл с билетом(ами) в чат с ботом.');
           } else {
-            alert('Ошибка: ' + (result.error || 'неизвестная ошибка'));
+            showToast('Ошибка: ' + (result.error || 'неизвестная ошибка'));
           }
         } else {
-          const errorJson = await response.json();
-          alert('Ошибка: ' + (errorJson.error || 'не удалось отправить сообщение'));
+          try {
+            const errorJson = await response.json();
+            showToast(errorJson.error || 'Не удалось отправить сообщение');
+          } catch (_) {
+            showToast('Ошибка отправки');
+          }
         }
       } catch (err) {
         console.error('Ошибка инициализации загрузки билетов:', err);
-        alert('Ошибка. Попробуйте отправить билет напрямую в чат с ботом.');
+        showToast('Отправьте билет напрямую в чат с ботом.');
       } finally {
         isProcessing = false;
         ticketsBtn.disabled = false;
@@ -2158,15 +2139,10 @@ function setPlanType(type) {
       homeBtn.style.border = '2px solid transparent';
     }
     if (streamingEl) streamingEl.classList.add('hidden');
-    // Показываем кнопку билетов при выборе "В кино"
+    // Кнопка "Добавить билеты" в форме планирования не показываем — она только у уже запланированного фильма (в film-actions)
     if (addTicketsBtn) {
-      addTicketsBtn.classList.remove('hidden');
-      addTicketsBtn.disabled = !hasTicketsAccess;
-      if (!hasTicketsAccess) {
-        addTicketsBtn.title = 'Оформите подписку "Билеты" для загрузки билетов на мероприятия';
-      } else {
-        addTicketsBtn.title = '';
-      }
+      addTicketsBtn.classList.add('hidden');
+      addTicketsBtn.disabled = true;
     }
   }
 }
@@ -2318,108 +2294,26 @@ async function handleCreatePlan() {
     
     const json = await response.json();
     if (json.success) {
-      // Если план "в кино", автоматически активируем ожидание билета
-      if (selectedPlanType === 'cinema' && json.plan_id && hasTicketsAccess) {
+      // Не блокируем попапом — показываем тост и обновляем карточку фильма (появится «Добавить билеты» если план «в кино»)
+      showToast('✅ План создан!');
+      const planningForm = document.getElementById('planning-form');
+      if (planningForm) {
+        planningForm.classList.add('hidden');
+        planningForm.style.display = 'none';
+      }
+      // Обновляем карточку фильма (has_plan станет true, кнопка «Добавить билеты» появится в film-actions)
+      if (currentFilm && currentFilm.kp_id) {
         try {
-          const ticketResponse = await fetch(`${API_BASE_URL}/api/extension/init-ticket-upload`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              chat_id: chatId,
-              user_id: userId,
-              plan_id: json.plan_id
-            })
-          });
-          
-          if (ticketResponse.ok) {
-            const ticketResult = await ticketResponse.json();
-            if (ticketResult.success) {
-              alert('✅ План создан!\n\n🎟️ Для сохранения билетов отправьте скриншот в чат с ботом — он уже ждёт ваш билет.\n\n💡 Напоминание о событии вместе с билетами придёт незадолго до сеанса!');
-            } else {
-              alert('✅ План создан!\n\n🎟️ Для добавления билетов отправьте скриншот в чат с ботом.');
-            }
-          } else {
-            alert('✅ План создан!\n\n🎟️ Для добавления билетов отправьте скриншот в чат с ботом.');
-          }
-        } catch (err) {
-          console.error('Ошибка инициализации загрузки билетов:', err);
-          alert('✅ План создан!\n\n🎟️ Для добавления билетов отправьте скриншот в чат с ботом.');
+          await loadFilmByKpId(currentFilm.kp_id);
+        } catch (e) {
+          console.error('Ошибка обновления карточки после создания плана:', e);
         }
-      } else {
-        alert('✅ План создан!');
-      }
-      
-      // Показываем кнопку "Добавить билеты" после успешного планирования, если выбрано "В кино"
-      const addTicketsBtn = document.getElementById('add-tickets-btn');
-      if (selectedPlanType === 'cinema' && addTicketsBtn && hasTicketsAccess && json.plan_id) {
-        addTicketsBtn.classList.remove('hidden');
-        addTicketsBtn.disabled = false;
-        addTicketsBtn.title = '';
-        // Инициируем сообщение в боте для загрузки билетов
-        addTicketsBtn.onclick = async () => {
-          try {
-            // Отправляем запрос в бот для начала процесса загрузки билетов
-            const response = await fetch(`${API_BASE_URL}/api/extension/init-ticket-upload`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                chat_id: chatId,
-                user_id: userId,
-                plan_id: json.plan_id
-              })
-            });
-            
-            if (response.ok) {
-              const result = await response.json();
-              if (result.success) {
-                alert('✅ Сообщение отправлено в бота. Отправьте фото или файл с билетом(ами) в чат.');
-              } else {
-                alert('Ошибка: ' + (result.error || 'неизвестная ошибка'));
-              }
-            } else {
-              const errorJson = await response.json();
-              alert('Ошибка: ' + (errorJson.error || 'не удалось отправить сообщение'));
-            }
-          } catch (err) {
-            console.error('Ошибка инициализации загрузки билетов:', err);
-            alert('Ошибка. Попробуйте отправить билет напрямую в чат с ботом.');
-          }
-        };
-      }
-      
-      // Закрываем форму планирования через 3 секунды, чтобы пользователь мог нажать кнопку билетов
-      // Но только если не в режиме auto_plan_cinema (там уже показали сообщение)
-      if (!window.autoPlanCinemaMode) {
-        setTimeout(() => {
-          const planningForm = document.getElementById('planning-form');
-          if (planningForm) {
-            planningForm.classList.add('hidden');
-            planningForm.style.display = 'none';
-          }
-          // Завершаем процесс работы с фильмом - очищаем состояние
-          resetExtensionState();
-          // Очищаем информацию о фильме
-          const filmInfo = document.getElementById('film-info');
-          if (filmInfo) {
-            filmInfo.classList.add('hidden');
-            filmInfo.style.display = 'none';
-          }
-        }, 3000);
-      } else {
-        // В режиме auto_plan_cinema сразу закрываем форму после показа сообщения
-        setTimeout(() => {
-          const planningForm = document.getElementById('planning-form');
-          if (planningForm) {
-            planningForm.classList.add('hidden');
-            planningForm.style.display = 'none';
-          }
-          resetExtensionState();
-          const filmInfo = document.getElementById('film-info');
-          if (filmInfo) {
-            filmInfo.classList.add('hidden');
-            filmInfo.style.display = 'none';
-          }
-        }, 1000);
+      } else if (currentFilm && currentFilm.imdb_id) {
+        try {
+          await loadFilmByImdbId(currentFilm.imdb_id, 'imdb');
+        } catch (e) {
+          console.error('Ошибка обновления карточки после создания плана:', e);
+        }
       }
     } else {
       alert('Ошибка создания плана: ' + (json.error || 'неизвестная ошибка'));
