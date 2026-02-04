@@ -35,6 +35,36 @@ def register_random_callbacks(bot):
             
             logger.info(f"[RANDOM CALLBACK] Mode: {mode}, user_id={user_id}, chat_id={chat_id}")
             
+            # «Назад к режимам» — сразу показываем список режимов и выходим
+            if mode == "back":
+                if user_id in user_random_state:
+                    user_random_state[user_id]['step'] = 'mode'
+                    user_random_state[user_id]['mode'] = None
+                    user_random_state[user_id]['periods'] = []
+                    user_random_state[user_id]['genres'] = []
+                    user_random_state[user_id]['directors'] = []
+                    user_random_state[user_id]['actors'] = []
+                markup = InlineKeyboardMarkup(row_width=1)
+                markup.add(InlineKeyboardButton("🎲 Рандом по своей базе", callback_data="rand_mode:database"))
+                markup.add(InlineKeyboardButton("⭐ По оценкам в базе", callback_data="rand_mode:group_votes"))
+                markup.add(InlineKeyboardButton("🎬 Рандом по кинопоиску", callback_data="rand_mode:kinopoisk"))
+                markup.add(InlineKeyboardButton("⭐ По моим оценкам (9-10)", callback_data="rand_mode:my_votes"))
+                markup.add(InlineKeyboardButton("⬅️ Назад в меню", callback_data="back_to_start_menu"))
+                bot.answer_callback_query(call.id)
+                try:
+                    bot.edit_message_text("🎲 <b>Выберите режим рандома:</b>", chat_id, call.message.message_id, reply_markup=markup, parse_mode='HTML')
+                except Exception as edit_err:
+                    err_str = str(edit_err).lower()
+                    if "not modified" in err_str or "message is not modified" in err_str:
+                        pass  # уже на этом экране — ничего не делаем
+                    else:
+                        logger.warning(f"[RANDOM CALLBACK] Edit on back failed: {edit_err}")
+                        try:
+                            bot.send_message(chat_id, "🎲 <b>Выберите режим рандома:</b>", reply_markup=markup, parse_mode='HTML')
+                        except Exception:
+                            pass
+                return
+            
             # Платные режимы: подписка или первые 3 использования бесплатно
             if mode in ['kinopoisk', 'my_votes', 'group_votes']:
                 has_rec_access = has_recommendations_access(chat_id, user_id)
