@@ -3357,8 +3357,12 @@ def create_web_app(bot):
             return jsonify({"success": False, "error": "Invalid month or year"}), 400
         if not (1 <= month <= 12) or not (2020 <= year <= 2030):
             return jsonify({"success": False, "error": "Invalid month or year"}), 400
-        from moviebot.api.site_stats import get_personal_stats, get_user_stats_settings, get_stats_share_view_count
-        data = get_personal_stats(chat_id, month, year)
+        try:
+            from moviebot.api.site_stats import get_personal_stats, get_user_stats_settings, get_stats_share_view_count
+            data = get_personal_stats(chat_id, month, year)
+        except Exception as e:
+            logger.exception("site_stats error for chat_id=%s: %s", chat_id, e)
+            return jsonify({"success": False, "error": "Ошибка загрузки статистики"}), 500
         settings = get_user_stats_settings(chat_id)
         data['debug_available'] = (chat_id == 301810276)
         if settings.get('public_enabled') and settings.get('public_slug'):
@@ -3418,7 +3422,7 @@ def create_web_app(bot):
     def site_stats_public(username):
         if request.method == 'OPTIONS':
             return jsonify({'status': 'ok'})
-        slug = username.strip().rstrip('/')
+        slug = (username or '').strip().rstrip('/').lstrip('@').lower()
         if not slug:
             return jsonify({"success": False, "error": "User not found"}), 404
         try:
@@ -3430,8 +3434,12 @@ def create_web_app(bot):
         if not (1 <= month <= 12) or not (2020 <= year <= 2030):
             month = datetime.now(pytz.UTC).month
             year = datetime.now(pytz.UTC).year
-        from moviebot.api.site_stats import get_public_personal_stats
-        data, err = get_public_personal_stats(slug, month, year)
+        try:
+            from moviebot.api.site_stats import get_public_personal_stats
+            data, err = get_public_personal_stats(slug, month, year)
+        except Exception as e:
+            logger.exception("site_stats_public error for slug=%s: %s", slug, e)
+            return jsonify({"success": False, "error": "Ошибка загрузки статистики"}), 500
         if err:
             if err == 'User not found':
                 return jsonify({"success": False, "error": "Пользователь не найден"}), 404

@@ -182,12 +182,12 @@ def _get_user_profile_and_achievements(user_id):
         profile['avg_rating_alltime'] = round(float(avg), 1) if avg is not None else None
         first_ts = None
         for q in [
-            "SELECT MIN(watched_at) FROM watched_movies WHERE chat_id = %s AND user_id = %s",
-            "SELECT MIN(rated_at) FROM ratings WHERE chat_id = %s AND user_id = %s",
+            "SELECT MIN(watched_at) AS ts FROM watched_movies WHERE chat_id = %s AND user_id = %s",
+            "SELECT MIN(rated_at) AS ts FROM ratings WHERE chat_id = %s AND user_id = %s",
         ]:
             cur.execute(q, (chat_id, user_id))
             r = cur.fetchone()
-            val = (list(r.values())[0] if isinstance(r, dict) and r else (r[0] if r and len(r) > 0 else None))
+            val = (r.get('ts') if isinstance(r, dict) else (r[0] if r and len(r) > 0 else None)) if r else None
             if val:
                 dt = _ensure_tz(val)
                 if first_ts is None or (dt and dt < first_ts):
