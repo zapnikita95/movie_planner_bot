@@ -658,6 +658,9 @@ def get_group_stats(chat_id, month, year):
     top_films.sort(key=lambda x: (-(x.get('avg_rating') or 0), -(len(x.get('rated_by') or [])), x.get('title') or ''))
     top_films = top_films[:10]
 
+    # Кино: (film_id, user_id) для бейджа
+    cinema_film_user = {(r.get('film_id') if isinstance(r, dict) else r[0], r.get('user_id') if isinstance(r, dict) else r[1]) for r in cinema_rows}
+
     # Watched list для группы (всё просмотренное за месяц)
     watched_list = []
     seen = set()
@@ -667,11 +670,12 @@ def get_group_stats(chat_id, month, year):
             return
         seen.add(key)
         rating = next((r.get('rating') for r in ratings_in_month if r.get('film_id') == fid and r.get('user_id') == uid), None)
+        is_cinema = (fid, uid) in cinema_film_user
         watched_list.append({
             'film_id': fid, 'kp_id': kp_id, 'title': title, 'year': year_val,
             'type': 'series' if is_series else 'film',
             'date': date_val.strftime('%Y-%m-%d') if hasattr(date_val, 'strftime') else str(date_val)[:10],
-            'rating': rating, 'user_id': uid
+            'rating': rating, 'user_id': uid, 'is_cinema': is_cinema
         })
     for r in wm_rows:
         fid = r.get('film_id') if isinstance(r, dict) else r[0]
@@ -692,7 +696,6 @@ def get_group_stats(chat_id, month, year):
         dt = r.get('watched_date') if isinstance(r, dict) else r[6]
         add_watched(fid, kp_id, title, year_val=year, is_series=is_series, date_val=dt, uid=uid)
     watched_list.sort(key=lambda x: (x.get('date') or '', x.get('title') or ''))
-    watched_list = watched_list[:50]
 
     # Cinema list
     cinema_list = []
