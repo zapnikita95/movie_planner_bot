@@ -1504,7 +1504,9 @@ def create_web_app(bot):
         'http://movie-planner.ru',
         'http://www.movie-planner.ru',
         'http://localhost',
+        'http://localhost:8080',
         'http://127.0.0.1',
+        'http://127.0.0.1:8080',
     }
 
     @app.after_request
@@ -3295,6 +3297,63 @@ def create_web_app(bot):
                 "rating_kp": None,
             })
         return jsonify({"success": True, "items": items})
+
+    @app.route('/api/site/stats', methods=['GET', 'OPTIONS'])
+    def site_stats():
+        if request.method == 'OPTIONS':
+            return jsonify({'status': 'ok'})
+        chat_id = _site_token_to_chat_id()
+        if chat_id is None:
+            return jsonify({"success": False, "error": "Не авторизован"}), 401
+        try:
+            month = int(request.args.get('month') or datetime.now(pytz.UTC).month)
+            year = int(request.args.get('year') or datetime.now(pytz.UTC).year)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "Invalid month or year"}), 400
+        if not (1 <= month <= 12) or not (2020 <= year <= 2030):
+            return jsonify({"success": False, "error": "Invalid month or year"}), 400
+        from moviebot.api.site_stats import get_personal_stats
+        data = get_personal_stats(chat_id, month, year)
+        return jsonify({"success": True, **data})
+
+    @app.route('/api/site/group-stats', methods=['GET', 'OPTIONS'])
+    def site_group_stats():
+        if request.method == 'OPTIONS':
+            return jsonify({'status': 'ok'})
+        chat_id = _site_token_to_chat_id()
+        if chat_id is None:
+            return jsonify({"success": False, "error": "Не авторизован"}), 401
+        try:
+            month = int(request.args.get('month') or datetime.now(pytz.UTC).month)
+            year = int(request.args.get('year') or datetime.now(pytz.UTC).year)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "Invalid month or year"}), 400
+        if not (1 <= month <= 12) or not (2020 <= year <= 2030):
+            return jsonify({"success": False, "error": "Invalid month or year"}), 400
+        from moviebot.api.site_stats import get_group_stats
+        data = get_group_stats(chat_id, month, year)
+        return jsonify(data)
+
+    @app.route('/api/site/group-stats/public/<slug>', methods=['GET', 'OPTIONS'])
+    def site_group_stats_public(slug):
+        if request.method == 'OPTIONS':
+            return jsonify({'status': 'ok'})
+        try:
+            month = int(request.args.get('month', 0))
+            year = int(request.args.get('year', 0))
+        except (TypeError, ValueError):
+            month = datetime.now(pytz.UTC).month
+            year = datetime.now(pytz.UTC).year
+        if not (1 <= month <= 12) or not (2020 <= year <= 2030):
+            month = datetime.now(pytz.UTC).month
+            year = datetime.now(pytz.UTC).year
+        from moviebot.api.site_stats import get_public_group_stats
+        data, err = get_public_group_stats(slug, month, year)
+        if err:
+            if err == 'Group not found':
+                return jsonify({"success": False, "error": "Группа не найдена"}), 404
+            return jsonify({"success": False, "error": "Статистика недоступна"}), 403
+        return jsonify(data)
 
     logger.info(f"[WEB APP] ===== FLASK ПРИЛОЖЕНИЕ СОЗДАНО =====")
     logger.info(f"[WEB APP] Зарегистрированные роуты: {[str(rule) for rule in app.url_map.iter_rules()]}")

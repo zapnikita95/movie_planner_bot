@@ -783,6 +783,59 @@ def init_database():
         logger.error(f"Ошибка при создании таблиц для тегов: {e}", exc_info=True)
         conn.rollback()
     
+    # Миграция: rated_at для статистики по месяцам
+    try:
+        cursor.execute('ALTER TABLE ratings ADD COLUMN IF NOT EXISTS rated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()')
+        conn.commit()
+        logger.info("Миграция: ratings.rated_at добавлен")
+    except Exception as e:
+        logger.debug(f"Миграция ratings.rated_at: {e}")
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+
+    # Таблица настроек публичной групповой статистики
+    try:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS group_stats_settings (
+                chat_id BIGINT PRIMARY KEY,
+                public_enabled BOOLEAN NOT NULL DEFAULT false,
+                public_slug VARCHAR(64) UNIQUE,
+                visible_blocks JSONB NOT NULL DEFAULT '{"summary":true,"mvp":true,"top_films":true,"rating_breakdown":true,"leaderboard":true,"controversial":true,"compatibility":true,"genres":true,"achievements":true,"heatmap":true}'::jsonb,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+            )
+        ''')
+        cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_group_stats_slug ON group_stats_settings(public_slug) WHERE public_slug IS NOT NULL')
+        conn.commit()
+        logger.info("Таблица group_stats_settings создана")
+    except Exception as e:
+        logger.error(f"Таблица group_stats_settings: {e}", exc_info=True)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+
+    # Таблица цветов аватаров участников группы
+    try:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS member_avatar_colors (
+                chat_id BIGINT,
+                user_id BIGINT,
+                color VARCHAR(7) NOT NULL,
+                PRIMARY KEY (chat_id, user_id)
+            )
+        ''')
+        conn.commit()
+        logger.info("Таблица member_avatar_colors создана")
+    except Exception as e:
+        logger.debug(f"Таблица member_avatar_colors: {e}")
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+
     conn.commit()
     logger.info("База данных инициализирована")
 
