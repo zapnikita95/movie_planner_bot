@@ -479,6 +479,25 @@ def get_personal_stats(chat_id, month, year):
             'online_link': None
         })
 
+    # Добавляем из cinema (походы в кино, если ещё не в списке)
+    for r in cinema_rows:
+        fid = r.get('film_id') if isinstance(r, dict) else r[0]
+        if (fid, 'wm') in seen or (fid, 'st') in seen or (fid, 'r') in seen:
+            continue
+        kp_id = r.get('kp_id') if isinstance(r, dict) else r[2]
+        title = r.get('title') if isinstance(r, dict) else r[3]
+        year = r.get('year') if isinstance(r, dict) else (r[4] if len(r) > 4 else None)
+        dt = r.get('screening_date') or r.get('plan_datetime') if isinstance(r, dict) else r[1]
+        date_str = dt.strftime('%Y-%m-%d') if hasattr(dt, 'strftime') else (str(dt)[:10] if dt else '')
+        rating = next((x.get('rating') for x in ratings_in_month if (x.get('film_id') == fid)), None)
+        seen.add((fid, 'c'))
+        watched_list.append({
+            'film_id': fid, 'kp_id': kp_id, 'title': title, 'year': year,
+            'type': 'film',
+            'date': date_str, 'rating': rating, 'is_cinema': True,
+            'online_link': None
+        })
+
     # Страховка: всё из films_watched | series_watched должно быть в watched_list
     watched_fids = {w.get('film_id') for w in watched_list}
     all_expected = films_watched | series_watched
