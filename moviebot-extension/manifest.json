@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Movie Planner",
-  "description": "Добавляй фильмы в базу Movie Planner. Автоопределение фильма и сериала на странице просмотра российских стримингов.",
+  "description": "Браузерный трекер фильмов и сериалов: авто-добавление с Kinopoisk/IMDb/стримингов, отметка прогресса серий, планы просмотра + Telegram-уведомления и личный кабинет.",
   "version": "1.3.5",
   "author": "Nikita Zaporozhets",
   "permissions": [
