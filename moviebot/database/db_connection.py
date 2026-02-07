@@ -795,21 +795,21 @@ def init_database():
         except Exception:
             pass
 
-    # Миграция: backfill rated_at и watched_at = январь 2025 для старых записей (сервис запустился в январе)
+    # Миграция: backfill rated_at и watched_at = январь 2026 для старых записей
     try:
         cursor.execute("""
-            UPDATE ratings SET rated_at = '2025-01-15 12:00:00+00'
-            WHERE rated_at IS NULL
+            UPDATE ratings SET rated_at = '2026-01-15 12:00:00+00'
+            WHERE rated_at IS NULL OR rated_at = '2025-01-15 12:00:00+00'::timestamptz
         """)
         r_cnt = cursor.rowcount
         cursor.execute("""
-            UPDATE watched_movies SET watched_at = '2025-01-15 12:00:00+00'
-            WHERE watched_at IS NULL
+            UPDATE watched_movies SET watched_at = '2026-01-15 12:00:00+00'
+            WHERE watched_at IS NULL OR watched_at = '2025-01-15 12:00:00+00'::timestamptz
         """)
         w_cnt = cursor.rowcount
         conn.commit()
         if r_cnt or w_cnt:
-            logger.info("Миграция: backfill rated_at=%s, watched_at=%s записей в январь 2025", r_cnt, w_cnt)
+            logger.info("Миграция: backfill rated_at=%s, watched_at=%s записей в январь 2026", r_cnt, w_cnt)
     except Exception as e:
         logger.debug(f"Миграция backfill: {e}")
         try:
