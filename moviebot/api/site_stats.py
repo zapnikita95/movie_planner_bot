@@ -53,6 +53,247 @@ def _month_range(month, year):
     return start, end
 
 
+# Список вечных личных ачивок (id, icon, name, description, rarity, условие)
+PERSONAL_ACHIEVEMENTS_DEF = [
+    ('first_watch', '🎬', 'Первый кадр', 'Первый фильм в MP', 'common', lambda p: p.get('total_films_alltime', 0) >= 1),
+    ('club_50', '🎞️', 'Полтинник', '50 просмотренных фильмов', 'common', lambda p: p.get('total_films_alltime', 0) >= 50),
+    ('club_100', '💯', 'Сотня', '100 просмотренных фильмов', 'rare', lambda p: p.get('total_films_alltime', 0) >= 100),
+    ('club_250', '🏆', 'Четверть тысячи', '250 фильмов', 'epic', lambda p: p.get('total_films_alltime', 0) >= 250),
+    ('club_500', '💎', 'Пятьсот', '500 фильмов', 'legendary', lambda p: p.get('total_films_alltime', 0) >= 500),
+    ('critic_100', '⭐', 'Критик', '100 оценок', 'common', lambda p: p.get('total_ratings_alltime', 0) >= 100),
+    ('critic_500', '🎓', 'Эксперт', '500 оценок', 'epic', lambda p: p.get('total_ratings_alltime', 0) >= 500),
+    ('cinema_1', '🎟️', 'Первый сеанс', 'Первый поход в кино через Movie Planner', 'common', lambda p: p.get('total_cinema_alltime', 0) >= 1),
+    ('cinema_10', '🎥', 'Кинозритель', '10 походов в кино', 'common', lambda p: p.get('total_cinema_alltime', 0) >= 10),
+    ('cinema_25', '🎬', 'Завсегдатай залов', '25 походов в кино', 'rare', lambda p: p.get('total_cinema_alltime', 0) >= 25),
+    ('cinema_50', '🍿', 'Синефил', '50 походов в кино', 'epic', lambda p: p.get('total_cinema_alltime', 0) >= 50),
+    ('cinema_100', '🏟️', 'Кинофанат', '100 походов в кино', 'legendary', lambda p: p.get('total_cinema_alltime', 0) >= 100),
+    ('series_5', '📺', 'Сериаломан', '5 завершённых сериалов', 'common', lambda p: p.get('completed_series_alltime', 0) >= 5),
+    ('series_500ep', '🔥', '500 серий', '500 отмеченных серий', 'rare', lambda p: p.get('total_episodes_alltime', 0) >= 500),
+    ('genres_10', '🌈', 'Всеядный', '10+ жанров', 'rare', lambda p: p.get('unique_genres_alltime', 0) >= 10),
+    ('year_streak', '📅', 'Годовой стрик', '12 месяцев подряд с активностью', 'epic', lambda p: p.get('year_streak', False)),
+    ('oldtimer', '🏠', 'Старожил', '1+ год в MP', 'rare', lambda p: p.get('months_since_first_action', 0) >= 12),
+    ('mvp_legend', '👑', 'Легенда', '6 раз «Киноман месяца» в группе', 'legendary', lambda p: p.get('mvp_count', 0) >= 6),
+]
+
+
+def _get_user_profile_and_achievements(user_id):
+    """Вычисляет user_profile (alltime) и список вечных ачивок. Без хранения в БД."""
+    cur = get_db_cursor()
+    chat_id = user_id  # личный чат
+
+    profile = {
+        'username': None,
+        'first_name': None,
+        'member_since': None,
+        'total_films_alltime': 0,
+        'total_series_alltime': 0,
+        'avg_rating_alltime': None,
+        'total_ratings_alltime': 0,
+        'total_cinema_alltime': 0,
+        'completed_series_alltime': 0,
+        'total_episodes_alltime': 0,
+        'unique_genres_alltime': 0,
+        'year_streak': False,
+        'months_since_first_action': 0,
+        'mvp_count': 0,
+    }
+
+    with db_lock:
+        cur.execute("SELECT name FROM site_sessions WHERE chat_id = %s ORDER BY created_at ASC LIMIT 1", (chat_id,))
+        row = cur.fetchone()
+        if row:
+            profile['first_name'] = row.get('name') if isinstance(row, dict) else row[0]
+        cur.execute("SELECT username FROM stats WHERE chat_id = %s AND user_id = %s AND username IS NOT NULL ORDER BY id DESC LIMIT 1", (chat_id, user_id))
+        row = cur.fetchone()
+        if row:
+            un = row.get('username') if isinstance(row, dict) else row[0]
+            profile['username'] = ('@' + un) if un and not str(un).startswith('@') else un
+
+        cur.execute("""
+            SELECT COUNT(DISTINCT wm.film_id) FROM watched_movies wm
+            JOIN movies m ON m.id = wm.film_id AND m.chat_id = wm.chat_id
+            WHERE wm.chat_id = %s AND wm.user_id = %s AND m.is_series = FALSE
+        """, (chat_id, user_id))
+        r = cur.fetchone()
+        films_wm = (r.get('count') if isinstance(r, dict) else r[0]) or 0
+        cur.execute("""
+            SELECT COUNT(DISTINCT r.film_id) FROM ratings r
+            JOIN movies m ON m.id = r.film_id AND m.chat_id = r.chat_id
+            WHERE r.chat_id = %s AND r.user_id = %s AND m.is_series = FALSE
+        """, (chat_id, user_id))
+        r = cur.fetchone()
+        films_rat = (r.get('count') if isinstance(r, dict) else r[0]) or 0
+        cur.execute("""
+            SELECT COUNT(*) FROM ratings WHERE chat_id = %s AND user_id = %s
+        """, (chat_id, user_id))
+        r = cur.fetchone()
+        profile['total_ratings_alltime'] = (r.get('count') if isinstance(r, dict) else r[0]) or 0
+        cur.execute("""
+            SELECT COUNT(*) FROM cinema_screenings WHERE chat_id = %s AND user_id = %s
+        """, (chat_id, user_id))
+        r = cur.fetchone()
+        profile['total_cinema_alltime'] = (r.get('count') if isinstance(r, dict) else r[0]) or 0
+        cur.execute("""
+            SELECT COUNT(DISTINCT st.film_id) FROM series_tracking st
+            JOIN movies m ON m.id = st.film_id AND m.chat_id = st.chat_id
+            WHERE st.chat_id = %s AND st.user_id = %s AND st.watched = TRUE AND m.is_series = TRUE
+        """, (chat_id, user_id))
+        r = cur.fetchone()
+        profile['completed_series_alltime'] = (r.get('count') if isinstance(r, dict) else r[0]) or 0
+        cur.execute("""
+            SELECT COUNT(*) FROM series_tracking st
+            JOIN movies m ON m.id = st.film_id AND m.chat_id = st.chat_id
+            WHERE st.chat_id = %s AND st.user_id = %s AND st.watched = TRUE
+        """, (chat_id, user_id))
+        r = cur.fetchone()
+        profile['total_episodes_alltime'] = (r.get('count') if isinstance(r, dict) else r[0]) or 0
+        cur.execute("""
+            SELECT m.genres FROM ratings r
+            JOIN movies m ON m.id = r.film_id AND m.chat_id = r.chat_id
+            WHERE r.chat_id = %s AND r.user_id = %s AND m.genres IS NOT NULL AND m.genres != ''
+        """, (chat_id, user_id))
+        genres_set = set()
+        for row in cur.fetchall():
+            g = row.get('genres') if isinstance(row, dict) else row[0]
+            if g:
+                for part in str(g).replace(',', ' ').split():
+                    if len(part) > 1:
+                        genres_set.add(part.strip())
+        profile['unique_genres_alltime'] = len(genres_set)
+        cur.execute("""
+            SELECT COUNT(DISTINCT m.id) FROM movies m
+            WHERE m.chat_id = %s AND m.is_series = FALSE
+              AND (EXISTS (SELECT 1 FROM watched_movies wm WHERE wm.chat_id = m.chat_id AND wm.film_id = m.id AND wm.user_id = %s)
+                   OR EXISTS (SELECT 1 FROM ratings r WHERE r.chat_id = m.chat_id AND r.film_id = m.id AND r.user_id = %s))
+        """, (chat_id, user_id, user_id))
+        r = cur.fetchone()
+        profile['total_films_alltime'] = (r.get('count') if isinstance(r, dict) else r[0]) or 0
+        cur.execute("""
+            SELECT COUNT(DISTINCT st.film_id) FROM series_tracking st
+            WHERE st.chat_id = %s AND st.user_id = %s AND st.watched = TRUE
+        """, (chat_id, user_id))
+        r = cur.fetchone()
+        profile['total_series_alltime'] = (r.get('count') if isinstance(r, dict) else r[0]) or 0
+        cur.execute("""
+            SELECT AVG(rating)::numeric(4,2) FROM ratings WHERE chat_id = %s AND user_id = %s
+        """, (chat_id, user_id))
+        r = cur.fetchone()
+        avg = r.get('avg') if isinstance(r, dict) else (r[0] if r and len(r) > 0 else None)
+        profile['avg_rating_alltime'] = round(float(avg), 1) if avg is not None else None
+        first_ts = None
+        for q in [
+            "SELECT MIN(watched_at) FROM watched_movies WHERE chat_id = %s AND user_id = %s",
+            "SELECT MIN(rated_at) FROM ratings WHERE chat_id = %s AND user_id = %s",
+        ]:
+            cur.execute(q, (chat_id, user_id))
+            r = cur.fetchone()
+            val = (list(r.values())[0] if isinstance(r, dict) and r else (r[0] if r and len(r) > 0 else None))
+            if val:
+                dt = _ensure_tz(val)
+                if first_ts is None or (dt and dt < first_ts):
+                    first_ts = dt
+        if first_ts:
+            profile['member_since'] = first_ts.strftime('%Y-%m-%d')
+            now = datetime.now(pytz.UTC)
+            months = (now.year - first_ts.year) * 12 + (now.month - first_ts.month)
+            profile['months_since_first_action'] = max(0, months)
+        mvp_count = 0
+        cur.execute("SELECT chat_id FROM group_stats_settings WHERE 1=0")
+        profile['mvp_count'] = mvp_count
+        year_streak = False
+        if first_ts:
+            cur.execute("""
+                SELECT DISTINCT date_trunc('month', t.dt)::date as m
+                FROM (
+                    SELECT watched_at as dt FROM watched_movies WHERE chat_id = %s AND user_id = %s AND watched_at IS NOT NULL
+                    UNION ALL
+                    SELECT rated_at as dt FROM ratings WHERE chat_id = %s AND user_id = %s AND rated_at IS NOT NULL
+                ) t
+                ORDER BY m
+            """, (chat_id, user_id, chat_id, user_id))
+            months_with_activity = []
+            for row in cur.fetchall():
+                m = row.get('m') if isinstance(row, dict) else row[0]
+                if m and hasattr(m, 'year'):
+                    months_with_activity.append((m.year, m.month))
+            months_set = set(months_with_activity)
+            if len(months_set) >= 12:
+                for y, mo in months_set:
+                    needed = []
+                    cy, cmo = y, mo
+                    for _ in range(12):
+                        needed.append((cy, cmo))
+                        if cmo == 12:
+                            cy, cmo = cy + 1, 1
+                        else:
+                            cmo += 1
+                    if all(m in months_set for m in needed):
+                        year_streak = True
+                        break
+        profile['year_streak'] = year_streak
+
+    user_profile_out = {
+        'username': profile.get('username') or f'user_{user_id}',
+        'first_name': profile.get('first_name') or profile.get('username') or f'user_{user_id}',
+        'member_since': profile.get('member_since'),
+        'total_films_alltime': profile.get('total_films_alltime', 0),
+        'total_series_alltime': profile.get('total_series_alltime', 0),
+        'avg_rating_alltime': profile.get('avg_rating_alltime'),
+    }
+
+    achievements = []
+    for ach_id, icon, name, desc, rarity, check in PERSONAL_ACHIEVEMENTS_DEF:
+        earned = check(profile)
+        target_val = None
+        current_val = None
+        if ach_id == 'club_250':
+            target_val, current_val = 250, profile.get('total_films_alltime', 0)
+        elif ach_id == 'club_500':
+            target_val, current_val = 500, profile.get('total_films_alltime', 0)
+        elif ach_id == 'critic_500':
+            target_val, current_val = 500, profile.get('total_ratings_alltime', 0)
+        elif ach_id == 'cinema_50':
+            target_val, current_val = 50, profile.get('total_cinema_alltime', 0)
+        elif ach_id == 'cinema_100':
+            target_val, current_val = 100, profile.get('total_cinema_alltime', 0)
+        elif ach_id == 'series_500ep':
+            target_val, current_val = 500, profile.get('total_episodes_alltime', 0)
+        elif ach_id == 'year_streak':
+            target_val, current_val = 12, 12 if profile.get('year_streak') else profile.get('months_since_first_action', 0)
+        elif ach_id == 'oldtimer':
+            target_val, current_val = 12, profile.get('months_since_first_action', 0)
+        elif ach_id == 'mvp_legend':
+            target_val, current_val = 6, profile.get('mvp_count', 0)
+        progress = None
+        if not earned and target_val is not None and current_val is not None:
+            progress = {'current': min(current_val, target_val), 'target': target_val}
+        earned_date = profile.get('member_since') if earned and ach_id == 'first_watch' else None
+        achievements.append({
+            'id': ach_id,
+            'icon': icon,
+            'name': name,
+            'description': desc,
+            'rarity': rarity,
+            'earned': earned,
+            'earned_date': earned_date,
+            'progress': progress,
+        })
+
+    earned_count = sum(1 for a in achievements if a['earned'])
+    achievements.append({
+        'id': 'collector',
+        'icon': '🎖️',
+        'name': 'Коллекционер',
+        'description': '10 ачивок получено',
+        'rarity': 'rare',
+        'earned': earned_count >= 10,
+        'earned_date': None,
+        'progress': None if earned_count >= 10 else {'current': earned_count, 'target': 10},
+    })
+
+    return user_profile_out, achievements
+
+
 def get_personal_stats(chat_id, month, year):
     """Персональная статистика за месяц. chat_id > 0."""
     conn = get_db_connection()
@@ -316,7 +557,7 @@ def get_personal_stats(chat_id, month, year):
 
     # total_watched = films + episodes (каждый фильм и каждая серия считаются как 1 просмотр)
     total_views = len(films_watched) + episodes_count
-    return {
+    out = {
         'period': {'month': month, 'year': year, 'label': f'{MONTH_NAMES_RU[month - 1]} {year}'},
         'summary': {
             'films_watched': len(films_watched),
@@ -332,6 +573,12 @@ def get_personal_stats(chat_id, month, year):
         'watched': watched_list,
         'rating_breakdown': rating_breakdown
     }
+    profile, achievements = _get_user_profile_and_achievements(user_id)
+    if profile:
+        out['user_profile'] = profile
+    if achievements:
+        out['achievements'] = achievements
+    return out
 
 
 def _ensure_tz(dt):
@@ -1068,6 +1315,9 @@ def get_public_personal_stats(slug, month, year):
         'cinema': True, 'platforms': True, 'watched_list': True
     }
     data = get_personal_stats(user_id, month, year)
+    # Публичный просмотр: показываем только заработанные ачивки
+    if 'achievements' in data:
+        data['achievements'] = [a for a in data['achievements'] if a.get('earned')]
     # Фильтруем по visible_blocks
     if not vb.get('summary', True):
         data.pop('summary', None)
