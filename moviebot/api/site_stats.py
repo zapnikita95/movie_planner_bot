@@ -1353,9 +1353,7 @@ def get_public_personal_stats(slug, month, year):
         'cinema': True, 'platforms': True, 'watched_list': True
     }
     data = get_personal_stats(user_id, month, year)
-    # Публичный просмотр: показываем только заработанные ачивки
-    if 'achievements' in data:
-        data['achievements'] = [a for a in data['achievements'] if a.get('earned')]
+    # Публичный просмотр: возвращаем все ачивки (earned + locked) для панели «Все ачивки»
     # Фильтруем по visible_blocks
     if not vb.get('summary', True):
         data.pop('summary', None)
