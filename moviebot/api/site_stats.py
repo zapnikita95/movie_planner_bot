@@ -742,6 +742,7 @@ def get_group_stats(chat_id, month, year):
                 ratings_in_month.append(r)
 
     # Агрегация: group_films (уникальные фильмы), group_series, group_episodes
+    # Оценка = просмотр: считаем ratings_in_month как просмотры
     films_watched = set()  # film_id (не сериалы)
     series_watched = set()
     episodes_count = 0
@@ -763,6 +764,16 @@ def get_group_stats(chat_id, month, year):
         if is_series:
             series_watched.add(fid)
             episodes_count += 1
+        else:
+            films_watched.add(fid)
+        uid_watched[uid] += 1
+    # Оценка = просмотр: каждая оценка за месяц считается просмотром
+    for r in ratings_in_month:
+        fid = r.get('film_id') if isinstance(r, dict) else r[2]
+        uid = r.get('user_id') if isinstance(r, dict) else r[1]
+        is_series = r.get('is_series') if isinstance(r, dict) else (r[8] if len(r) > 8 else False)
+        if is_series:
+            series_watched.add(fid)
         else:
             films_watched.add(fid)
         uid_watched[uid] += 1
