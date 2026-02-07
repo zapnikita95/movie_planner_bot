@@ -71,9 +71,9 @@ def get_personal_stats(chat_id, month, year):
         """, (chat_id, user_id, start_ts, end_ts))
         watched_rows = cur.fetchall()
 
-        # Серии из series_tracking
+        # Серии из series_tracking (year, online_link для watched_list)
         cur.execute("""
-            SELECT st.film_id, st.watched_date, m.kp_id, m.title, m.is_series
+            SELECT st.film_id, st.watched_date, m.kp_id, m.title, m.year, m.is_series, m.online_link
             FROM series_tracking st
             JOIN movies m ON m.id = st.film_id AND m.chat_id = st.chat_id
             WHERE st.chat_id = %s AND st.user_id = %s AND st.watched = TRUE
@@ -106,7 +106,7 @@ def get_personal_stats(chat_id, month, year):
     episodes_count = 0
     for r in series_rows:
         fid = r.get('film_id') if isinstance(r, dict) else r[0]
-        is_series = r.get('is_series') if isinstance(r, dict) else r[4]
+        is_series = r.get('is_series') if isinstance(r, dict) else r[5]
         if is_series:
             series_watched.add(fid)
             episodes_count += 1
@@ -121,11 +121,13 @@ def get_personal_stats(chat_id, month, year):
         else:
             films_watched.add(fid)
 
-    # Рейтинги = просмотрено (оценка подразумевает просмотр). Добавляем фильмы из ratings_in_month.
+    # Рейтинги = просмотрено (оценка подразумевает просмотр). Добавляем фильмы и сериалы из ratings_in_month.
     for r in ratings_in_month:
         fid = r.get('film_id') if isinstance(r, dict) else r[0]
         is_series = r.get('is_series') if isinstance(r, dict) else r[7]
-        if not is_series:
+        if is_series:
+            series_watched.add(fid)
+        else:
             films_watched.add(fid)
 
     # Cinema: из cinema_screenings (планы удаляются, записи остаются) + plans для актуальных планов
@@ -155,7 +157,7 @@ def get_personal_stats(chat_id, month, year):
             cinema_rows.append(row)
 
     cinema_film_ids = {r.get('film_id') if isinstance(r, dict) else r[0] for r in cinema_rows}
-    # Собираем watched для вывода (из watched_movies + series_tracking)
+    # Собираем watched для вывода (из watched_movies + series_tracking + ratings) — всё, что в summary
     watched_list = []
     seen = set()
     for r in watched_rows:
@@ -177,6 +179,92 @@ def get_personal_stats(chat_id, month, year):
                 'rating': rating, 'is_cinema': fid in cinema_film_ids,
                 'online_link': online_link
             })
+
+    # Добавляем сериалы из series_tracking (по одному на film_id, с последней датой в месяце)
+    series_by_fid = {}  # film_id -> row (с макс watched_date)
+    for r in series_rows:
+        fid = r.get('film_id') if isinstance(r, dict) else r[0]
+        wd = r.get('watched_date') if isinstance(r, dict) else r[1]
+        if fid not in series_by_fid:
+            series_by_fid[fid] = r
+        else:
+            prev = series_by_fid[fid]
+            pw = prev.get('watched_date') if isinstance(prev, dict) else prev[1]
+            if wd and pw and (not hasattr(wd, 'strftime') or not hasattr(pw, 'strftime') or wd > pw):
+                series_by_fid[fid] = r
+    for fid, r in series_by_fid.items():
+        key = (fid, 'st')
+        if key in seen:
+            continue
+        seen.add(key)
+        kp_id = r.get('kp_id') if isinstance(r, dict) else r[2]
+        title = r.get('title') if isinstance(r, dict) else r[3]
+        year = r.get('year') if isinstance(r, dict) else r[4]
+        is_series = r.get('is_series') if isinstance(r, dict) else r[5]
+        wd = r.get('watched_date') if isinstance(r, dict) else r[1]
+        online_link = r.get('online_link') if isinstance(r, dict) else (r[6] if len(r) > 6 else None)
+        date_str = wd.strftime('%Y-%m-%d') if hasattr(wd, 'strftime') else (str(wd)[:10] if wd else '')
+        rating = next((x.get('rating') for x in ratings_in_month if (x.get('film_id') == fid)), None)
+        watched_list.append({
+            'film_id': fid, 'kp_id': kp_id, 'title': title, 'year': year,
+            'type': 'series' if is_series else 'film',
+            'date': date_str, 'rating': rating, 'is_cinema': fid in cinema_film_ids,
+            'online_link': online_link
+        })
+
+    # Добавляем из ratings (оценены за месяц, но не в watched_movies/series_tracking)
+    for r in ratings_in_month:
+        fid = r.get('film_id') if isinstance(r, dict) else r[0]
+        if (fid, 'wm') in seen or (fid, 'st') in seen:
+            continue
+        kp_id = r.get('kp_id') if isinstance(r, dict) else r[4]
+        title = r.get('title') if isinstance(r, dict) else r[5]
+        year = r.get('year') if isinstance(r, dict) else r[6]
+        is_series = r.get('is_series') if isinstance(r, dict) else r[7]
+        rt = r.get('rating') if isinstance(r, dict) else r[1]
+        rt_at = r.get('rated_at') if isinstance(r, dict) else (r[2] if len(r) > 2 else None)
+        date_str = None
+        if rt_at:
+            dt = _ensure_tz(rt_at)
+            if dt and hasattr(dt, 'strftime'):
+                date_str = dt.strftime('%Y-%m-%d')
+        if not date_str:
+            date_str = datetime.now(pytz.UTC).strftime('%Y-%m-%d')
+        seen.add((fid, 'r'))
+        watched_list.append({
+            'film_id': fid, 'kp_id': kp_id, 'title': title, 'year': year,
+            'type': 'series' if is_series else 'film',
+            'date': date_str, 'rating': rt, 'is_cinema': fid in cinema_film_ids,
+            'online_link': None
+        })
+
+    # Страховка: всё из films_watched | series_watched должно быть в watched_list
+    watched_fids = {w.get('film_id') for w in watched_list}
+    all_expected = films_watched | series_watched
+    missing = all_expected - watched_fids
+    ratings_by_fid = {r.get('film_id') if isinstance(r, dict) else r[0]: r for r in ratings_all}
+    for fid in missing:
+        r = ratings_by_fid.get(fid)
+        if r:
+            kp_id = r.get('kp_id') if isinstance(r, dict) else r[4]
+            title = r.get('title') if isinstance(r, dict) else r[5]
+            year = r.get('year') if isinstance(r, dict) else r[6]
+            is_series = r.get('is_series') if isinstance(r, dict) else r[7]
+            rt = r.get('rating') if isinstance(r, dict) else r[1]
+            rt_at = r.get('rated_at') if isinstance(r, dict) else (r[2] if len(r) > 2 else None)
+            date_str = start_ts.strftime('%Y-%m-%d')
+            if rt_at:
+                dt = _ensure_tz(rt_at)
+                if dt and hasattr(dt, 'strftime'):
+                    date_str = dt.strftime('%Y-%m-%d')
+            watched_list.append({
+                'film_id': fid, 'kp_id': kp_id, 'title': title, 'year': year,
+                'type': 'series' if is_series else 'film',
+                'date': date_str, 'rating': rt, 'is_cinema': fid in cinema_film_ids,
+                'online_link': None
+            })
+
+    watched_list.sort(key=lambda w: (w.get('date') or '', w.get('title') or ''))
 
     # Платформы из online_link
     platform_counts = defaultdict(int)
@@ -241,7 +329,7 @@ def get_personal_stats(chat_id, month, year):
         'top_films': top_films,
         'cinema': cinema_list,
         'platforms': platforms,
-        'watched': watched_list[:50],
+        'watched': watched_list,
         'rating_breakdown': rating_breakdown
     }
 
