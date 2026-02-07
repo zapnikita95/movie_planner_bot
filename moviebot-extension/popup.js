@@ -1822,8 +1822,8 @@ function displayFilmInfo(film, data, showConfirmation = false) {
     ratingDiv.style.cssText = 'margin-top: 12px; padding: 12px; background: #f8f9fa; border-radius: 8px; text-align: center;';
     ratingDiv.innerHTML = `
       <p style="margin: 0 0 10px 0; font-size: 14px; color: #333;">Оцените фильм:</p>
-      <div style="display: flex; justify-content: center; gap: 4px; flex-wrap: wrap;" id="catalog-rating-stars">
-        ${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => `<button type="button" data-rating="${n}" style="width: 28px; height: 28px; padding: 0; border: 1px solid #ddd; border-radius: 4px; background: #fff; cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center;">${n}</button>`).join('')}
+      <div style="display: flex; justify-content: center; gap: 2px; flex-wrap: nowrap;" id="catalog-rating-stars">
+        ${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => `<button type="button" data-rating="${n}" style="width: 24px; min-width: 24px; height: 24px; padding: 0; border: 1px solid #ddd; border-radius: 3px; background: #fff; cursor: pointer; font-size: 11px; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">${n}</button>`).join('')}
       </div>
     `;
     actionsEl.appendChild(ratingDiv);
