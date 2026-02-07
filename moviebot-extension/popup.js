@@ -1704,6 +1704,55 @@ function displayFilmInfo(film, data, showConfirmation = false) {
   }
   actionsEl.appendChild(dbBtn);
   
+  // Кнопка "Отметить просмотренным" — только если фильм в базе и ещё не просмотрен
+  if (data.in_database && !data.watched) {
+    const markWatchedBtn = document.createElement('button');
+    markWatchedBtn.textContent = '✅ Отметить просмотренным';
+    markWatchedBtn.className = 'btn btn-primary';
+    markWatchedBtn.addEventListener('click', async () => {
+      if (isProcessing) return;
+      const kpId = film.kp_id;
+      const filmId = film.film_id || data.film_id;
+      if (!kpId || !chatId || !userId) {
+        showToast('Нужна авторизация. Привяжите аккаунт через /code в боте.');
+        return;
+      }
+      isProcessing = true;
+      markWatchedBtn.disabled = true;
+      markWatchedBtn.textContent = '⏳ Отмечаем...';
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/extension/mark-film-watched`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chat_id: chatId,
+            user_id: userId,
+            kp_id: kpId,
+            film_id: filmId || undefined
+          })
+        });
+        const json = await res.json().catch(() => ({}));
+        if (res.ok && json.success) {
+          markWatchedBtn.textContent = '✅ Просмотрено!';
+          markWatchedBtn.style.background = '#28a745';
+          await loadFilmByKpId(kpId);
+        } else {
+          showToast(json.error || 'Не удалось отметить');
+          markWatchedBtn.disabled = false;
+          markWatchedBtn.textContent = '✅ Отметить просмотренным';
+        }
+      } catch (e) {
+        console.error('Ошибка отметки просмотренным:', e);
+        showToast('Ошибка сети');
+        markWatchedBtn.disabled = false;
+        markWatchedBtn.textContent = '✅ Отметить просмотренным';
+      } finally {
+        isProcessing = false;
+      }
+    });
+    actionsEl.appendChild(markWatchedBtn);
+  }
+  
   // Кнопка "Запланировать просмотр"
   const planBtn = document.createElement('button');
   planBtn.textContent = data.has_plan ? '✏️ Изменить в расписании' : '📅 Запланировать просмотр';
@@ -1764,6 +1813,50 @@ function displayFilmInfo(film, data, showConfirmation = false) {
       }
     });
     actionsEl.appendChild(ticketsBtn);
+  }
+  
+  // Блок оценки: если фильм просмотрен, но ещё не оценён — показываем шкалу 1–10
+  if (data.watched && !data.rated && film && (film.kp_id || data.film_id)) {
+    const ratingDiv = document.createElement('div');
+    ratingDiv.className = 'catalog-rating-block';
+    ratingDiv.style.cssText = 'margin-top: 12px; padding: 12px; background: #f8f9fa; border-radius: 8px; text-align: center;';
+    ratingDiv.innerHTML = `
+      <p style="margin: 0 0 10px 0; font-size: 14px; color: #333;">Оцените фильм:</p>
+      <div style="display: flex; justify-content: center; gap: 4px; flex-wrap: wrap;" id="catalog-rating-stars">
+        ${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => `<button type="button" data-rating="${n}" style="width: 28px; height: 28px; padding: 0; border: 1px solid #ddd; border-radius: 4px; background: #fff; cursor: pointer; font-size: 12px; display: flex; align-items: center; justify-content: center;">${n}</button>`).join('')}
+      </div>
+    `;
+    actionsEl.appendChild(ratingDiv);
+    const kpId = film.kp_id;
+    const filmId = film.film_id || data.film_id;
+    ratingDiv.querySelectorAll('button[data-rating]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const rating = parseInt(btn.dataset.rating, 10);
+        ratingDiv.querySelectorAll('button').forEach(b => { b.disabled = true; });
+        try {
+          const res = await fetch(`${API_BASE_URL}/api/extension/rate-film`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: chatId,
+              user_id: userId,
+              kp_id: kpId,
+              film_id: filmId || undefined,
+              rating: rating
+            })
+          });
+          const json = await res.json().catch(() => ({}));
+          if (res.ok && json.success) {
+            ratingDiv.innerHTML = `<p style="margin: 0; color: #28a745; font-size: 14px;">✅ Оценка ${rating}/10 сохранена!</p>`;
+          } else {
+            ratingDiv.innerHTML = `<p style="margin: 0; color: #dc3545; font-size: 14px;">❌ Ошибка сохранения оценки</p>`;
+          }
+        } catch (e) {
+          console.error('Ошибка отправки оценки:', e);
+          ratingDiv.innerHTML = `<p style="margin: 0; color: #dc3545; font-size: 14px;">❌ Ошибка сохранения оценки</p>`;
+        }
+      });
+    });
   }
   
   // Показываем подтверждение ТОЛЬКО если это fallback поиск (showConfirmation === true)
