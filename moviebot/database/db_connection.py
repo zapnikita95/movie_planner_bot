@@ -891,6 +891,28 @@ def init_database():
         except Exception:
             pass
 
+    # Таблица просмотров ссылок на публичную статистику (уникальность по slug+type+month+year)
+    try:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS stats_share_views (
+                slug VARCHAR(64) NOT NULL,
+                stats_type VARCHAR(8) NOT NULL,
+                month SMALLINT NOT NULL,
+                year SMALLINT NOT NULL,
+                view_count INTEGER NOT NULL DEFAULT 0,
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                PRIMARY KEY (slug, stats_type, month, year)
+            )
+        ''')
+        conn.commit()
+        logger.info("Таблица stats_share_views создана")
+    except Exception as e:
+        logger.debug(f"Таблица stats_share_views: {e}")
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+
     # Таблица цветов аватаров участников группы
     try:
         cursor.execute('''

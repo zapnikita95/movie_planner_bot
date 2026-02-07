@@ -3357,13 +3357,15 @@ def create_web_app(bot):
             return jsonify({"success": False, "error": "Invalid month or year"}), 400
         if not (1 <= month <= 12) or not (2020 <= year <= 2030):
             return jsonify({"success": False, "error": "Invalid month or year"}), 400
-        from moviebot.api.site_stats import get_personal_stats, get_user_stats_settings
+        from moviebot.api.site_stats import get_personal_stats, get_user_stats_settings, get_stats_share_view_count
         data = get_personal_stats(chat_id, month, year)
         settings = get_user_stats_settings(chat_id)
         data['debug_available'] = (chat_id == 301810276)
         if settings.get('public_enabled') and settings.get('public_slug'):
             site_base = os.environ.get('SITE_BASE_URL', 'https://movie-planner.ru')
-            data['share_url'] = site_base.rstrip('/') + '/#/u/' + settings['public_slug'] + '/stats'
+            slug = settings['public_slug']
+            data['share_url'] = site_base.rstrip('/') + '/#/u/' + slug + '/stats?m=' + str(month) + '&y=' + str(year)
+            data['share_views'] = get_stats_share_view_count(slug, 'user', month, year)
         return jsonify({"success": True, **data})
 
     @app.route('/api/site/group-stats/settings', methods=['GET', 'PUT', 'OPTIONS'])
@@ -3402,8 +3404,14 @@ def create_web_app(bot):
             return jsonify({"success": False, "error": "Invalid month or year"}), 400
         if not (1 <= month <= 12) or not (2020 <= year <= 2030):
             return jsonify({"success": False, "error": "Invalid month or year"}), 400
-        from moviebot.api.site_stats import get_group_stats
+        from moviebot.api.site_stats import get_group_stats, get_stats_share_view_count
         data = get_group_stats(chat_id, month, year)
+        group = data.get('group', {})
+        slug = group.get('public_slug')
+        if slug:
+            data['share_url'] = (os.environ.get('SITE_BASE_URL', 'https://movie-planner.ru').rstrip('/') +
+                                 '/#/g/' + slug + '/stats?m=' + str(month) + '&y=' + str(year))
+            data['share_views'] = get_stats_share_view_count(slug, 'group', month, year)
         return jsonify(data)
 
     @app.route('/api/site/stats/public/<path:username>', methods=['GET', 'OPTIONS'])

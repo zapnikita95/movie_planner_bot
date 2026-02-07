@@ -1016,6 +1016,34 @@ def set_group_stats_settings(chat_id, public_enabled=None, visible_blocks=None):
     return get_group_stats_settings(chat_id)
 
 
+def increment_stats_share_view(slug, stats_type, month, year):
+    """Увеличивает счётчик просмотров ссылки на публичную статистику."""
+    cur = get_db_cursor()
+    with db_lock:
+        cur.execute("""
+            INSERT INTO stats_share_views (slug, stats_type, month, year, view_count, updated_at)
+            VALUES (%s, %s, %s, %s, 1, NOW())
+            ON CONFLICT (slug, stats_type, month, year)
+            DO UPDATE SET view_count = stats_share_views.view_count + 1, updated_at = NOW()
+        """, (slug, stats_type, month, year))
+        conn = get_db_connection()
+        conn.commit()
+
+
+def get_stats_share_view_count(slug, stats_type, month, year):
+    """Возвращает количество переходов по ссылке за месяц."""
+    cur = get_db_cursor()
+    with db_lock:
+        cur.execute(
+            "SELECT view_count FROM stats_share_views WHERE slug = %s AND stats_type = %s AND month = %s AND year = %s",
+            (slug, stats_type, month, year)
+        )
+        row = cur.fetchone()
+    if not row:
+        return 0
+    return row.get('view_count', 0) if isinstance(row, dict) else (row[0] or 0)
+
+
 def get_public_personal_stats(slug, month, year):
     """Публичная личная статистика по slug. Без авторизации."""
     cur = get_db_cursor()
@@ -1065,6 +1093,10 @@ def get_public_personal_stats(slug, month, year):
         username = '@' + username
     data['user'] = {'name': name or slug, 'username': username or slug}
     data['success'] = True
+    try:
+        increment_stats_share_view(slug, 'user', month, year)
+    except Exception:
+        pass
     return data, None
 
 
@@ -1133,4 +1165,8 @@ def get_public_group_stats(slug, month, year):
         return None, 'Stats are private'
     data = get_group_stats(chat_id, month, year)
     data['group']['public_slug'] = slug
+    try:
+        increment_stats_share_view(slug, 'group', month, year)
+    except Exception:
+        pass
     return data, None
