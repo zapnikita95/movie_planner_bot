@@ -913,6 +913,27 @@ def init_database():
         except Exception:
             pass
 
+    # Таблица истории «Киноман месяца» (для ачивки Легенда)
+    try:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS mvp_history (
+                chat_id BIGINT NOT NULL,
+                user_id BIGINT NOT NULL,
+                year SMALLINT NOT NULL,
+                month SMALLINT NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                PRIMARY KEY (chat_id, year, month)
+            )
+        ''')
+        conn.commit()
+        logger.info("Таблица mvp_history создана")
+    except Exception as e:
+        logger.debug(f"Таблица mvp_history: {e}")
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+
     # Таблица цветов аватаров участников группы
     try:
         cursor.execute('''

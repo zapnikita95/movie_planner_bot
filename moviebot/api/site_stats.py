@@ -4,6 +4,7 @@
 import logging
 from datetime import datetime
 from collections import defaultdict
+from urllib.parse import urlparse
 
 import pytz
 from moviebot.database.db_connection import get_db_connection, get_db_cursor, db_lock
@@ -18,27 +19,62 @@ MONTH_NAMES_RU = [
 AVATAR_COLORS = ['#ff2d7b', '#9b4dff', '#00d4ff', '#34d399', '#fbbf24', '#fb923c', '#f472b6', '#a78bfa']
 
 PLATFORM_MAP = {
-    'kinopoisk.ru': 'Кинопоиск', 'www.kinopoisk.ru': 'Кинопоиск',
-    'netflix.com': 'Netflix', 'www.netflix.com': 'Netflix',
+    # Россия
+    'kinopoisk.ru': 'Кинопоиск', 'www.kinopoisk.ru': 'Кинопоиск', 'hd.kinopoisk.ru': 'Кинопоиск',
     'okko.tv': 'Okko', 'www.okko.tv': 'Okko',
     'ivi.ru': 'Иви', 'www.ivi.ru': 'Иви',
     'more.tv': 'more.tv', 'www.more.tv': 'more.tv',
     'wink.ru': 'Wink', 'www.wink.ru': 'Wink',
     'start.video': 'Start', 'www.start.video': 'Start',
+    'start.ru': 'Start', 'www.start.ru': 'Start',
+    'tvoe.ru': 'ТВОЕ', 'www.tvoe.ru': 'ТВОЕ',
+    'tvoe.live': 'ТВОЕ', 'www.tvoe.live': 'ТВОЕ',
+    'amediateka.ru': 'Амедиатека', 'www.amediateka.ru': 'Амедиатека',
+    'premier.one': 'Premier', 'www.premier.one': 'Premier',
+    '1tv.ru': 'Первый канал', 'www.1tv.ru': 'Первый канал',
+    'kion.ru': 'KION', 'www.kion.ru': 'KION', 'smotrim.ru': 'Смотрим', 'www.smotrim.ru': 'Смотрим',
+    'megogo.net': 'Megogo', 'www.megogo.net': 'Megogo',
+    'rutube.ru': 'RUTUBE', 'www.rutube.ru': 'RUTUBE',
+    'kino.pub': 'Kino.pub', 'www.kino.pub': 'Kino.pub',
+    'lenta.ru': 'Лента', 'www.lenta.ru': 'Лента',
+    'rezka.ag': 'Rezka', 'rezka.ad': 'Rezka', 'hdrezka.ag': 'HDRezka', 'hdrezka': 'HDRezka', 'rezka.cc': 'Rezka',
+    'lordfilm': 'LordFilm', 'lordserial': 'LordFilm',
+    'allserial': 'AllSerial', 'boxserial': 'BoxSerial',
+    'smotreshka.tv': 'Smotreshka', 'www.smotreshka.tv': 'Smotreshka',
+    # Международные
+    'netflix.com': 'Netflix', 'www.netflix.com': 'Netflix',
+    'primevideo.com': 'Amazon Prime', 'www.primevideo.com': 'Amazon Prime',
+    'amazon.com': 'Amazon Prime', 'www.amazon.com': 'Amazon Prime',
+    'disneyplus.com': 'Disney+', 'www.disneyplus.com': 'Disney+',
+    'hbomax.com': 'HBO Max', 'max.com': 'Max', 'www.hbomax.com': 'HBO Max', 'www.max.com': 'Max',
+    'tv.apple.com': 'Apple TV+', 'apple.com/tv': 'Apple TV+',
+    'mubi.com': 'Mubi', 'www.mubi.com': 'Mubi',
+    'plex.tv': 'Plex', 'www.plex.tv': 'Plex',
+    'youtube.com': 'YouTube', 'www.youtube.com': 'YouTube', 'youtu.be': 'YouTube',
 }
 
 
 def _platform_from_link(link):
+    """Определяет платформу по URL. Учитывает online_link из расширения (добавление/просмотр с площадки)."""
     if not link:
         return None
-    link = str(link).lower()
+    link = str(link).lower().strip()
+    if not link.startswith(('http://', 'https://')):
+        link = 'https://' + link
     for domain, name in PLATFORM_MAP.items():
         if domain in link:
             return name
-    if 'www.' in link:
-        parts = link.split('www.')[-1].split('/')[0].split('.')
-        if len(parts) >= 2:
-            return parts[-2] + '.' + parts[-1]
+    try:
+        parsed = urlparse(link)
+        host = (parsed.netloc or parsed.path).strip()
+        if host.startswith('www.'):
+            host = host[4:]
+        if host:
+            parts = host.split('.')
+            if len(parts) >= 2:
+                return parts[-2] + '.' + parts[-1]
+    except Exception:
+        pass
     return None
 
 
@@ -197,8 +233,11 @@ def _get_user_profile_and_achievements(user_id):
             now = datetime.now(pytz.UTC)
             months = (now.year - first_ts.year) * 12 + (now.month - first_ts.month)
             profile['months_since_first_action'] = max(0, months)
-        mvp_count = 0
-        cur.execute("SELECT chat_id FROM group_stats_settings WHERE 1=0")
+        cur.execute("""
+            SELECT COUNT(*) FROM mvp_history WHERE user_id = %s
+        """, (user_id,))
+        r = cur.fetchone()
+        mvp_count = (r.get('count') if isinstance(r, dict) else r[0]) or 0
         profile['mvp_count'] = mvp_count
         year_streak = False
         if first_ts:

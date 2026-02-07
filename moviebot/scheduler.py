@@ -3810,6 +3810,91 @@ def check_unwatched_films_notification():
             pass
 
 
+def check_monthly_mvp_and_notify():
+    """1-го числа каждого месяца: записываем MVP в mvp_history и отправляем сообщение в группу."""
+    try:
+        now = datetime.now(pytz.UTC)
+        prev = now - timedelta(days=1)
+        prev_month, prev_year = prev.month, prev.year
+        month_names = ['', 'января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
+        month_label = f"{month_names[prev_month]} {prev_year}"
+
+        conn_local = _scheduler_conn()
+        cursor_local = conn_local.cursor()
+        try:
+            with db_lock:
+                cursor_local.execute("""
+                    SELECT DISTINCT chat_id FROM (
+                        SELECT chat_id FROM group_stats_settings
+                        UNION
+                        SELECT chat_id FROM watched_movies WHERE chat_id < 0
+                        UNION
+                        SELECT chat_id FROM ratings WHERE chat_id < 0
+                    ) g WHERE chat_id < 0
+                """)
+                groups = [r[0] if isinstance(r, (list, tuple)) else r.get('chat_id') for r in cursor_local.fetchall()]
+        finally:
+            cursor_local.close()
+            conn_local.close()
+
+        from moviebot.api.site_stats import get_group_stats
+        for chat_id in groups:
+            try:
+                data = get_group_stats(chat_id, prev_month, prev_year)
+                if not data or not data.get('mvp'):
+                    continue
+                mvp = data['mvp']
+                mvp_uid = mvp.get('user_id')
+                if not mvp_uid:
+                    continue
+
+                conn_ins = _scheduler_conn()
+                cur_ins = conn_ins.cursor()
+                try:
+                    with db_lock:
+                        cur_ins.execute("""
+                            INSERT INTO mvp_history (chat_id, user_id, year, month)
+                            VALUES (%s, %s, %s, %s)
+                            ON CONFLICT (chat_id, year, month) DO UPDATE SET user_id = EXCLUDED.user_id
+                        """, (chat_id, mvp_uid, prev_year, prev_month))
+                    conn_ins.commit()
+                finally:
+                    cur_ins.close()
+                    conn_ins.close()
+
+                if bot:
+                    conn_usr = _scheduler_conn()
+                    cur_usr = conn_usr.cursor()
+                    display_name = "Участник"
+                    try:
+                        cur_usr.execute("SELECT username FROM stats WHERE chat_id = %s AND user_id = %s AND username IS NOT NULL AND username != '' ORDER BY id DESC LIMIT 1", (chat_id, mvp_uid))
+                        row = cur_usr.fetchone()
+                        if row:
+                            un = row.get('username') if isinstance(row, dict) else (row[0] if row else None)
+                            if un and not str(un).startswith('@'):
+                                un = '@' + un
+                            if un:
+                                display_name = un
+                    finally:
+                        cur_usr.close()
+                        conn_usr.close()
+
+                    films = mvp.get('films', 0)
+                    ratings = mvp.get('ratings', 0)
+                    avg = mvp.get('avg_rating', 0)
+                    mention = f'<a href="tg://user?id={mvp_uid}">{display_name}</a>'
+                    text = f"👑 <b>Киноман месяца</b> ({month_label})\n\n{mention} — больше всех смотрел и оценивал: {films} просмотров, {ratings} оценок (средняя {avg})"
+                    try:
+                        bot.send_message(chat_id, text, parse_mode='HTML')
+                        logger.info(f"[MVP] Сообщение отправлено в группу {chat_id}")
+                    except Exception as send_e:
+                        logger.warning(f"[MVP] Не удалось отправить в {chat_id}: {send_e}")
+            except Exception as g_e:
+                logger.warning(f"[MVP] Ошибка для группы {chat_id}: {g_e}", exc_info=True)
+    except Exception as e:
+        logger.error(f"[MVP] Ошибка check_monthly_mvp_and_notify: {e}", exc_info=True)
+
+
 def update_series_status_cache():
     """Фоновая задача: обновляет статусы сериалов раз в день"""
     logger.info("[CACHE] Запуск обновления кэша сериалов")

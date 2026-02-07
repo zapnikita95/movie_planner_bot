@@ -153,6 +153,7 @@ from moviebot.scheduler import (
     check_onboarding_24h,
     check_onboarding_plan_reminder,
     check_onboarding_48h,
+    check_monthly_mvp_and_notify,
     choose_random_participant,  # Оставлено для обратной совместимости
     start_dice_game  # Оставлено для обратной совместимости
 )
@@ -187,6 +188,8 @@ scheduler.add_job(check_and_send_random_events, 'cron', day_of_week='fri-sun', h
 # ПРИОРИТЕТ 4: Уведомление о непросмотренных фильмах - воскресенье и вторник (проверяется внутри функции)
 scheduler.add_job(check_unwatched_films_notification, 'cron', day_of_week='tue,sun', hour=15, minute=0, timezone=PLANS_TZ, id='check_unwatched_films_notification')
 
+# Киноман месяца: 1-го числа в 10:00 — записать MVP и отправить сообщение в группу
+scheduler.add_job(check_monthly_mvp_and_notify, 'cron', day=1, hour=10, minute=0, timezone=PLANS_TZ, id='check_monthly_mvp')
 # Онбординг: уведомления новым пользователям (разнесены по минутам, чтобы не шли вместе)
 scheduler.add_job(check_onboarding_24h, 'cron', minute=5, timezone=PLANS_TZ, id='check_onboarding_24h')
 scheduler.add_job(check_onboarding_plan_reminder, 'cron', minute=25, timezone=PLANS_TZ, id='check_onboarding_plan_reminder')
