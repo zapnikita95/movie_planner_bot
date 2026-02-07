@@ -706,7 +706,7 @@ def get_group_stats(chat_id, month, year):
     # ratings за месяц (rated_at если есть). ТОЛЬКО группа: r.chat_id = группа, фильмы из базы группы.
     with db_lock:
         cur.execute("""
-            SELECT r.rating, r.user_id, r.film_id, r.rated_at, m.kp_id, m.title, m.year, m.genres
+            SELECT r.rating, r.user_id, r.film_id, r.rated_at, m.kp_id, m.title, m.year, m.genres, m.is_series
             FROM ratings r
             JOIN movies m ON m.id = r.film_id AND m.chat_id = r.chat_id
             WHERE r.chat_id = %s
@@ -942,6 +942,25 @@ def get_group_stats(chat_id, month, year):
         is_series = r.get('is_series') if isinstance(r, dict) else r[5]
         dt = r.get('watched_date') if isinstance(r, dict) else r[6]
         add_watched(fid, kp_id, title, year_val=year, is_series=is_series, date_val=dt, uid=uid)
+    # Добавляем в watched фильмы из оценок и походов в кино (если их ещё нет)
+    for r in ratings_in_month:
+        fid = r.get('film_id') if isinstance(r, dict) else r[2]
+        uid = r.get('user_id') if isinstance(r, dict) else r[1]
+        kp_id = r.get('kp_id') if isinstance(r, dict) else r[4]
+        title = r.get('title') if isinstance(r, dict) else r[5]
+        year = r.get('year') if isinstance(r, dict) else (r[6] if len(r) > 6 else None)
+        is_series = r.get('is_series') if isinstance(r, dict) else (r[8] if len(r) > 8 else False)
+        dt = r.get('rated_at') if isinstance(r, dict) else r[3]
+        if dt:
+            add_watched(fid, kp_id, title, year_val=year, is_series=bool(is_series), date_val=dt, uid=uid)
+    for r in cinema_rows:
+        fid = r.get('film_id') if isinstance(r, dict) else r[0]
+        uid = r.get('user_id') if isinstance(r, dict) else r[1]
+        kp_id = r.get('kp_id') if isinstance(r, dict) else r[3]
+        title = r.get('title') if isinstance(r, dict) else r[4]
+        year = r.get('year') if isinstance(r, dict) else (r[5] if len(r) > 5 else None)
+        dt = r.get('screening_date') or r.get('plan_datetime') if isinstance(r, dict) else r[2]
+        add_watched(fid, kp_id, title, year_val=year, is_series=False, date_val=dt, uid=uid)
     watched_list.sort(key=lambda x: (x.get('date') or '', x.get('title') or ''))
 
     # Cinema list
