@@ -3362,7 +3362,7 @@ def create_web_app(bot):
             data = get_personal_stats(chat_id, month, year)
         except Exception as e:
             logger.exception("site_stats error for chat_id=%s: %s", chat_id, e)
-            return jsonify({"success": False, "error": "Ошибка загрузки статистики"}), 500
+            return jsonify({"success": False, "error": "Ошибка загрузки статистики", "debug": str(e)}), 500
         settings = get_user_stats_settings(chat_id)
         data['debug_available'] = (chat_id == 301810276)
         if settings.get('public_enabled') and settings.get('public_slug'):
@@ -3439,7 +3439,7 @@ def create_web_app(bot):
             data, err = get_public_personal_stats(slug, month, year)
         except Exception as e:
             logger.exception("site_stats_public error for slug=%s: %s", slug, e)
-            return jsonify({"success": False, "error": "Ошибка загрузки статистики"}), 500
+            return jsonify({"success": False, "error": "Ошибка загрузки статистики", "debug": str(e)}), 500
         if err:
             if err == 'User not found':
                 return jsonify({"success": False, "error": "Пользователь не найден"}), 404
