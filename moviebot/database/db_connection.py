@@ -817,6 +817,28 @@ def init_database():
         except Exception:
             pass
 
+    # Таблица настроек публичной личной статистики
+    try:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS user_stats_settings (
+                user_id BIGINT PRIMARY KEY,
+                public_enabled BOOLEAN NOT NULL DEFAULT false,
+                public_slug VARCHAR(64) UNIQUE,
+                visible_blocks JSONB NOT NULL DEFAULT '{"summary":true,"top_films":true,"rating_breakdown":true,"cinema":true,"platforms":true,"watched_list":true}'::jsonb,
+                created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+            )
+        ''')
+        cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_user_stats_slug ON user_stats_settings(public_slug) WHERE public_slug IS NOT NULL')
+        conn.commit()
+        logger.info("Таблица user_stats_settings создана")
+    except Exception as e:
+        logger.error(f"Таблица user_stats_settings: {e}", exc_info=True)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+
     # Таблица цветов аватаров участников группы
     try:
         cursor.execute('''

@@ -3312,8 +3312,12 @@ def create_web_app(bot):
             return jsonify({"success": False, "error": "Invalid month or year"}), 400
         if not (1 <= month <= 12) or not (2020 <= year <= 2030):
             return jsonify({"success": False, "error": "Invalid month or year"}), 400
-        from moviebot.api.site_stats import get_personal_stats
+        from moviebot.api.site_stats import get_personal_stats, get_user_stats_settings
         data = get_personal_stats(chat_id, month, year)
+        settings = get_user_stats_settings(chat_id)
+        if settings.get('public_enabled') and settings.get('public_slug'):
+            site_base = os.environ.get('SITE_BASE_URL', 'https://movie-planner.ru')
+            data['share_url'] = site_base.rstrip('/') + '/#/u/' + settings['public_slug'] + '/stats'
         return jsonify({"success": True, **data})
 
     @app.route('/api/site/group-stats', methods=['GET', 'OPTIONS'])
@@ -3333,6 +3337,52 @@ def create_web_app(bot):
         from moviebot.api.site_stats import get_group_stats
         data = get_group_stats(chat_id, month, year)
         return jsonify(data)
+
+    @app.route('/api/site/stats/public/<path:username>', methods=['GET', 'OPTIONS'])
+    def site_stats_public(username):
+        if request.method == 'OPTIONS':
+            return jsonify({'status': 'ok'})
+        slug = username.strip().rstrip('/')
+        if not slug:
+            return jsonify({"success": False, "error": "User not found"}), 404
+        try:
+            month = int(request.args.get('month', 0))
+            year = int(request.args.get('year', 0))
+        except (TypeError, ValueError):
+            month = datetime.now(pytz.UTC).month
+            year = datetime.now(pytz.UTC).year
+        if not (1 <= month <= 12) or not (2020 <= year <= 2030):
+            month = datetime.now(pytz.UTC).month
+            year = datetime.now(pytz.UTC).year
+        from moviebot.api.site_stats import get_public_personal_stats
+        data, err = get_public_personal_stats(slug, month, year)
+        if err:
+            if err == 'User not found':
+                return jsonify({"success": False, "error": "Пользователь не найден"}), 404
+            return jsonify({"success": False, "error": "Статистика недоступна"}), 403
+        return jsonify(data)
+
+    @app.route('/api/site/stats/settings', methods=['GET', 'PUT', 'OPTIONS'])
+    def site_stats_settings():
+        if request.method == 'OPTIONS':
+            return jsonify({'status': 'ok'})
+        chat_id = _site_token_to_chat_id()
+        if chat_id is None:
+            return jsonify({"success": False, "error": "Не авторизован"}), 401
+        from moviebot.api.site_stats import get_user_stats_settings, set_user_stats_settings
+        if request.method == 'GET':
+            s = get_user_stats_settings(chat_id)
+            return jsonify({"success": True, **s})
+        # PUT
+        try:
+            body = request.get_json() or {}
+            public_enabled = body.get('public_enabled')
+            visible_blocks = body.get('visible_blocks')
+            s = set_user_stats_settings(chat_id, public_enabled=public_enabled, visible_blocks=visible_blocks)
+            return jsonify({"success": True, **s})
+        except Exception as e:
+            logger.exception("stats settings PUT: %s", e)
+            return jsonify({"success": False, "error": str(e)}), 500
 
     @app.route('/api/site/group-stats/public/<slug>', methods=['GET', 'OPTIONS'])
     def site_group_stats_public(slug):
