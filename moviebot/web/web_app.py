@@ -1997,8 +1997,8 @@ def create_web_app(bot):
             # Без db_lock как просил пользователь
             online_link = data.get('online_link')
             cursor.execute("""
-                INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series, online_link)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO movies (chat_id, link, kp_id, title, year, genres, description, director, actors, is_series, online_link, added_by, added_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
                 ON CONFLICT (chat_id, kp_id) DO UPDATE SET
                     title = EXCLUDED.title,
                     year = EXCLUDED.year,
@@ -2008,13 +2008,15 @@ def create_web_app(bot):
                     actors = EXCLUDED.actors,
                     is_series = EXCLUDED.is_series,
                     link = EXCLUDED.link,
-                    online_link = COALESCE(EXCLUDED.online_link, movies.online_link)
+                    online_link = COALESCE(EXCLUDED.online_link, movies.online_link),
+                    added_by = COALESCE(movies.added_by, EXCLUDED.added_by),
+                    added_at = COALESCE(movies.added_at, EXCLUDED.added_at)
                 RETURNING id
             """, (
                 chat_id, link, str(kp_id), info.get('title'), info.get('year'),
                 info.get('genres', '—'), info.get('description', 'Нет описания'),
                 info.get('director', 'Не указан'), info.get('actors', '—'),
-                1 if is_series else 0, online_link
+                1 if is_series else 0, online_link, user_id_ext
             ))
             result = cursor.fetchone()
             film_id = result.get('id') if isinstance(result, dict) else result[0]
@@ -2685,10 +2687,10 @@ def create_web_app(bot):
                         if info:
                             with db_lock:
                                 cursor.execute("""
-                                    INSERT INTO movies (chat_id, kp_id, title, year, link, is_series, online_link)
-                                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                                    INSERT INTO movies (chat_id, kp_id, title, year, link, is_series, online_link, added_by, added_at)
+                                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
                                     RETURNING id
-                                """, (chat_id, str(kp_id), info.get('title'), info.get('year'), link, 1 if is_series else 0, online_link))
+                                """, (chat_id, str(kp_id), info.get('title'), info.get('year'), link, 1 if is_series else 0, online_link, user_id))
                                 row = cursor.fetchone()
                                 film_id = row.get('id') if isinstance(row, dict) else (row[0] if row else None)
                                 conn.commit()
@@ -3322,6 +3324,25 @@ def create_web_app(bot):
             })
         return jsonify({"success": True, "items": items})
 
+    @app.route('/api/site/stats/debug', methods=['GET', 'OPTIONS'])
+    def site_stats_debug():
+        if request.method == 'OPTIONS':
+            return jsonify({'status': 'ok'})
+        chat_id = _site_token_to_chat_id()
+        if chat_id is None:
+            return jsonify({"success": False, "error": "Не авторизован"}), 401
+        if chat_id != 301810276:  # только владелец
+            return jsonify({"success": False, "error": "Forbidden"}), 403
+        try:
+            month = int(request.args.get('month') or datetime.now(pytz.UTC).month)
+            year = int(request.args.get('year') or datetime.now(pytz.UTC).year)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "Invalid month or year"}), 400
+        from moviebot.api.site_stats import get_stats_debug
+        is_personal = chat_id > 0
+        data = get_stats_debug(chat_id, month, year, is_personal=is_personal)
+        return jsonify({"success": True, "debug": data})
+
     @app.route('/api/site/stats', methods=['GET', 'OPTIONS'])
     def site_stats():
         if request.method == 'OPTIONS':
@@ -3339,6 +3360,7 @@ def create_web_app(bot):
         from moviebot.api.site_stats import get_personal_stats, get_user_stats_settings
         data = get_personal_stats(chat_id, month, year)
         settings = get_user_stats_settings(chat_id)
+        data['debug_available'] = (chat_id == 301810276)
         if settings.get('public_enabled') and settings.get('public_slug'):
             site_base = os.environ.get('SITE_BASE_URL', 'https://movie-planner.ru')
             data['share_url'] = site_base.rstrip('/') + '/#/u/' + settings['public_slug'] + '/stats'

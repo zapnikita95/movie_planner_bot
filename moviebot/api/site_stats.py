@@ -121,6 +121,13 @@ def get_personal_stats(chat_id, month, year):
         else:
             films_watched.add(fid)
 
+    # Рейтинги = просмотрено (оценка подразумевает просмотр). Добавляем фильмы из ratings_in_month.
+    for r in ratings_in_month:
+        fid = r.get('film_id') if isinstance(r, dict) else r[0]
+        is_series = r.get('is_series') if isinstance(r, dict) else r[7]
+        if not is_series:
+            films_watched.add(fid)
+
     # Cinema: из cinema_screenings (планы удаляются, записи остаются) + plans для актуальных планов
     cinema_rows = []
     with db_lock:
@@ -219,6 +226,8 @@ def get_personal_stats(chat_id, month, year):
     count_rating = len(ratings_in_month)
     avg_rating = round(total_rating / count_rating, 1) if count_rating else None
 
+    # total_watched = films + episodes (каждый фильм и каждая серия считаются как 1 просмотр)
+    total_views = len(films_watched) + episodes_count
     return {
         'period': {'month': month, 'year': year, 'label': f'{MONTH_NAMES_RU[month - 1]} {year}'},
         'summary': {
@@ -226,7 +235,7 @@ def get_personal_stats(chat_id, month, year):
             'series_watched': len(series_watched),
             'episodes_watched': episodes_count,
             'cinema_visits': len(cinema_rows),
-            'total_watched': len(films_watched) + len(series_watched),
+            'total_watched': total_views,
             'avg_rating': avg_rating
         },
         'top_films': top_films,
@@ -359,7 +368,7 @@ def get_group_stats(chat_id, month, year):
         for row in cur.fetchall():
             cinema_rows.append(row)
 
-    # ratings за месяц (rated_at если есть)
+    # ratings за месяц (rated_at если есть). ТОЛЬКО группа: r.chat_id = группа, фильмы из базы группы.
     with db_lock:
         cur.execute("""
             SELECT r.rating, r.user_id, r.film_id, r.rated_at, m.kp_id, m.title, m.year, m.genres
@@ -497,7 +506,25 @@ def get_group_stats(chat_id, month, year):
             generous_uid = uid
             break
     polyglot_uid = max(uid_genres.items(), key=lambda x: len(x[1]))[0] if uid_genres and max(len(g) for g in uid_genres.values()) >= 5 else None
-    discoverer_uid = None  # добавил фильм, все оценили ≥8 — сложнее, пропустим
+    # Первооткрыватель: добавил фильм в базу группы, все оценили ≥8 (за месяц)
+    discoverer_uid = None
+    film_ratings_for_discoverer = defaultdict(list)
+    for r in ratings_in_month:
+        fid = r.get('film_id') if isinstance(r, dict) else r[2]
+        uid = r.get('user_id') if isinstance(r, dict) else r[1]
+        rt = r.get('rating') if isinstance(r, dict) else r[0]
+        if fid and rt:
+            film_ratings_for_discoverer[fid].append({'user_id': uid, 'rating': rt})
+    for fid, rats in film_ratings_for_discoverer.items():
+        if len(rats) >= 2 and all(r['rating'] >= 8 for r in rats):
+            with db_lock:
+                cur.execute("SELECT added_by FROM movies WHERE id = %s AND chat_id = %s", (fid, chat_id))
+                row = cur.fetchone()
+            if row:
+                ab = row.get('added_by') if isinstance(row, dict) else row[0]
+                if ab:
+                    discoverer_uid = ab
+                    break
     achievements = [
         {'id': 'cinephile', 'icon': '🎬', 'name': 'Киноман', 'description': 'Посмотрел 10+ фильмов за месяц',
          'holder_user_id': cinephile_uid, 'earned': cinephile_uid is not None},
@@ -948,6 +975,56 @@ def get_public_personal_stats(slug, month, year):
     data['user'] = {'name': name or slug, 'username': username or slug}
     data['success'] = True
     return data, None
+
+
+def get_stats_debug(chat_id, month, year, is_personal=True):
+    """Сырые данные для отладки: количество записей в watched_movies, series_tracking, ratings за месяц."""
+    cur = get_db_cursor()
+    start_ts, end_ts = _month_range(month, year)
+    user_id = chat_id if is_personal else None
+    out = {'chat_id': chat_id, 'month': month, 'year': year, 'is_personal': is_personal, 'period': f'{month}-{year}'}
+    with db_lock:
+        if is_personal:
+            cur.execute("""
+                SELECT COUNT(*), COUNT(DISTINCT film_id) FROM watched_movies
+                WHERE chat_id = %s AND user_id = %s AND watched_at >= %s AND watched_at < %s
+            """, (chat_id, user_id, start_ts, end_ts))
+            r = cur.fetchone()
+            out['watched_movies_count'] = r[0] if r else 0
+            out['watched_movies_films'] = r[1] if r and len(r) > 1 else 0
+            cur.execute("""
+                SELECT COUNT(*), COUNT(DISTINCT film_id) FROM series_tracking
+                WHERE chat_id = %s AND user_id = %s AND watched = TRUE AND watched_date >= %s AND watched_date < %s
+            """, (chat_id, user_id, start_ts, end_ts))
+            r = cur.fetchone()
+            out['series_tracking_count'] = r[0] if r else 0
+            out['series_tracking_series'] = r[1] if r and len(r) > 1 else 0
+            cur.execute("""
+                SELECT COUNT(*) FROM ratings r
+                WHERE r.chat_id = %s AND r.user_id = %s AND r.rated_at >= %s AND r.rated_at < %s
+            """, (chat_id, user_id, start_ts, end_ts))
+            r = cur.fetchone()
+            out['ratings_count'] = r[0] if r else 0
+        else:
+            cur.execute("""
+                SELECT COUNT(*), COUNT(DISTINCT film_id) FROM watched_movies
+                WHERE chat_id = %s AND watched_at >= %s AND watched_at < %s
+            """, (chat_id, start_ts, end_ts))
+            r = cur.fetchone()
+            out['watched_movies_count'] = r[0] if r else 0
+            cur.execute("""
+                SELECT COUNT(*) FROM series_tracking
+                WHERE chat_id = %s AND watched = TRUE AND watched_date >= %s AND watched_date < %s
+            """, (chat_id, start_ts, end_ts))
+            r = cur.fetchone()
+            out['series_tracking_count'] = r[0] if r else 0
+            cur.execute("""
+                SELECT COUNT(*) FROM ratings r
+                WHERE r.chat_id = %s AND r.rated_at >= %s AND r.rated_at < %s
+            """, (chat_id, start_ts, end_ts))
+            r = cur.fetchone()
+            out['ratings_count'] = r[0] if r else 0
+    return out
 
 
 def get_public_group_stats(slug, month, year):

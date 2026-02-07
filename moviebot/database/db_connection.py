@@ -513,7 +513,16 @@ def init_database():
     except Exception as e:
         logger.debug(f"Поле online_link уже существует или ошибка: {e}")
         conn.rollback()
-    
+
+    try:
+        cursor.execute('ALTER TABLE movies ADD COLUMN IF NOT EXISTS added_by BIGINT')
+        cursor.execute('ALTER TABLE movies ADD COLUMN IF NOT EXISTS added_at TIMESTAMP WITH TIME ZONE')
+        conn.commit()
+        logger.info("Миграция: movies.added_by, added_at добавлены")
+    except Exception as e:
+        logger.debug(f"Поле added_by/added_at уже существует: {e}")
+        conn.rollback()
+
     # Миграция: изменение типа timestamp в stats с TEXT на TIMESTAMP WITH TIME ZONE
     try:
         # Сначала проверяем текущий тип поля
