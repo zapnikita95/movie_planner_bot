@@ -112,14 +112,14 @@ def _get_user_profile_and_achievements(user_id):
         cur.execute("""
             SELECT COUNT(DISTINCT wm.film_id) FROM watched_movies wm
             JOIN movies m ON m.id = wm.film_id AND m.chat_id = wm.chat_id
-            WHERE wm.chat_id = %s AND wm.user_id = %s AND m.is_series = FALSE
+            WHERE wm.chat_id = %s AND wm.user_id = %s AND (m.is_series IS NULL OR m.is_series = 0)
         """, (chat_id, user_id))
         r = cur.fetchone()
         films_wm = (r.get('count') if isinstance(r, dict) else r[0]) or 0
         cur.execute("""
             SELECT COUNT(DISTINCT r.film_id) FROM ratings r
             JOIN movies m ON m.id = r.film_id AND m.chat_id = r.chat_id
-            WHERE r.chat_id = %s AND r.user_id = %s AND m.is_series = FALSE
+            WHERE r.chat_id = %s AND r.user_id = %s AND (m.is_series IS NULL OR m.is_series = 0)
         """, (chat_id, user_id))
         r = cur.fetchone()
         films_rat = (r.get('count') if isinstance(r, dict) else r[0]) or 0
@@ -136,7 +136,7 @@ def _get_user_profile_and_achievements(user_id):
         cur.execute("""
             SELECT COUNT(DISTINCT st.film_id) FROM series_tracking st
             JOIN movies m ON m.id = st.film_id AND m.chat_id = st.chat_id
-            WHERE st.chat_id = %s AND st.user_id = %s AND st.watched = TRUE AND m.is_series = TRUE
+            WHERE st.chat_id = %s AND st.user_id = %s AND st.watched = TRUE AND m.is_series != 0
         """, (chat_id, user_id))
         r = cur.fetchone()
         profile['completed_series_alltime'] = (r.get('count') if isinstance(r, dict) else r[0]) or 0
@@ -162,7 +162,7 @@ def _get_user_profile_and_achievements(user_id):
         profile['unique_genres_alltime'] = len(genres_set)
         cur.execute("""
             SELECT COUNT(DISTINCT m.id) FROM movies m
-            WHERE m.chat_id = %s AND m.is_series = FALSE
+            WHERE m.chat_id = %s AND (m.is_series IS NULL OR m.is_series = 0)
               AND (EXISTS (SELECT 1 FROM watched_movies wm WHERE wm.chat_id = m.chat_id AND wm.film_id = m.id AND wm.user_id = %s)
                    OR EXISTS (SELECT 1 FROM ratings r WHERE r.chat_id = m.chat_id AND r.film_id = m.id AND r.user_id = %s))
         """, (chat_id, user_id, user_id))
