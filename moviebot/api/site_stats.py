@@ -89,26 +89,54 @@ def _month_range(month, year):
     return start, end
 
 
-# Список вечных личных ачивок (id, icon, name, description, rarity, условие)
+# Список вечных личных ачивок (многоуровневые). id, icon, name, description, rarity, (target_value, profile_key)
+# Условие: profile[profile_key] >= target_value
 PERSONAL_ACHIEVEMENTS_DEF = [
-    ('first_watch', '🎬', 'Первый кадр', 'Первый фильм в MP', 'common', lambda p: p.get('total_films_alltime', 0) >= 1),
-    ('club_50', '🎞️', 'Полтинник', '50 просмотренных фильмов', 'common', lambda p: p.get('total_films_alltime', 0) >= 50),
-    ('club_100', '💯', 'Сотня', '100 просмотренных фильмов', 'rare', lambda p: p.get('total_films_alltime', 0) >= 100),
-    ('club_250', '🏆', 'Четверть тысячи', '250 фильмов', 'epic', lambda p: p.get('total_films_alltime', 0) >= 250),
-    ('club_500', '💎', 'Пятьсот', '500 фильмов', 'legendary', lambda p: p.get('total_films_alltime', 0) >= 500),
-    ('critic_100', '⭐', 'Критик', '100 оценок', 'common', lambda p: p.get('total_ratings_alltime', 0) >= 100),
-    ('critic_500', '🎓', 'Эксперт', '500 оценок', 'epic', lambda p: p.get('total_ratings_alltime', 0) >= 500),
-    ('cinema_1', '🎟️', 'Первый сеанс', 'Первый поход в кино через Movie Planner', 'common', lambda p: p.get('total_cinema_alltime', 0) >= 1),
-    ('cinema_10', '🎥', 'Кинозритель', '10 походов в кино', 'common', lambda p: p.get('total_cinema_alltime', 0) >= 10),
-    ('cinema_25', '🎬', 'Завсегдатай залов', '25 походов в кино', 'rare', lambda p: p.get('total_cinema_alltime', 0) >= 25),
-    ('cinema_50', '🍿', 'Синефил', '50 походов в кино', 'epic', lambda p: p.get('total_cinema_alltime', 0) >= 50),
-    ('cinema_100', '🏟️', 'Кинофанат', '100 походов в кино', 'legendary', lambda p: p.get('total_cinema_alltime', 0) >= 100),
-    ('series_5', '📺', 'Сериаломан', '5 завершённых сериалов', 'common', lambda p: p.get('completed_series_alltime', 0) >= 5),
-    ('series_500ep', '🔥', '500 серий', '500 отмеченных серий', 'rare', lambda p: p.get('total_episodes_alltime', 0) >= 500),
-    ('genres_10', '🌈', 'Всеядный', '10+ жанров', 'rare', lambda p: p.get('unique_genres_alltime', 0) >= 10),
-    ('year_streak', '📅', 'Годовой стрик', '12 месяцев подряд с активностью', 'epic', lambda p: p.get('year_streak', False)),
-    ('oldtimer', '🏠', 'Старожил', '1+ год в MP', 'rare', lambda p: p.get('months_since_first_action', 0) >= 12),
-    ('mvp_legend', '👑', 'Легенда', '6 раз «Киноман месяца» в группе', 'legendary', lambda p: p.get('mvp_count', 0) >= 6),
+    # Киноман (films)
+    ('films_1', '🎬', 'Первый кадр', 'Первый фильм в MP', 'common', (1, 'total_films_alltime')),
+    ('films_5', '🎞️', 'Пятиборье', '5 просмотренных фильмов', 'common', (5, 'total_films_alltime')),
+    ('films_10', '📽️', 'Десятка', '10 просмотренных фильмов', 'common', (10, 'total_films_alltime')),
+    ('films_50', '🎞️', 'Полтинник', '50 просмотренных фильмов', 'common', (50, 'total_films_alltime')),
+    ('films_100', '💯', 'Сотня', '100 просмотренных фильмов', 'rare', (100, 'total_films_alltime')),
+    ('films_250', '🏆', 'Четверть тысячи', '250 фильмов', 'epic', (250, 'total_films_alltime')),
+    ('films_500', '💎', 'Пятьсот', '500 фильмов', 'legendary', (500, 'total_films_alltime')),
+    # Критик (ratings)
+    ('ratings_1', '⭐', 'Первая оценка', 'Оценил первый фильм', 'common', (1, 'total_ratings_alltime')),
+    ('ratings_10', '📝', 'Десять оценок', '10 оценок', 'common', (10, 'total_ratings_alltime')),
+    ('ratings_50', '✍️', 'Полтинник оценок', '50 оценок', 'common', (50, 'total_ratings_alltime')),
+    ('ratings_100', '⭐', 'Критик', '100 оценок', 'common', (100, 'total_ratings_alltime')),
+    ('ratings_500', '🎓', 'Эксперт', '500 оценок', 'epic', (500, 'total_ratings_alltime')),
+    # Кинозритель (cinema)
+    ('cinema_1', '🎟️', 'Первый сеанс', 'Первый поход в кино через MP', 'common', (1, 'total_cinema_alltime')),
+    ('cinema_10', '🎥', 'Кинозритель', '10 походов в кино', 'common', (10, 'total_cinema_alltime')),
+    ('cinema_25', '🎬', 'Завсегдатай залов', '25 походов в кино', 'rare', (25, 'total_cinema_alltime')),
+    ('cinema_50', '🍿', 'Синефил', '50 походов в кино', 'epic', (50, 'total_cinema_alltime')),
+    ('cinema_100', '🏟️', 'Кинофанат', '100 походов в кино', 'legendary', (100, 'total_cinema_alltime')),
+    # Сериалы — завершённые
+    ('series_completed_1', '📺', 'Первый сериал', 'Первый сериал досмотрен до конца', 'common', (1, 'completed_series_alltime')),
+    ('series_completed_3', '📺', 'Троица', '3 завершённых сериала', 'common', (3, 'completed_series_alltime')),
+    ('series_completed_5', '📺', 'Сериаломан', '5 завершённых сериалов', 'common', (5, 'completed_series_alltime')),
+    ('series_completed_10', '📺', 'Бинджер', '10 завершённых сериалов', 'rare', (10, 'completed_series_alltime')),
+    # Сериалы — эпизоды
+    ('series_ep_50', '🔥', '50 серий', '50 отмеченных серий', 'common', (50, 'total_episodes_alltime')),
+    ('series_ep_100', '🔥', '100 серий', '100 отмеченных серий', 'common', (100, 'total_episodes_alltime')),
+    ('series_ep_250', '🔥', '250 серий', '250 отмеченных серий', 'common', (250, 'total_episodes_alltime')),
+    ('series_ep_500', '🔥', '500 серий', '500 отмеченных серий', 'rare', (500, 'total_episodes_alltime')),
+    ('series_ep_1000', '🔥', 'Тысяча серий', '1000 отмеченных серий', 'epic', (1000, 'total_episodes_alltime')),
+    # Всеядный (genres)
+    ('genres_3', '🌈', 'Разнообразие', '3+ жанра в оценках', 'common', (3, 'unique_genres_alltime')),
+    ('genres_5', '🌈', 'Широкий вкус', '5+ жанров', 'common', (5, 'unique_genres_alltime')),
+    ('genres_10', '🌈', 'Всеядный', '10+ жанров', 'rare', (10, 'unique_genres_alltime')),
+    ('genres_15', '🌈', 'Универсал', '15+ жанров', 'epic', (15, 'unique_genres_alltime')),
+    # Планировщик (plans)
+    ('plans_1', '📅', 'Первый план', 'Запланировал первый просмотр', 'common', (1, 'total_plans_alltime')),
+    ('plans_5', '📅', 'Планировщик', '5 планов', 'common', (5, 'total_plans_alltime')),
+    ('plans_10', '📅', 'Организатор', '10 планов', 'common', (10, 'total_plans_alltime')),
+    ('plans_25', '📅', 'Мастер планов', '25 планов', 'rare', (25, 'total_plans_alltime')),
+    # Одноуровневые
+    ('year_streak', '📅', 'Годовой стрик', '12 месяцев подряд с активностью', 'epic', None),  # special: year_streak
+    ('oldtimer', '🏠', 'Старожил', '1+ год в MP', 'rare', None),  # special: months_since_first_action >= 12
+    ('mvp_legend', '👑', 'Легенда', '6 раз «Киноман месяца» в группе', 'legendary', None),  # special: mvp_count >= 6
 ]
 
 
@@ -132,6 +160,7 @@ def _get_user_profile_and_achievements(user_id):
         'year_streak': False,
         'months_since_first_action': 0,
         'mvp_count': 0,
+        'total_plans_alltime': 0,
     }
 
     with db_lock:
@@ -239,6 +268,11 @@ def _get_user_profile_and_achievements(user_id):
         r = cur.fetchone()
         mvp_count = (r.get('count') if isinstance(r, dict) else r[0]) or 0
         profile['mvp_count'] = mvp_count
+        cur.execute("""
+            SELECT COUNT(*) FROM plans WHERE user_id = %s
+        """, (user_id,))
+        r = cur.fetchone()
+        profile['total_plans_alltime'] = (r.get('count') if isinstance(r, dict) else r[0]) or 0
         year_streak = False
         if first_ts:
             cur.execute("""
@@ -280,23 +314,28 @@ def _get_user_profile_and_achievements(user_id):
         'avg_rating_alltime': profile.get('avg_rating_alltime'),
     }
 
+    def _check_achievement(profile, item):
+        ach_id, icon, name, desc, rarity, cond = item
+        if cond is None:
+            if ach_id == 'year_streak':
+                return profile.get('year_streak', False)
+            if ach_id == 'oldtimer':
+                return profile.get('months_since_first_action', 0) >= 12
+            if ach_id == 'mvp_legend':
+                return profile.get('mvp_count', 0) >= 6
+            return False
+        target, key = cond
+        return profile.get(key, 0) >= target
+
     achievements = []
-    for ach_id, icon, name, desc, rarity, check in PERSONAL_ACHIEVEMENTS_DEF:
-        earned = check(profile)
+    for item in PERSONAL_ACHIEVEMENTS_DEF:
+        ach_id, icon, name, desc, rarity, cond = item
+        earned = _check_achievement(profile, item)
         target_val = None
         current_val = None
-        if ach_id == 'club_250':
-            target_val, current_val = 250, profile.get('total_films_alltime', 0)
-        elif ach_id == 'club_500':
-            target_val, current_val = 500, profile.get('total_films_alltime', 0)
-        elif ach_id == 'critic_500':
-            target_val, current_val = 500, profile.get('total_ratings_alltime', 0)
-        elif ach_id == 'cinema_50':
-            target_val, current_val = 50, profile.get('total_cinema_alltime', 0)
-        elif ach_id == 'cinema_100':
-            target_val, current_val = 100, profile.get('total_cinema_alltime', 0)
-        elif ach_id == 'series_500ep':
-            target_val, current_val = 500, profile.get('total_episodes_alltime', 0)
+        if cond is not None:
+            target_val, key = cond
+            current_val = profile.get(key, 0)
         elif ach_id == 'year_streak':
             target_val, current_val = 12, 12 if profile.get('year_streak') else profile.get('months_since_first_action', 0)
         elif ach_id == 'oldtimer':
@@ -306,7 +345,7 @@ def _get_user_profile_and_achievements(user_id):
         progress = None
         if not earned and target_val is not None and current_val is not None:
             progress = {'current': min(current_val, target_val), 'target': target_val}
-        earned_date = profile.get('member_since') if earned and ach_id == 'first_watch' else None
+        earned_date = profile.get('member_since') if earned and ach_id == 'films_1' else None
         achievements.append({
             'id': ach_id,
             'icon': icon,

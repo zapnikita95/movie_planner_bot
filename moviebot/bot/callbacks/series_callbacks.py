@@ -160,6 +160,11 @@ def _handle_series_mark_ep_yes(call):
                 cursor.close()
             except Exception:
                 pass
+    try:
+        from moviebot.achievements_notify import notify_new_achievements
+        notify_new_achievements(user_id, context={})
+    except Exception as ach_e:
+        logger.debug(f"[SERIES MARK EP] Achievement notify: {ach_e}")
     # Обновить описание сериала
     try:
         from moviebot.bot.handlers.series import show_film_info_with_buttons, get_film_current_state
@@ -1747,12 +1752,18 @@ def handle_episode_toggle(call):
                 conn_local.close()
             except:
                 pass
-        
+
+        try:
+            from moviebot.achievements_notify import notify_new_achievements
+            notify_new_achievements(user_id, context={})
+        except Exception as ach_e:
+            logger.debug(f"[EPISODE TOGGLE] Achievement notify: {ach_e}")
+
         # Обновляем страницу эпизодов
         from moviebot.bot.handlers.seasons import show_episodes_page
         message_id = call.message.message_id if call.message else None
         message_thread_id = getattr(call.message, 'message_thread_id', None)
-        
+
         # Получаем текущую страницу из состояния
         current_page = 1
         if user_id in user_episodes_state:

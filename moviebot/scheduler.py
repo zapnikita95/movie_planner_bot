@@ -3408,7 +3408,7 @@ def check_onboarding_24h():
             if movies_count > 0:
                 continue
             text = (
-                "Привет! Вижу, вы добавили Movie Planner, но пока ничего не попробовали 😅\n\n"
+                "Привет! Видим, вы добавили Movie Planner, но пока ничего не попробовали 😅\n\n"
                 "Давайте запланируем фильм на выходные? Просто пришлите в чат ссылку на любой фильм или сериал с Кинопоиска — его можно добавить в базу и запланировать просмотр. Далее нужно будет нажать \"Запланировать\", выбрать формат — \"🏠 Дома\" или \"🎥 В кино\", и своим языком указать, когда хотите посмотреть фильм: например, \"суббота вечер\". Готово!\n\n"
                 "Вам придет напоминание о запланированном просмотре.\n\n"
                 "Также, чтобы добавить фильмы в вашу базу, вы можете добавить одну из подборок:"
@@ -3578,7 +3578,7 @@ def check_onboarding_48h():
             if movies_count > 0:
                 continue
             text = (
-                "Привет! Вижу, Вы пока не успели ничего добавить в Movie Planner 😊\n\n"
+                "Привет! Видим, вы пока не успели ничего добавить в Movie Planner 😊\n\n"
                 "Вот что сильно упрощает жизнь: установите расширение для Chrome — и добавляйте фильмы/сериалы одним кликом прямо с Кинопоиска, IMDb или Letterboxd, а также любые фильмы с большинства стримингов.\n\n"
                 "После установки просто зайдите на страницу любого фильма на Кинопоиске — и сможете добавить его в базу и запланировать просмотр. Попробуете? 😄"
             )
@@ -3594,6 +3594,258 @@ def check_onboarding_48h():
                 logger.warning(f"[ONBOARDING 48H] Не удалось отправить user_id={user_id}: {e}")
     except Exception as e:
         logger.error(f"[ONBOARDING 48H] Ошибка: {e}", exc_info=True)
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
+
+
+def check_onboarding_5_7d():
+    """Через 5–7 дней после /start: если всё ещё 0 фильмов — мягкий пуш «не нашли время?» + ссылка на быстрый старт."""
+
+    if not bot:
+        return
+    conn_local = _scheduler_conn()
+    cursor_local = conn_local.cursor()
+    now = datetime.now(PLANS_TZ)
+    if now.tzinfo is None:
+        now = pytz.utc.localize(now)
+    try:
+        first_starts = _get_first_start_per_user(cursor_local, since_hours=200)
+        for user_id, first_ts in first_starts.items():
+            if first_ts.tzinfo is None:
+                first_ts = pytz.utc.localize(first_ts)
+            delta_days = (now - first_ts).total_seconds() / 86400
+            if not (5 <= delta_days <= 7):
+                continue
+            chat_id = user_id
+            if _onboarding_was_sent(chat_id, 'onboarding_5_7d_sent', cursor_local):
+                continue
+            if _user_has_blocked_bot(chat_id, cursor_local):
+                continue
+            with db_lock:
+                cursor_local.execute("SELECT COUNT(*) FROM movies WHERE chat_id = %s", (chat_id,))
+                cnt = cursor_local.fetchone()
+            movies_count = cnt.get('count', 0) if isinstance(cnt, dict) else (cnt[0] if cnt else 0)
+            if movies_count > 0:
+                continue
+            text = (
+                "Привет! Не нашли время попробовать Movie Planner? 😊\n\n"
+                "Добавьте хотя бы один фильм — и мы покажем, как удобно планировать просмотры. "
+                "Просто пришлите ссылку на любой фильм с Кинопоиска в чат — или установите расширение для Chrome, чтобы добавлять фильмы одним кликом."
+            )
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("💻 Установить расширение", url=EXTENSION_URL))
+            try:
+                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                _onboarding_set_sent(chat_id, 'onboarding_5_7d_sent')
+                logger.info(f"[ONBOARDING 5-7D] Отправлено user_id={user_id}")
+            except Exception as e:
+                if _is_telegram_blocked_error(e):
+                    _onboarding_mark_bot_blocked(user_id)
+                logger.warning(f"[ONBOARDING 5-7D] Не удалось отправить user_id={user_id}: {e}")
+    except Exception as e:
+        logger.error(f"[ONBOARDING 5-7D] Ошибка: {e}", exc_info=True)
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
+
+
+def check_onboarding_plan_reminder_4_5d():
+    """Через 4–5 дней после /start: если есть фильмы, но нет планов — напомнить запланировать."""
+
+    if not bot:
+        return
+    conn_local = _scheduler_conn()
+    cursor_local = conn_local.cursor()
+    now = datetime.now(PLANS_TZ)
+    if now.tzinfo is None:
+        now = pytz.utc.localize(now)
+    try:
+        first_starts = _get_first_start_per_user(cursor_local, since_hours=200)
+        for user_id, first_ts in first_starts.items():
+            if first_ts.tzinfo is None:
+                first_ts = pytz.utc.localize(first_ts)
+            delta_days = (now - first_ts).total_seconds() / 86400
+            if not (4 <= delta_days <= 5):
+                continue
+            chat_id = user_id
+            if _onboarding_was_sent(chat_id, 'onboarding_plan_reminder_4_5d_sent', cursor_local):
+                continue
+            if _user_has_blocked_bot(chat_id, cursor_local):
+                continue
+            with db_lock:
+                cursor_local.execute("SELECT COUNT(*) FROM movies WHERE chat_id = %s", (chat_id,))
+                mrow = cursor_local.fetchone()
+                cursor_local.execute(
+                    "SELECT COUNT(*) FROM plans WHERE chat_id = %s AND user_id = %s",
+                    (chat_id, user_id)
+                )
+                prow = cursor_local.fetchone()
+            movies_count = mrow.get('count', 0) if isinstance(mrow, dict) else (mrow[0] if mrow else 0)
+            plans_count = prow.get('count', 0) if isinstance(prow, dict) else (prow[0] if prow else 0)
+            if movies_count == 0 or plans_count > 0:
+                continue
+            with db_lock:
+                cursor_local.execute(
+                    "SELECT id, title, kp_id FROM movies WHERE chat_id = %s ORDER BY id DESC LIMIT 1",
+                    (chat_id,)
+                )
+                film_row = cursor_local.fetchone()
+            if not film_row:
+                continue
+            film_id = film_row.get('id') if isinstance(film_row, dict) else film_row[0]
+            title = film_row.get('title') or 'фильм'
+            if isinstance(title, str):
+                title = title[:80]
+            kp_id = film_row.get('kp_id') if isinstance(film_row, dict) else film_row[2]
+            try:
+                import html as html_module
+                title_esc = html_module.escape(str(title)[:80])
+            except Exception:
+                title_esc = str(title)[:80]
+            text = (
+                f"У вас в базе уже {movies_count} фильм(ов/а). Запланируйте просмотр — и мы напомним в нужный день и время.\n\n"
+                f"Перейдите к описанию любого фильма и нажмите «Запланировать»."
+            )
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("📖 Перейти к описанию", callback_data=f"back_to_film:{kp_id or film_id}"))
+            try:
+                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                _onboarding_set_sent(chat_id, 'onboarding_plan_reminder_4_5d_sent')
+                logger.info(f"[ONBOARDING PLAN 4-5D] Отправлено user_id={user_id}, film_id={film_id}")
+            except Exception as e:
+                logger.warning(f"[ONBOARDING PLAN 4-5D] Не удалось отправить user_id={user_id}: {e}")
+    except Exception as e:
+        logger.error(f"[ONBOARDING PLAN 4-5D] Ошибка: {e}", exc_info=True)
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
+
+
+def check_inactivity_14d():
+    """Через 14 дней без активности: пуш «скучаем по вам» + премьеры/подборки. Только для пользователей с хотя бы 1 фильмом."""
+
+    if not bot:
+        return
+    conn_local = _scheduler_conn()
+    cursor_local = conn_local.cursor()
+    now = datetime.now(PLANS_TZ)
+    if now.tzinfo is None:
+        now = pytz.utc.localize(now)
+    try:
+        with db_lock:
+            cursor_local.execute("""
+                SELECT DISTINCT m.chat_id
+                FROM movies m
+                WHERE m.chat_id > 0
+                AND (SELECT MAX(s.timestamp) FROM stats s WHERE s.user_id = m.chat_id) < NOW() - INTERVAL '14 days'
+                AND (SELECT MAX(s.timestamp) FROM stats s WHERE s.user_id = m.chat_id) IS NOT NULL
+            """)
+            rows = cursor_local.fetchall()
+        for row in rows:
+            chat_id = row.get('chat_id') if isinstance(row, dict) else row[0]
+            if not chat_id:
+                continue
+            if _onboarding_was_sent(chat_id, 'inactivity_14d_sent', cursor_local):
+                continue
+            if _user_has_blocked_bot(chat_id, cursor_local):
+                continue
+            text = (
+                "Привет! Скучаем по вам 😊\n\n"
+                "Уже есть новые премьеры и подборки — посмотрите, что добавить в планы. Может, пора запланировать просмотр на выходные?"
+            )
+            markup = InlineKeyboardMarkup(row_width=1)
+            try:
+                bot_username = bot.get_me().username
+            except Exception:
+                bot_username = None
+            if bot_username:
+                markup.add(InlineKeyboardButton("📅 Премьеры", url=f"https://t.me/{bot_username}?start=premieres"))
+                markup.add(InlineKeyboardButton("🎲 Случайный фильм", url=f"https://t.me/{bot_username}?start=random"))
+            try:
+                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                _onboarding_set_sent(chat_id, 'inactivity_14d_sent')
+                logger.info(f"[INACTIVITY 14D] Отправлено user_id={chat_id}")
+            except Exception as e:
+                if _is_telegram_blocked_error(e):
+                    _onboarding_mark_bot_blocked(chat_id)
+                logger.warning(f"[INACTIVITY 14D] Не удалось отправить user_id={chat_id}: {e}")
+    except Exception as e:
+        logger.error(f"[INACTIVITY 14D] Ошибка: {e}", exc_info=True)
+    finally:
+        try:
+            cursor_local.close()
+        except:
+            pass
+        try:
+            conn_local.close()
+        except:
+            pass
+
+
+def check_onboarding_extension_1_2_films():
+    """Через 72–96ч после /start: если 1–2 фильма — предложить расширение для удобного добавления."""
+
+    if not bot:
+        return
+    conn_local = _scheduler_conn()
+    cursor_local = conn_local.cursor()
+    now = datetime.now(PLANS_TZ)
+    if now.tzinfo is None:
+        now = pytz.utc.localize(now)
+    try:
+        first_starts = _get_first_start_per_user(cursor_local, since_hours=120)
+        for user_id, first_ts in first_starts.items():
+            if first_ts.tzinfo is None:
+                first_ts = pytz.utc.localize(first_ts)
+            delta_h = (now - first_ts).total_seconds() / 3600
+            if not (72 <= delta_h <= 96):
+                continue
+            chat_id = user_id
+            if _onboarding_was_sent(chat_id, 'onboarding_extension_1_2_sent', cursor_local):
+                continue
+            if _user_has_blocked_bot(chat_id, cursor_local):
+                continue
+            with db_lock:
+                cursor_local.execute("SELECT COUNT(*) FROM movies WHERE chat_id = %s", (chat_id,))
+                cnt = cursor_local.fetchone()
+            movies_count = cnt.get('count', 0) if isinstance(cnt, dict) else (cnt[0] if cnt else 0)
+            if movies_count < 1 or movies_count > 2:
+                continue
+            text = (
+                "Добавлять фильмы проще с расширением — одним кликом с Кинопоиска, IMDb или большинства стримингов.\n\n"
+                "Установите расширение для Chrome — и пополняйте базу без копирования ссылок."
+            )
+            markup = InlineKeyboardMarkup(row_width=1)
+            markup.add(InlineKeyboardButton("💻 Установить расширение", url=EXTENSION_URL))
+            try:
+                bot.send_message(chat_id, text, reply_markup=markup, parse_mode='HTML')
+                _onboarding_set_sent(chat_id, 'onboarding_extension_1_2_sent')
+                logger.info(f"[ONBOARDING EXT 1-2] Отправлено user_id={user_id}, movies={movies_count}")
+            except Exception as e:
+                if _is_telegram_blocked_error(e):
+                    _onboarding_mark_bot_blocked(user_id)
+                logger.warning(f"[ONBOARDING EXT 1-2] Не удалось отправить user_id={user_id}: {e}")
+    except Exception as e:
+        logger.error(f"[ONBOARDING EXT 1-2] Ошибка: {e}", exc_info=True)
     finally:
         try:
             cursor_local.close()
@@ -3861,6 +4113,12 @@ def check_monthly_mvp_and_notify():
                 finally:
                     cur_ins.close()
                     conn_ins.close()
+
+                try:
+                    from moviebot.achievements_notify import notify_new_achievements
+                    notify_new_achievements(mvp_uid, context={})
+                except Exception as ach_e:
+                    logger.debug(f"[MVP] Achievement notify: {ach_e}")
 
                 if bot:
                     conn_usr = _scheduler_conn()

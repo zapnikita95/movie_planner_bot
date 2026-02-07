@@ -153,6 +153,10 @@ from moviebot.scheduler import (
     check_onboarding_24h,
     check_onboarding_plan_reminder,
     check_onboarding_48h,
+    check_onboarding_5_7d,
+    check_onboarding_plan_reminder_4_5d,
+    check_inactivity_14d,
+    check_onboarding_extension_1_2_films,
     check_monthly_mvp_and_notify,
     choose_random_participant,  # Оставлено для обратной совместимости
     start_dice_game  # Оставлено для обратной совместимости
@@ -194,6 +198,10 @@ scheduler.add_job(check_monthly_mvp_and_notify, 'cron', day=1, hour=10, minute=0
 scheduler.add_job(check_onboarding_24h, 'cron', minute=5, timezone=PLANS_TZ, id='check_onboarding_24h')
 scheduler.add_job(check_onboarding_plan_reminder, 'cron', minute=25, timezone=PLANS_TZ, id='check_onboarding_plan_reminder')
 scheduler.add_job(check_onboarding_48h, 'cron', minute=45, timezone=PLANS_TZ, id='check_onboarding_48h')
+scheduler.add_job(check_onboarding_5_7d, 'cron', minute=10, timezone=PLANS_TZ, id='check_onboarding_5_7d')
+scheduler.add_job(check_onboarding_plan_reminder_4_5d, 'cron', minute=30, timezone=PLANS_TZ, id='check_onboarding_plan_reminder_4_5d')
+scheduler.add_job(check_inactivity_14d, 'cron', minute=50, timezone=PLANS_TZ, id='check_inactivity_14d')
+scheduler.add_job(check_onboarding_extension_1_2_films, 'cron', minute=15, timezone=PLANS_TZ, id='check_onboarding_extension_1_2_films')
 
 # Регистрация ВСЕХ хэндлеров
 logger.info("=" * 80)

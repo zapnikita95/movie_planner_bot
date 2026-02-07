@@ -1044,6 +1044,14 @@ def premiere_notify_handler(call):
                             logger.info(f"[PREMIERE NOTIFY] План успешно добавлен: plan_id={plan_id}, film_id={film_id}")
                             if film_added:
                                 logger.info(f"[PREMIERE NOTIFY] Фильм добавлен в базу как следствие успешного добавления плана")
+                            try:
+                                from moviebot.achievements_notify import notify_new_achievements
+                                cursor_local.execute('SELECT title FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                                trow = cursor_local.fetchone()
+                                film_title = (trow.get('title') if isinstance(trow, dict) else (trow[0] if trow else None)) or 'фильм'
+                                notify_new_achievements(user_id, context={'film_title': film_title})
+                            except Exception as ach_e:
+                                logger.debug(f"[PREMIERE] Achievement notify: {ach_e}")
                         else:
                             logger.error(f"[PREMIERE NOTIFY] План не был создан, но ошибки не было")
                             conn_local.rollback()

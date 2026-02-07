@@ -1800,10 +1800,18 @@ def handle_rate_list_reply(message):
                 errors.append(f"{kp_id_str}: ошибка обработки")
         
         conn.commit()
-    
+
+        if results and user_id:
+            try:
+                from moviebot.achievements_notify import notify_new_achievements
+                first_title = results[0][1] if results else 'фильм'
+                notify_new_achievements(user_id, context={'film_title': first_title})
+            except Exception as ach_e:
+                logger.debug(f"[RATE LIST] Achievement notify: {ach_e}")
+
     # Формируем ответ
     response_text = ""
-    
+
     if results:
         user_name = message.from_user.first_name or f"user_{user_id}"
         response_text += f"✅ <b>{user_name}</b> поставил(а) оценки:\n\n"
@@ -2703,7 +2711,12 @@ def handle_reaction(reaction):
         
         conn.commit()
         logger.info(f"[REACTION] Фильм {film_title} отмечен просмотренным пользователем {user_id}")
-        
+        try:
+            from moviebot.achievements_notify import notify_new_achievements
+            notify_new_achievements(user_id, context={'film_title': film_title})
+        except Exception as ach_e:
+            logger.debug(f"[REACTION] Achievement notify: {ach_e}")
+
         # Получаем kp_id для получения фактов
         cursor.execute('SELECT kp_id FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
         kp_row = cursor.fetchone()

@@ -106,6 +106,11 @@ def register_rate_handlers(bot):
                         conn_local.commit()
                         bot.reply_to(message, f"✅ Оценка сохранена!\n\n<b>{title}</b>\nОценка: {rating}/10", parse_mode='HTML')
                         logger.info(f"[RATE] Пользователь {user_id} поставил оценку {rating} для фильма {kp_id}")
+                        try:
+                            from moviebot.achievements_notify import notify_new_achievements
+                            notify_new_achievements(user_id, context={'film_title': title or 'фильм'})
+                        except Exception as ach_e:
+                            logger.debug(f"[RATE] Achievement notify: {ach_e}")
                 except Exception as db_e:
                     logger.error(f"[RATE] Ошибка сохранения оценки: {db_e}", exc_info=True)
                     try:
@@ -507,6 +512,15 @@ def handle_rating_internal(message, rating):
                 )
             else:
                 bot.reply_to(message, f"✅ Оценка {rating}/10 сохранена. Средняя: {avg_str}/10")
+            try:
+                from moviebot.achievements_notify import notify_new_achievements
+                with db_lock:
+                    cursor_local.execute('SELECT title FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                    trow = cursor_local.fetchone()
+                film_title = (trow.get('title') if isinstance(trow, dict) else (trow[0] if trow else None)) or 'фильм'
+                notify_new_achievements(user_id, context={'film_title': film_title})
+            except Exception as ach_e:
+                logger.debug(f"[RATE] Achievement notify: {ach_e}")
 
             # Обновление описания
             if kp_id:

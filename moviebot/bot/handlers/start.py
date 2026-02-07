@@ -288,6 +288,64 @@ def start_menu_callback(call):
         except:
             pass
 
+@bot.callback_query_handler(func=lambda call: call.data == "send_login_code")
+def send_login_code_callback(call):
+    """Кнопка «Перейти в личный кабинет» — отправляет код для входа в новом сообщении."""
+    try:
+        import secrets
+        from datetime import datetime, timedelta
+        from moviebot.database.db_connection import get_db_connection, get_db_cursor
+
+        user_id = call.from_user.id
+        chat_id = call.message.chat.id
+
+        safe_answer_callback_query(bot, call.id, "⏳ Генерируем код...")
+
+        code = secrets.token_hex(5).upper()
+        expires = datetime.utcnow() + timedelta(minutes=10)
+
+        conn = get_db_connection()
+        cursor = get_db_cursor()
+        try:
+            cursor.execute("""
+                INSERT INTO extension_links (code, user_id, chat_id, expires_at, used)
+                VALUES (%s, %s, %s, %s, FALSE)
+                ON CONFLICT (code) DO UPDATE SET
+                    user_id = EXCLUDED.user_id,
+                    chat_id = EXCLUDED.chat_id,
+                    expires_at = EXCLUDED.expires_at,
+                    used = FALSE
+            """, (code, user_id, chat_id, expires))
+            conn.commit()
+
+            text = (
+                f"🔢 <b>Код для входа:</b>\n\n"
+                f"<code>{code}</code>\n\n"
+                f"Используйте его для входа в <a href=\"https://movie-planner.ru\">личном кабинете</a> или в расширении.\n"
+                f"⏰ Код действует 10 минут."
+            )
+            bot.send_message(chat_id, text, parse_mode='HTML')
+            logger.info(f"[SEND LOGIN CODE] Код отправлен user_id={user_id}")
+        except Exception as e:
+            logger.error(f"[SEND LOGIN CODE] Ошибка: {e}", exc_info=True)
+            bot.answer_callback_query(call.id, "❌ Не удалось сгенерировать код", show_alert=True)
+        finally:
+            try:
+                cursor.close()
+            except Exception:
+                pass
+            try:
+                conn.close()
+            except Exception:
+                pass
+    except Exception as e:
+        logger.error(f"[SEND LOGIN CODE] Общая ошибка: {e}", exc_info=True)
+        try:
+            bot.answer_callback_query(call.id, "❌ Произошла ошибка", show_alert=True)
+        except Exception:
+            pass
+
+
 @bot.callback_query_handler(func=lambda call: call.data == "extension:get_code")
 def extension_get_code_callback(call):
     """Генерация кода для привязки браузерного расширения через callback"""

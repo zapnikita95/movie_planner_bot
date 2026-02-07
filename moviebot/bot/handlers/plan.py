@@ -154,7 +154,19 @@ def process_plan(bot, user_id, chat_id, link, plan_type, day_or_date, message_da
                     logger.warning(f"[PROCESS PLAN] Фильм не найден в базе для film_id={film_id}")
             
             conn_local.commit()
-        
+
+            film_title = 'просмотр'
+            if film_id:
+                cursor_local.execute('SELECT title FROM movies WHERE id = %s AND chat_id = %s', (film_id, chat_id))
+                trow = cursor_local.fetchone()
+                if trow:
+                    film_title = (trow.get('title') if isinstance(trow, dict) else trow[0]) or film_title
+            try:
+                from moviebot.achievements_notify import notify_new_achievements
+                notify_new_achievements(user_id, context={'film_title': film_title})
+            except Exception as ach_e:
+                logger.debug(f"[PLAN] Achievement notify: {ach_e}")
+
         # Успешное планирование - фильм уже в базе (film_id получен выше)
         logger.info(f"[PLAN] Успешное планирование: plan_id={plan_id}, film_id={film_id}, kp_id={kp_id}, plan_type={plan_type}, plan_datetime={plan_utc}")
     except Exception as e:

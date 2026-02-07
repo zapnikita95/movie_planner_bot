@@ -2323,6 +2323,12 @@ def create_web_app(bot):
                         
                         bot.send_message(chat_id, text, parse_mode='HTML', reply_markup=markup)
                         logger.info(f"[EXTENSION API] Сообщение о создании/обновлении плана отправлено в chat_id={chat_id}")
+                        if not existing_plan:
+                            try:
+                                from moviebot.achievements_notify import notify_new_achievements
+                                notify_new_achievements(user_id, context={'film_title': title or 'фильм'})
+                            except Exception as ach_e:
+                                logger.debug(f"[EXTENSION] Achievement notify: {ach_e}")
                 except Exception as e:
                     logger.error(f"[EXTENSION API] Ошибка отправки сообщения о плане: {e}", exc_info=True)
                     # Не прерываем выполнение, если не удалось отправить сообщение
@@ -2830,6 +2836,14 @@ def create_web_app(bot):
                 send_film_watched_message(bot, chat_id, user_id, kp_id, film_id)
             except Exception as e:
                 logger.error(f"[EXTENSION API] Ошибка отправки сообщения в бота: {e}", exc_info=True)
+            try:
+                from moviebot.achievements_notify import notify_new_achievements
+                cursor.execute("SELECT title FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
+                trow = cursor.fetchone()
+                film_title = (trow.get('title') if isinstance(trow, dict) else (trow[0] if trow else None)) or 'фильм'
+                notify_new_achievements(user_id, context={'film_title': film_title})
+            except Exception as ach_e:
+                logger.debug(f"[EXTENSION] Achievement notify: {ach_e}")
 
             return jsonify({"success": True})
         except Exception as e:
@@ -2900,6 +2914,11 @@ def create_web_app(bot):
                 send_rating_message(bot, chat_id, user_id, kp_id, film_id, rating, film_title)
             except Exception as e:
                 logger.error(f"[EXTENSION API] Ошибка отправки сообщения в бота: {e}", exc_info=True)
+            try:
+                from moviebot.achievements_notify import notify_new_achievements
+                notify_new_achievements(user_id, context={'film_title': film_title or 'фильм'})
+            except Exception as ach_e:
+                logger.debug(f"[EXTENSION] Achievement notify: {ach_e}")
 
             recommendations_sent = False
             if rating >= 7:
