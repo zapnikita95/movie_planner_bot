@@ -2277,6 +2277,14 @@ def main_file_handler(message):
                 tickets_json = json.dumps(existing_tickets, ensure_ascii=False)
                 
                 cursor.execute("UPDATE plans SET ticket_file_id = %s WHERE id = %s", (tickets_json, plan_id))
+                # Поход в кино: сохраняем в cinema_screenings для статистики (планы потом удаляются)
+                cursor.execute("""
+                    INSERT INTO cinema_screenings (chat_id, user_id, film_id, screening_date)
+                    SELECT p.chat_id, %s, p.film_id, COALESCE(DATE(p.plan_datetime AT TIME ZONE 'UTC'), CURRENT_DATE)
+                    FROM plans p
+                    WHERE p.id = %s AND p.plan_type = 'cinema' AND p.film_id IS NOT NULL
+                    ON CONFLICT (chat_id, user_id, film_id) DO NOTHING
+                """, (user_id, plan_id))
                 conn.commit()
                 logger.info(f"[TICKET UPLOAD] Билет сохранен в БД для plan_id={plan_id}")
 
@@ -2683,6 +2691,15 @@ def handle_reaction(reaction):
                 SELECT COUNT(*) FROM watched_movies WHERE film_id = %s AND chat_id = %s
             ) > 0
         """, (film_id, film_id, chat_id))
+        # Поход в кино: если есть план cinema — сохраняем в cinema_screenings (для статистики)
+        cursor.execute("""
+            INSERT INTO cinema_screenings (chat_id, user_id, film_id, screening_date)
+            SELECT p.chat_id, %s, p.film_id, COALESCE(DATE(p.plan_datetime AT TIME ZONE 'UTC'), CURRENT_DATE)
+            FROM plans p
+            WHERE p.chat_id = %s AND p.film_id = %s AND p.plan_type = 'cinema'
+            LIMIT 1
+            ON CONFLICT (chat_id, user_id, film_id) DO NOTHING
+        """, (user_id, chat_id, film_id))
         
         conn.commit()
         logger.info(f"[REACTION] Фильм {film_title} отмечен просмотренным пользователем {user_id}")

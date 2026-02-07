@@ -1531,7 +1531,7 @@ def create_web_app(bot):
             else:
                 response.headers['Access-Control-Allow-Origin'] = '*'
             response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
-            response.headers['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'
+            response.headers['Access-Control-Allow-Methods'] = 'GET,POST,PUT,OPTIONS'
             response.headers['Access-Control-Allow-Credentials'] = 'true'
             logger.info(f"[CORS] ✅ Добавлены заголовки для пути: {request.path}, метод: {request.method}, статус: {response.status_code}")
         return response
@@ -1657,7 +1657,7 @@ def create_web_app(bot):
             # Явно добавляем CORS заголовки для OPTIONS (after_request тоже добавит, но для надежности делаем явно)
             response.headers['Access-Control-Allow-Origin'] = '*'
             response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
-            response.headers['Access-Control-Allow-Methods'] = 'GET,POST,OPTIONS'
+            response.headers['Access-Control-Allow-Methods'] = 'GET,POST,PUT,OPTIONS'
             response.headers['Access-Control-Allow-Credentials'] = 'true'
             logger.info("[CORS] ✅ Явно добавлены заголовки для OPTIONS запроса film-info")
             return response
@@ -2806,6 +2806,21 @@ def create_web_app(bot):
                     cursor.execute("""
                         UPDATE movies SET watched = 1 WHERE id = %s AND chat_id = %s
                     """, (film_id, chat_id))
+                # Важно: watched_movies используется для статистики (личная и групповая)
+                cursor.execute("""
+                    INSERT INTO watched_movies (chat_id, film_id, user_id, watched_at)
+                    VALUES (%s, %s, %s, NOW())
+                    ON CONFLICT (chat_id, film_id, user_id) DO NOTHING
+                """, (chat_id, film_id, user_id))
+                # Поход в кино: если есть план cinema — сохраняем в cinema_screenings
+                cursor.execute("""
+                    INSERT INTO cinema_screenings (chat_id, user_id, film_id, screening_date)
+                    SELECT p.chat_id, %s, p.film_id, COALESCE(DATE(p.plan_datetime AT TIME ZONE 'UTC'), CURRENT_DATE)
+                    FROM plans p
+                    WHERE p.chat_id = %s AND p.film_id = %s AND p.plan_type = 'cinema'
+                    LIMIT 1
+                    ON CONFLICT (chat_id, user_id, film_id) DO NOTHING
+                """, (user_id, chat_id, film_id))
                 conn.commit()
 
             try:
@@ -2859,10 +2874,19 @@ def create_web_app(bot):
 
             with db_lock:
                 cursor.execute("""
-                    INSERT INTO ratings (chat_id, film_id, user_id, rating, is_imported)
-                    VALUES (%s, %s, %s, %s, FALSE)
-                    ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = %s, is_imported = FALSE
+                    INSERT INTO ratings (chat_id, film_id, user_id, rating, is_imported, rated_at)
+                    VALUES (%s, %s, %s, %s, FALSE, NOW())
+                    ON CONFLICT (chat_id, film_id, user_id) DO UPDATE SET rating = %s, is_imported = FALSE, rated_at = NOW()
                 """, (chat_id, film_id, user_id, rating, rating))
+                # Поход в кино: если был план cinema — сохраняем в cinema_screenings
+                cursor.execute("""
+                    INSERT INTO cinema_screenings (chat_id, user_id, film_id, screening_date)
+                    SELECT p.chat_id, %s, p.film_id, COALESCE(DATE(p.plan_datetime AT TIME ZONE 'UTC'), CURRENT_DATE)
+                    FROM plans p
+                    WHERE p.chat_id = %s AND p.film_id = %s AND p.plan_type = 'cinema'
+                    LIMIT 1
+                    ON CONFLICT (chat_id, user_id, film_id) DO NOTHING
+                """, (user_id, chat_id, film_id))
                 conn.commit()
 
             cursor.execute("SELECT title FROM movies WHERE id = %s AND chat_id = %s", (film_id, chat_id))
@@ -3319,6 +3343,28 @@ def create_web_app(bot):
             site_base = os.environ.get('SITE_BASE_URL', 'https://movie-planner.ru')
             data['share_url'] = site_base.rstrip('/') + '/#/u/' + settings['public_slug'] + '/stats'
         return jsonify({"success": True, **data})
+
+    @app.route('/api/site/group-stats/settings', methods=['GET', 'PUT', 'OPTIONS'])
+    def site_group_stats_settings():
+        if request.method == 'OPTIONS':
+            return jsonify({'status': 'ok'})
+        chat_id = _site_token_to_chat_id()
+        if chat_id is None:
+            return jsonify({"success": False, "error": "Не авторизован"}), 401
+        if chat_id > 0:
+            return jsonify({"success": False, "error": "Только для групп"}), 400
+        from moviebot.api.site_stats import get_group_stats_settings, set_group_stats_settings
+        if request.method == 'GET':
+            s = get_group_stats_settings(chat_id)
+            return jsonify({"success": True, **s})
+        try:
+            body = request.get_json() or {}
+            public_enabled = body.get('public_enabled')
+            s = set_group_stats_settings(chat_id, public_enabled=public_enabled)
+            return jsonify({"success": True, **s})
+        except Exception as e:
+            logger.exception("group-stats settings PUT: %s", e)
+            return jsonify({"success": False, "error": str(e)}), 500
 
     @app.route('/api/site/group-stats', methods=['GET', 'OPTIONS'])
     def site_group_stats():

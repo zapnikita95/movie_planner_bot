@@ -795,6 +795,28 @@ def init_database():
         except Exception:
             pass
 
+    # Миграция: backfill rated_at и watched_at = январь 2025 для старых записей (сервис запустился в январе)
+    try:
+        cursor.execute("""
+            UPDATE ratings SET rated_at = '2025-01-15 12:00:00+00'
+            WHERE rated_at IS NULL
+        """)
+        r_cnt = cursor.rowcount
+        cursor.execute("""
+            UPDATE watched_movies SET watched_at = '2025-01-15 12:00:00+00'
+            WHERE watched_at IS NULL
+        """)
+        w_cnt = cursor.rowcount
+        conn.commit()
+        if r_cnt or w_cnt:
+            logger.info("Миграция: backfill rated_at=%s, watched_at=%s записей в январь 2025", r_cnt, w_cnt)
+    except Exception as e:
+        logger.debug(f"Миграция backfill: {e}")
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+
     # Таблица настроек публичной групповой статистики
     try:
         cursor.execute('''
@@ -834,6 +856,27 @@ def init_database():
         logger.info("Таблица user_stats_settings создана")
     except Exception as e:
         logger.error(f"Таблица user_stats_settings: {e}", exc_info=True)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+
+    # Таблица походов в кино (для статистики; планы удаляются, а записи остаются)
+    try:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS cinema_screenings (
+                chat_id BIGINT NOT NULL,
+                user_id BIGINT NOT NULL,
+                film_id INTEGER NOT NULL,
+                screening_date DATE NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                PRIMARY KEY (chat_id, user_id, film_id)
+            )
+        ''')
+        conn.commit()
+        logger.info("Таблица cinema_screenings создана")
+    except Exception as e:
+        logger.debug(f"Таблица cinema_screenings: {e}")
         try:
             conn.rollback()
         except Exception:

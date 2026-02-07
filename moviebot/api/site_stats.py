@@ -121,17 +121,33 @@ def get_personal_stats(chat_id, month, year):
         else:
             films_watched.add(fid)
 
-    # Cinema из plans
+    # Cinema: из cinema_screenings (планы удаляются, записи остаются) + plans для актуальных планов
+    cinema_rows = []
     with db_lock:
         cur.execute("""
-            SELECT p.film_id, p.plan_datetime, m.kp_id, m.title, m.year
+            SELECT cs.film_id, cs.screening_date, m.kp_id, m.title, m.year
+            FROM cinema_screenings cs
+            JOIN movies m ON m.id = cs.film_id AND m.chat_id = cs.chat_id
+            WHERE cs.chat_id = %s AND cs.user_id = %s
+              AND cs.screening_date >= %s AND cs.screening_date < %s
+        """, (chat_id, user_id, start_ts.date(), end_ts.date()))
+        cinema_rows = list(cur.fetchall())
+        # Дополняем планами (если ещё не удалены; в личке chat_id=user_id)
+        cur.execute("""
+            SELECT p.film_id, p.plan_datetime::date, m.kp_id, m.title, m.year
             FROM plans p
             JOIN movies m ON m.id = p.film_id AND m.chat_id = p.chat_id
-            WHERE p.chat_id = %s AND p.plan_type = 'cinema'
+            WHERE p.chat_id = %s AND p.plan_type = 'cinema' AND (p.user_id = %s OR p.user_id IS NULL)
               AND p.plan_datetime >= %s AND p.plan_datetime < %s
-        """, (chat_id, start_ts, end_ts))
-        cinema_rows = cur.fetchall()
+              AND NOT EXISTS (
+                SELECT 1 FROM cinema_screenings cs
+                WHERE cs.chat_id = p.chat_id AND cs.user_id = %s AND cs.film_id = p.film_id
+              )
+        """, (chat_id, user_id, start_ts, end_ts, user_id))
+        for row in cur.fetchall():
+            cinema_rows.append(row)
 
+    cinema_film_ids = {r.get('film_id') if isinstance(r, dict) else r[0] for r in cinema_rows}
     # Собираем watched для вывода (из watched_movies + series_tracking)
     watched_list = []
     seen = set()
@@ -151,7 +167,7 @@ def get_personal_stats(chat_id, month, year):
                 'film_id': fid, 'kp_id': kp_id, 'title': title, 'year': year,
                 'type': 'series' if is_series else 'film',
                 'date': watched_at.strftime('%Y-%m-%d') if hasattr(watched_at, 'strftime') else str(watched_at)[:10],
-                'rating': rating, 'is_cinema': False,
+                'rating': rating, 'is_cinema': fid in cinema_film_ids,
                 'online_link': online_link
             })
 
@@ -301,7 +317,7 @@ def get_group_stats(chat_id, month, year):
     # watched_movies за месяц (фильмы + сериалы)
     with db_lock:
         cur.execute("""
-            SELECT wm.film_id, wm.user_id, m.kp_id, m.title, m.year, m.is_series, wm.watched_at
+            SELECT wm.film_id, wm.user_id, m.kp_id, m.title, m.year, m.is_series, wm.watched_at, m.genres
             FROM watched_movies wm
             JOIN movies m ON m.id = wm.film_id AND m.chat_id = wm.chat_id
             WHERE wm.chat_id = %s AND wm.watched_at >= %s AND wm.watched_at < %s
@@ -311,7 +327,7 @@ def get_group_stats(chat_id, month, year):
     # series_tracking за месяц
     with db_lock:
         cur.execute("""
-            SELECT st.film_id, st.user_id, m.kp_id, m.title, m.year, m.is_series, st.watched_date
+            SELECT st.film_id, st.user_id, m.kp_id, m.title, m.year, m.is_series, st.watched_date, m.genres
             FROM series_tracking st
             JOIN movies m ON m.id = st.film_id AND m.chat_id = st.chat_id
             WHERE st.chat_id = %s AND st.watched = TRUE
@@ -319,16 +335,29 @@ def get_group_stats(chat_id, month, year):
         """, (chat_id, start_ts, end_ts))
         st_rows = cur.fetchall()
 
-    # plans cinema за месяц
+    # Cinema: cinema_screenings (постоянные) + plans (если ещё не удалены)
+    cinema_rows = []
     with db_lock:
         cur.execute("""
-            SELECT p.film_id, p.user_id, p.plan_datetime, m.kp_id, m.title, m.year
+            SELECT cs.film_id, cs.user_id, cs.screening_date, m.kp_id, m.title, m.year
+            FROM cinema_screenings cs
+            JOIN movies m ON m.id = cs.film_id AND m.chat_id = cs.chat_id
+            WHERE cs.chat_id = %s AND cs.screening_date >= %s AND cs.screening_date < %s
+        """, (chat_id, start_ts.date(), end_ts.date()))
+        cinema_rows = list(cur.fetchall())
+        cur.execute("""
+            SELECT p.film_id, p.user_id, p.plan_datetime::date, m.kp_id, m.title, m.year
             FROM plans p
             JOIN movies m ON m.id = p.film_id AND m.chat_id = p.chat_id
             WHERE p.chat_id = %s AND p.plan_type = 'cinema'
               AND p.plan_datetime >= %s AND p.plan_datetime < %s
+              AND NOT EXISTS (
+                SELECT 1 FROM cinema_screenings cs
+                WHERE cs.chat_id = p.chat_id AND cs.user_id = p.user_id AND cs.film_id = p.film_id
+              )
         """, (chat_id, start_ts, end_ts))
-        cinema_rows = cur.fetchall()
+        for row in cur.fetchall():
+            cinema_rows.append(row)
 
     # ratings за месяц (rated_at если есть)
     with db_lock:
@@ -340,7 +369,7 @@ def get_group_stats(chat_id, month, year):
         """, (chat_id,))
         ratings_all = cur.fetchall()
 
-    # Фильтруем ratings по месяцу
+    # Фильтруем ratings строго по месяцу (rated_at). Без даты — не включаем (данные по группе только за месяц)
     ratings_in_month = []
     for r in ratings_all:
         rt_at = r.get('rated_at') if isinstance(r, dict) else (r[3] if len(r) > 3 else None)
@@ -348,8 +377,6 @@ def get_group_stats(chat_id, month, year):
             dt = _ensure_tz(rt_at)
             if dt and start_ts <= dt < end_ts:
                 ratings_in_month.append(r)
-        else:
-            ratings_in_month.append(r)
 
     # Агрегация: group_films (уникальные фильмы), group_series, group_episodes
     films_watched = set()  # film_id (не сериалы)
@@ -439,34 +466,81 @@ def get_group_stats(chat_id, month, year):
         if uid_activity[mvp_uid]['ratings']:
             mvp_avg = round(uid_activity[mvp_uid]['rating_sum'] / uid_activity[mvp_uid]['ratings'], 1)
 
+    # Все ачивки по spec
+    def _holder(cond, uid): return uid if cond else None
+    uid_series = defaultdict(int)
+    for r in st_rows:
+        uid = r.get('user_id') if isinstance(r, dict) else r[1]
+        uid_series[uid] += 1
+    uid_genres = defaultdict(set)
+    for r in wm_rows + st_rows:
+        uid = r.get('user_id') if isinstance(r, dict) else r[1]
+        g = r.get('genres') if isinstance(r, dict) else (r[7] if len(r) > 7 else None)
+        if g:
+            for gen in (g or '').split(','):
+                gen = gen.strip()
+                if gen:
+                    uid_genres[uid].add(gen)
+    # Киноман, Оценщик — уже есть mvp_uid. Остальные — ищем лучшего по условию
+    cinephile_uid = max(uid_watched.items(), key=lambda x: x[1])[0] if uid_watched and max(uid_watched.values()) >= 10 else None
+    rater_uid = max(uid_ratings.items(), key=lambda x: len(x[1]))[0] if uid_ratings and max(len(r) for r in uid_ratings.values()) >= 15 else None
+    cinema_uid = max(uid_cinema.items(), key=lambda x: x[1])[0] if uid_cinema and max(uid_cinema.values()) >= 3 else None
+    series_uid = max(uid_series.items(), key=lambda x: x[1])[0] if uid_series and max(uid_series.values()) >= 20 else None
+    strict_uid = None  # средняя < 7 при ≥5 оценках
+    for uid, rats in uid_ratings.items():
+        if len(rats) >= 5 and sum(rats) / len(rats) < 7:
+            strict_uid = uid
+            break
+    generous_uid = None  # средняя > 8 при ≥5 оценках
+    for uid, rats in uid_ratings.items():
+        if len(rats) >= 5 and sum(rats) / len(rats) > 8:
+            generous_uid = uid
+            break
+    polyglot_uid = max(uid_genres.items(), key=lambda x: len(x[1]))[0] if uid_genres and max(len(g) for g in uid_genres.values()) >= 5 else None
+    discoverer_uid = None  # добавил фильм, все оценили ≥8 — сложнее, пропустим
     achievements = [
         {'id': 'cinephile', 'icon': '🎬', 'name': 'Киноман', 'description': 'Посмотрел 10+ фильмов за месяц',
-         'holder_user_id': mvp_uid if mvp_films >= 10 else None, 'earned': mvp_films >= 10},
+         'holder_user_id': cinephile_uid, 'earned': cinephile_uid is not None},
+        {'id': 'strict_critic', 'icon': '⭐', 'name': 'Строгий критик', 'description': 'Средняя оценка ниже 7',
+         'holder_user_id': strict_uid, 'earned': strict_uid is not None},
+        {'id': 'frequent_goer', 'icon': '🍿', 'name': 'Завсегдатай', 'description': '3+ похода в кино',
+         'holder_user_id': cinema_uid, 'earned': cinema_uid is not None},
+        {'id': 'generous', 'icon': '💕', 'name': 'Добряк', 'description': 'Средняя оценка выше 8',
+         'holder_user_id': generous_uid, 'earned': generous_uid is not None},
+        {'id': 'binge_watcher', 'icon': '🔥', 'name': 'Серийный убийца', 'description': '20+ серий за месяц',
+         'holder_user_id': series_uid, 'earned': series_uid is not None},
         {'id': 'rater', 'icon': '📊', 'name': 'Оценщик', 'description': '15+ оценок за месяц',
-         'holder_user_id': mvp_uid if mvp_ratings >= 15 else None, 'earned': mvp_ratings >= 15},
+         'holder_user_id': rater_uid, 'earned': rater_uid is not None},
+        {'id': 'polyglot', 'icon': '🌍', 'name': 'Полиглот', 'description': '5+ жанров за месяц',
+         'holder_user_id': polyglot_uid, 'earned': polyglot_uid is not None},
+        {'id': 'discoverer', 'icon': '👀', 'name': 'Первооткрыватель', 'description': 'Нашёл фильм, который все оценили 8+',
+         'holder_user_id': discoverer_uid, 'earned': discoverer_uid is not None},
     ]
 
-    # top_films по средней оценке (фильмы с несколькими оценками)
+    # top_films по средней оценке (фильмы с мин. 2 оценками)
     film_ratings = defaultdict(list)
     for r in ratings_in_month:
         fid = r.get('film_id') if isinstance(r, dict) else r[2]
+        uid = r.get('user_id') if isinstance(r, dict) else r[1]
         rt = r.get('rating') if isinstance(r, dict) else r[0]
         kp_id = r.get('kp_id') if isinstance(r, dict) else r[4]
         title = r.get('title') if isinstance(r, dict) else r[5]
         year = r.get('year') if isinstance(r, dict) else r[6]
         genres = r.get('genres') if isinstance(r, dict) else r[7]
         if fid and rt:
-            film_ratings[fid].append({'rating': rt, 'kp_id': kp_id, 'title': title, 'year': year, 'genre': genres or ''})
+            film_ratings[fid].append({'user_id': uid, 'rating': rt, 'kp_id': kp_id, 'title': title, 'year': year, 'genre': genres or ''})
     top_films = []
     for fid, rats in film_ratings.items():
+        if len(rats) < 2:
+            continue
         avg = round(sum(r['rating'] for r in rats) / len(rats), 1)
         r0 = rats[0]
         top_films.append({
             'film_id': fid, 'kp_id': r0.get('kp_id'), 'title': r0.get('title'), 'year': r0.get('year'),
             'genre': r0.get('genre', ''), 'avg_rating': avg,
-            'rated_by': [{'user_id': None, 'rating': r['rating']} for r in rats]
+            'rated_by': [{'user_id': r['user_id'], 'rating': r['rating']} for r in rats]
         })
-    top_films.sort(key=lambda x: (-(x.get('avg_rating') or 0), x.get('title') or ''))
+    top_films.sort(key=lambda x: (-(x.get('avg_rating') or 0), -(len(x.get('rated_by') or [])), x.get('title') or ''))
     top_films = top_films[:10]
 
     # Watched list для группы (всё просмотренное за месяц)
@@ -517,10 +591,93 @@ def get_group_stats(chat_id, month, year):
         rating = next((x.get('rating') for x in ratings_in_month if x.get('film_id') == fid), None)
         cinema_list.append({'film_id': fid, 'kp_id': kp_id, 'title': title, 'year': year, 'date': date_str, 'rating': rating})
 
+    # Controversial: фильмы с ≥3 оценками, max spread
     controversial = []
+    for fid, rats in film_ratings.items():
+        if len(rats) < 3:
+            continue
+        ratings_vals = [r['rating'] for r in rats]
+        spread = max(ratings_vals) - min(ratings_vals)
+        r0 = rats[0]
+        controversial.append({
+            'film_id': fid, 'kp_id': r0.get('kp_id'), 'title': r0.get('title'), 'year': r0.get('year'),
+            'ratings': [{'user_id': r['user_id'], 'rating': r['rating']} for r in rats],
+            'spread': spread, 'avg_rating': round(sum(ratings_vals) / len(ratings_vals), 1)
+        })
+    controversial.sort(key=lambda x: -x['spread'])
+    controversial = controversial[:5]
+
+    # Compatibility: пары участников, общие фильмы, MAE -> pct
     compatibility = []
+    pair_common = defaultdict(lambda: [])  # (uid1, uid2) -> [(r1, r2), ...]
+    for fid, rats in film_ratings.items():
+        uids = list({r['user_id'] for r in rats})
+        for i, u1 in enumerate(uids):
+            for u2 in uids[i+1:]:
+                r1 = next((r['rating'] for r in rats if r['user_id'] == u1), None)
+                r2 = next((r['rating'] for r in rats if r['user_id'] == u2), None)
+                if r1 is not None and r2 is not None:
+                    key = (min(u1, u2), max(u1, u2))
+                    pair_common[key].append((r1, r2))
+    for (u1, u2), pairs in pair_common.items():
+        if len(pairs) < 3:
+            continue
+        mae = sum(abs(a - b) for a, b in pairs) / len(pairs)
+        pct = max(0, round((1 - mae / 9) * 100))
+        compatibility.append({'pair': [u1, u2], 'pct': pct, 'common_films': len(pairs)})
+    compatibility.sort(key=lambda x: -x['pct'])
+
+    # Genres: по жанрам, сколько каждый участник посмотрел
+    genre_by_user = defaultdict(lambda: defaultdict(int))
+    for r in wm_rows + st_rows:
+        uid = r.get('user_id') if isinstance(r, dict) else r[1]
+        g = r.get('genres') if isinstance(r, dict) else (r[7] if len(r) > 7 else None)
+        if g:
+            for gen in (g or '').split(','):
+                gen = gen.strip()
+                if gen:
+                    genre_by_user[gen][uid] += 1
     genres = []
-    heatmap = {}
+    for genre, by_mem in sorted(genre_by_user.items(), key=lambda x: -sum(x[1].values())):
+        genres.append({
+            'genre': genre,
+            'by_member': [{'user_id': uid, 'count': c} for uid, c in sorted(by_mem.items(), key=lambda x: -x[1])]
+        })
+    genres = genres[:8]
+
+    # Heatmap: день -> {user_id: count}
+    heatmap = defaultdict(lambda: defaultdict(int))
+    for r in wm_rows:
+        uid = r.get('user_id') if isinstance(r, dict) else r[1]
+        dt = r.get('watched_at') if isinstance(r, dict) else r[6]
+        if dt:
+            d = getattr(dt, 'day', None) or (int(str(dt)[8:10]) if len(str(dt)) >= 10 else None)
+            if d:
+                heatmap[str(d)][str(uid)] = heatmap[str(d)].get(str(uid), 0) + 1
+    for r in st_rows:
+        uid = r.get('user_id') if isinstance(r, dict) else r[1]
+        dt = r.get('watched_date') if isinstance(r, dict) else r[6]
+        if dt:
+            d = getattr(dt, 'day', None) or (int(str(dt)[8:10]) if len(str(dt)) >= 10 else None)
+            if d:
+                heatmap[str(d)][str(uid)] = heatmap[str(d)].get(str(uid), 0) + 1
+    for r in ratings_in_month:
+        uid = r.get('user_id') if isinstance(r, dict) else r[1]
+        rt_at = r.get('rated_at') if isinstance(r, dict) else (r[3] if len(r) > 3 else None)
+        if rt_at:
+            dt = _ensure_tz(rt_at)
+            if dt:
+                d = dt.day
+                heatmap[str(d)][str(uid)] = heatmap[str(d)].get(str(uid), 0) + 1
+    heatmap = dict(heatmap)
+
+    # public_slug из group_stats_settings
+    public_slug = None
+    with db_lock:
+        cur.execute("SELECT public_slug FROM group_stats_settings WHERE chat_id = %s AND public_enabled = TRUE", (chat_id,))
+        row = cur.fetchone()
+        if row:
+            public_slug = row.get('public_slug') if isinstance(row, dict) else row[0]
 
     return {
         'success': True,
@@ -529,7 +686,7 @@ def get_group_stats(chat_id, month, year):
             'title': group_title,
             'members_active': len(members),
             'total_films_alltime': total_films,
-            'public_slug': None
+            'public_slug': public_slug
         },
         'period': {'month': month, 'year': year, 'label': f'{MONTH_NAMES_RU[month - 1]} {year}'},
         'members': members,
@@ -664,6 +821,81 @@ def set_user_stats_settings(user_id, public_enabled=None, visible_blocks=None):
             )
         get_db_connection().commit()
     return get_user_stats_settings(user_id)
+
+
+def get_group_stats_settings(chat_id):
+    """Настройки публичности групповой статистики."""
+    cur = get_db_cursor()
+    with db_lock:
+        cur.execute(
+            "SELECT public_enabled, public_slug, visible_blocks FROM group_stats_settings WHERE chat_id = %s",
+            (chat_id,)
+        )
+        row = cur.fetchone()
+    if not row:
+        return {'public_enabled': False, 'public_slug': None, 'visible_blocks': {}}
+    vb = row.get('visible_blocks') if isinstance(row, dict) else row[2]
+    if isinstance(vb, str):
+        import json
+        vb = json.loads(vb) if vb else {}
+    return {
+        'public_enabled': bool(row.get('public_enabled') if isinstance(row, dict) else row[0]),
+        'public_slug': row.get('public_slug') if isinstance(row, dict) else row[1],
+        'visible_blocks': vb or {}
+    }
+
+
+def set_group_stats_settings(chat_id, public_enabled=None, visible_blocks=None):
+    """Обновить настройки публичности группы. Создаёт slug при первом включении."""
+    cur = get_db_cursor()
+    conn = get_db_connection()
+    import json
+    with db_lock:
+        cur.execute("SELECT public_enabled, public_slug FROM group_stats_settings WHERE chat_id = %s", (chat_id,))
+        row = cur.fetchone()
+        slug = None
+        if not row:
+            if public_enabled:
+                cur.execute("SELECT name FROM site_sessions WHERE chat_id = %s ORDER BY created_at DESC LIMIT 1", (chat_id,))
+                srow = cur.fetchone()
+                name = (srow.get('name') if isinstance(srow, dict) else srow[0]) if srow else None
+                base = (name or 'group').lower().replace(' ', '_')[:24] if name else 'group'
+                slug = f"{base}_{abs(chat_id) % 10000}"
+                cur.execute("SELECT 1 FROM group_stats_settings WHERE public_slug = %s", (slug,))
+                if cur.fetchone():
+                    slug = f"g{abs(chat_id)}"
+            cur.execute(
+                """INSERT INTO group_stats_settings (chat_id, public_enabled, public_slug, updated_at)
+                   VALUES (%s, %s, %s, NOW())
+                   ON CONFLICT (chat_id) DO UPDATE SET
+                     public_enabled = COALESCE(EXCLUDED.public_enabled, group_stats_settings.public_enabled),
+                     public_slug = CASE WHEN EXCLUDED.public_enabled THEN COALESCE(group_stats_settings.public_slug, EXCLUDED.public_slug) ELSE group_stats_settings.public_slug END,
+                     updated_at = NOW()""",
+                (chat_id, bool(public_enabled) if public_enabled is not None else False, slug)
+            )
+        else:
+            curr_slug = row.get('public_slug') if isinstance(row, dict) else row[1]
+            curr_enabled = row.get('public_enabled') if isinstance(row, dict) else row[0]
+            slug = curr_slug
+            if public_enabled and not curr_slug:
+                cur.execute("SELECT name FROM site_sessions WHERE chat_id = %s ORDER BY created_at DESC LIMIT 1", (chat_id,))
+                srow = cur.fetchone()
+                name = (srow.get('name') if isinstance(srow, dict) else srow[0]) if srow else None
+                base = (name or 'group').lower().replace(' ', '_')[:24] if name else 'group'
+                slug = f"{base}_{abs(chat_id) % 10000}"
+                cur.execute("SELECT 1 FROM group_stats_settings WHERE public_slug = %s AND chat_id != %s", (slug, chat_id))
+                if cur.fetchone():
+                    slug = f"g{abs(chat_id)}"
+            cur.execute(
+                """UPDATE group_stats_settings SET
+                     public_enabled = COALESCE(%s, public_enabled),
+                     public_slug = CASE WHEN %s THEN COALESCE(public_slug, %s) ELSE public_slug END,
+                     updated_at = NOW()
+                   WHERE chat_id = %s""",
+                (public_enabled, bool(public_enabled), slug, chat_id)
+            )
+        conn.commit()
+    return get_group_stats_settings(chat_id)
 
 
 def get_public_personal_stats(slug, month, year):
